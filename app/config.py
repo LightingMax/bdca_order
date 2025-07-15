@@ -16,6 +16,7 @@ class Config:
     TEMP_FOLDER = os.path.join(PROJECT_ROOT, 'temp')
     DATA_FOLDER = os.path.join(PROJECT_ROOT, 'data')
     OUTPUT_FOLDER = os.path.join(PROJECT_ROOT, 'app', 'static', 'output')
+    LOG_FOLDER = os.path.join(PROJECT_ROOT, 'logs')
     
     # 用户数据文件
     USER_DATA_FILE = os.path.join(DATA_FOLDER, 'user_data.json')
