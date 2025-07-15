@@ -156,10 +156,37 @@
             "-28.86-1",
             "-32.13-1"
           ]
+        },
+        {
+          "timestamp": "2025-07-15 10:24:27",
+          "file_count": 4,
+          "total_amount": 113.46000000000001,
+          "order_ids": [
+            "T3-32.62-1",
+            "-19.85-1",
+            "-28.86-1",
+            "-32.13-1"
+          ]
+        },
+        {
+          "timestamp": "2025-07-15 10:24:36",
+          "file_count": 1,
+          "total_amount": 17.71,
+          "order_ids": [
+            "-17.71-1"
+          ]
+        },
+        {
+          "timestamp": "2025-07-15 10:24:42",
+          "file_count": 1,
+          "total_amount": 40.26,
+          "order_ids": [
+            "-40.26-2"
+          ]
         }
       ],
-      "total_amount": 577.1,
-      "total_prints": 32
+      "total_amount": 748.5300000000001,
+      "total_prints": 38
     }
   }
 }

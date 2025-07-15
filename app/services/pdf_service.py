@@ -220,16 +220,21 @@ def merge_pdfs(itinerary_path, invoice_path, output_path):
     
     assert itinerary_count == invoice_count, "行程单和发票的行程数量不一致"
     
-    
-    
     A4_WIDTH, A4_HEIGHT = 2480, 3508
+    per_count_height = A4_HEIGHT / 20
     try:
         from pdf2image import convert_from_path
         from PIL import Image
         images = convert_from_path(itinerary_path,dpi=300)
         itinerary_image = images[0]
         w, h = itinerary_image.size
-        top_half = itinerary_image.crop((0, 0, w, h // 2))
+        # 计算需要裁剪的区域
+        top_half = itinerary_image.crop((0, 0, w, h // 2+ per_count_height*(itinerary_count-1)))
+        
+        # resize top_half
+        ratio = A4_WIDTH / top_half.width
+        new_size = (A4_WIDTH, int(top_half.height * ratio))
+        top_half = top_half.resize(new_size)
         
         images = convert_from_path(invoice_path,dpi=300)
         invoice_image = images[0]
