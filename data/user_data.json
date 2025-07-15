@@ -17,10 +17,29 @@
           "order_ids": [
             "-17.71-1"
           ]
+        },
+        {
+          "timestamp": "2025-07-15 17:21:34",
+          "file_count": 4,
+          "total_amount": 113.46000000000001,
+          "order_ids": [
+            "T3-32.62-1",
+            "-19.85-1",
+            "-28.86-1",
+            "-32.13-1"
+          ]
+        },
+        {
+          "timestamp": "2025-07-15 17:21:54",
+          "file_count": 1,
+          "total_amount": 215.51,
+          "order_ids": [
+            "-215.51-11"
+          ]
         }
       ],
-      "total_amount": 57.97,
-      "total_prints": 2
+      "total_amount": 386.94,
+      "total_prints": 7
     }
   }
 }

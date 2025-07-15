@@ -26,5 +26,54 @@
         "has_invoice": true
       }
     ]
+  },
+  "102d021ab9794c228234ce9795c4220ffd2d61911b301660037dee44b7317532": {
+    "filename": "5.zip",
+    "upload_time": "2025-07-15 17:21:34",
+    "session_id": "4852c94c-ea76-455c-85ad-f1590a38f296",
+    "results": [
+      {
+        "order_id": "T3-32.62-1",
+        "amount": 32.62,
+        "output_file": "order_1_954a131f.pdf",
+        "has_itinerary": true,
+        "has_invoice": true
+      },
+      {
+        "order_id": "-19.85-1",
+        "amount": 19.85,
+        "output_file": "order_2_11c6959a.pdf",
+        "has_itinerary": true,
+        "has_invoice": true
+      },
+      {
+        "order_id": "-28.86-1",
+        "amount": 28.86,
+        "output_file": "order_3_02ea4185.pdf",
+        "has_itinerary": true,
+        "has_invoice": true
+      },
+      {
+        "order_id": "-32.13-1",
+        "amount": 32.13,
+        "output_file": "order_4_ea3a61ee.pdf",
+        "has_itinerary": true,
+        "has_invoice": true
+      }
+    ]
+  },
+  "12ce3d0c02e353762f5589355c8b18fa01a702732e925e2ffc42400b3bdd5c22": {
+    "filename": "6.zip",
+    "upload_time": "2025-07-15 17:21:54",
+    "session_id": "1151c25b-8827-4cad-8216-a2b58b09e447",
+    "results": [
+      {
+        "order_id": "-215.51-11",
+        "amount": 215.51,
+        "output_file": "order_1_4281b8c1.pdf",
+        "has_itinerary": true,
+        "has_invoice": true
+      }
+    ]
   }
 }

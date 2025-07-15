@@ -52,6 +52,63 @@
         .nav-tabs {
             margin-bottom: 20px;
         }
+        /* 添加动画效果 */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateX(-30px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .animate-fade-in {
+            animation: fadeIn 0.5s ease-out;
+        }
+        
+        .animate-pulse {
+            animation: pulse 1s infinite;
+        }
+        
+        .animate-slide-in {
+            animation: slideIn 0.4s ease-out;
+        }
+        
+        .file-item {
+            transition: all 0.3s ease;
+        }
+        
+        .file-item:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        
+        .upload-success {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background-color: #28a745;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 5px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            z-index: 1000;
+            opacity: 0;
+            transform: translateY(-20px);
+            transition: all 0.5s ease;
+        }
+        
+        .upload-success.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
     </style>
 </head>
 <body>
@@ -88,8 +145,15 @@
             <button id="printAllBtn" class="btn btn-primary mt-3">打印全部</button>
         </div>
     </div>
+    
+    <!-- 上传成功通知 -->
+    <div id="uploadSuccess" class="upload-success">
+        <i class="bi bi-check-circle-fill me-2"></i> 上传成功！
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Bootstrap 图标 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const uploadArea = document.getElementById('uploadArea');
@@ -101,6 +165,19 @@
             const printAllBtn = document.getElementById('printAllBtn');
             
             let processedFiles = [];
+            
+            // 页面加载动画
+            function initPageAnimations() {
+                document.querySelector('h1').classList.add('animate-fade-in');
+                document.querySelector('.nav-tabs').classList.add('animate-fade-in');
+                document.querySelector('.nav-tabs').style.animationDelay = '0.1s';
+                
+                uploadArea.classList.add('animate-fade-in');
+                uploadArea.style.animationDelay = '0.2s';
+            }
+            
+            // 初始化页面动画
+            initPageAnimations();
             
             // 点击上传区域触发文件选择
             uploadArea.addEventListener('click', function() {
@@ -127,10 +204,14 @@
             
             function highlight() {
                 uploadArea.classList.add('highlight');
+                // 添加脉冲动画
+                uploadArea.classList.add('animate-pulse');
             }
             
             function unhighlight() {
                 uploadArea.classList.remove('highlight');
+                // 移除脉冲动画
+                uploadArea.classList.remove('animate-pulse');
             }
             
             // 处理拖放的文件
@@ -176,7 +257,9 @@
                 for (let i = 0; i < files.length; i++) {
                     const file = files[i];
                     const li = document.createElement('li');
-                    li.className = 'list-group-item d-flex justify-content-between align-items-center';
+                    li.className = 'list-group-item d-flex justify-content-between align-items-center animate-fade-in';
+                    // 设置延迟动画，使文件依次显示
+                    li.style.animationDelay = (i * 0.1) + 's';
                     li.innerHTML = `
                         <span>${file.name}</span>
                         <span class="badge bg-primary rounded-pill">${formatFileSize(file.size)}</span>
@@ -185,6 +268,7 @@
                 }
                 
                 fileList.style.display = 'block';
+                fileList.classList.add('animate-fade-in');
                 
                 uploadFiles(files);
             }
@@ -215,12 +299,29 @@
                     if (e.lengthComputable) {
                         const percentComplete = (e.loaded / e.total) * 100;
                         progressBar.style.width = percentComplete + '%';
+                        
+                        // 添加进度条颜色变化
+                        if (percentComplete < 30) {
+                            progressBar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-info';
+                        } else if (percentComplete < 70) {
+                            progressBar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-primary';
+                        } else {
+                            progressBar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-success';
+                        }
                     }
                 });
                 
                 xhr.addEventListener('load', function() {
                     if (xhr.status === 200) {
                         const response = JSON.parse(xhr.responseText);
+                        
+                        // 显示上传成功通知
+                        const uploadSuccess = document.getElementById('uploadSuccess');
+                        uploadSuccess.classList.add('show');
+                        setTimeout(() => {
+                            uploadSuccess.classList.remove('show');
+                        }, 3000);
+                        
                         displayResults(response);
                     } else {
                         let errorMessage = '上传失败';
@@ -248,6 +349,7 @@
             function displayResults(response) {
                 progress.style.display = 'none';
                 resultArea.style.display = 'block';
+                resultArea.classList.add('animate-fade-in');
                 resultList.innerHTML = '';
                 
                 // 隐藏文件列表
@@ -261,7 +363,7 @@
                     const totalAmount = response.total_amount || response.results.reduce((sum, result) => sum + result.amount, 0);
                     
                     const summaryDiv = document.createElement('div');
-                    summaryDiv.className = 'alert alert-success mb-3';
+                    summaryDiv.className = 'alert alert-success mb-3 animate-fade-in';
                     
                     // 添加重用文件信息和新处理订单信息
                     let summaryText = `成功处理 <strong>${totalFiles}</strong> 个订单，总金额: <strong>¥${totalAmount.toFixed(2)}</strong>`;
@@ -282,7 +384,8 @@
                     // 显示文件重用详情
                     if (response.file_details && (response.file_details.reused.length > 0 || response.file_details.processed.length > 0)) {
                         const fileDetailsDiv = document.createElement('div');
-                        fileDetailsDiv.className = 'mb-4';
+                        fileDetailsDiv.className = 'mb-4 animate-fade-in';
+                        fileDetailsDiv.style.animationDelay = '0.2s';
                         
                         let fileDetailsHtml = '<h5>文件处理详情</h5>';
                         
@@ -290,13 +393,13 @@
                         if (response.file_details.processed.length > 0) {
                             fileDetailsHtml += '<div class="mb-2"><strong>新处理的文件:</strong></div>';
                             fileDetailsHtml += '<ul class="list-group mb-3">';
-                            response.file_details.processed.forEach(file => {
+                            response.file_details.processed.forEach((file, index) => {
                                 const newBadge = file.new_result_count ? 
                                     `<span class="badge bg-success ms-2">+${file.new_result_count} 新订单</span>` : 
                                     '<span class="badge bg-secondary ms-2">无新订单</span>';
                                 
                                 fileDetailsHtml += `
-                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <li class="list-group-item d-flex justify-content-between align-items-center animate-slide-in" style="animation-delay: ${0.2 + index * 0.1}s">
                                         <div>
                                             <span>${file.filename} ${newBadge}</span>
                                             <small class="d-block text-muted">哈希: ${file.hash.substring(0, 8)}...${file.hash.substring(file.hash.length - 8)}</small>
@@ -312,9 +415,9 @@
                         if (response.file_details.reused.length > 0) {
                             fileDetailsHtml += '<div class="mb-2"><strong>重用的文件:</strong></div>';
                             fileDetailsHtml += '<ul class="list-group">';
-                            response.file_details.reused.forEach(file => {
+                            response.file_details.reused.forEach((file, index) => {
                                 fileDetailsHtml += `
-                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <li class="list-group-item d-flex justify-content-between align-items-center animate-slide-in" style="animation-delay: ${0.2 + index * 0.1}s">
                                         <div>
                                             <span>${file.filename}</span>
                                             <small class="d-block text-muted">哈希: ${file.hash.substring(0, 8)}...${file.hash.substring(file.hash.length - 8)}</small>
@@ -334,11 +437,15 @@
                     // 显示订单结果
                     const ordersDiv = document.createElement('div');
                     ordersDiv.innerHTML = '<h5>订单处理结果</h5>';
+                    ordersDiv.className = 'animate-fade-in';
+                    ordersDiv.style.animationDelay = '0.3s';
                     resultList.appendChild(ordersDiv);
                     
                     response.results.forEach(function(result, index) {
                         const fileItem = document.createElement('div');
-                        fileItem.className = 'file-item';
+                        fileItem.className = 'file-item animate-slide-in';
+                        // 设置延迟动画，使订单依次显示
+                        fileItem.style.animationDelay = (0.3 + index * 0.1) + 's';
                         
                         let statusIcon = '';
                         if (result.has_itinerary && result.has_invoice) {
@@ -384,18 +491,43 @@
             
             // 打印单个文件
             function printFile(filename) {
+                const printBtn = document.querySelector(`.print-btn[data-file="${filename}"]`);
+                if (printBtn) {
+                    // 添加加载动画
+                    const originalText = printBtn.innerHTML;
+                    printBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 打印中...';
+                    printBtn.disabled = true;
+                }
+                
                 fetch(`/api/print/${filename}`, {
                     method: 'POST'
                 })
                 .then(response => response.json())
                 .then(data => {
+                    if (printBtn) {
+                        // 恢复按钮状态
+                        printBtn.innerHTML = '打印';
+                        printBtn.disabled = false;
+                    }
+                    
                     if (data.success) {
-                        alert('文件已发送至打印机');
+                        // 显示成功通知
+                        const uploadSuccess = document.getElementById('uploadSuccess');
+                        uploadSuccess.innerHTML = '<i class="bi bi-printer-fill me-2"></i> 文件已发送至打印机';
+                        uploadSuccess.classList.add('show');
+                        setTimeout(() => {
+                            uploadSuccess.classList.remove('show');
+                        }, 3000);
                     } else {
                         alert('打印失败: ' + (data.error || '未知错误'));
                     }
                 })
                 .catch(error => {
+                    if (printBtn) {
+                        // 恢复按钮状态
+                        printBtn.innerHTML = '打印';
+                        printBtn.disabled = false;
+                    }
                     alert('打印请求出错: ' + error);
                 });
             }
@@ -410,6 +542,11 @@
                 if (confirm(`确定要打印全部 ${processedFiles.length} 个文件吗？`)) {
                     let printedCount = 0;
                     
+                    // 添加加载动画
+                    const originalText = printAllBtn.innerHTML;
+                    printAllBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 打印中...';
+                    printAllBtn.disabled = true;
+                    
                     processedFiles.forEach(function(file) {
                         fetch(`/api/print/${file.output_file}`, {
                             method: 'POST'
@@ -418,10 +555,26 @@
                         .then(data => {
                             printedCount++;
                             if (printedCount === processedFiles.length) {
-                                alert('所有文件已发送至打印机');
+                                // 恢复按钮状态
+                                printAllBtn.innerHTML = originalText;
+                                printAllBtn.disabled = false;
+                                
+                                // 显示成功通知
+                                const uploadSuccess = document.getElementById('uploadSuccess');
+                                uploadSuccess.innerHTML = '<i class="bi bi-printer-fill me-2"></i> 所有文件已发送至打印机';
+                                uploadSuccess.classList.add('show');
+                                setTimeout(() => {
+                                    uploadSuccess.classList.remove('show');
+                                }, 3000);
                             }
                         })
                         .catch(error => {
+                            printedCount++;
+                            if (printedCount === processedFiles.length) {
+                                // 恢复按钮状态
+                                printAllBtn.innerHTML = originalText;
+                                printAllBtn.disabled = false;
+                            }
                             console.error('打印请求出错:', error);
                         });
                     });
