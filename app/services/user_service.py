@@ -2,36 +2,28 @@ import os
 import json
 import uuid
 import datetime
+import hashlib
 from flask import current_app, request
-from getmac import get_mac_address
 
 def get_user_mac():
-    """获取用户MAC地址"""
+    """获取用户唯一标识"""
     logger = current_app.logger
-    logger.debug("尝试获取用户MAC地址")
+    logger.debug("尝试获取用户唯一标识")
     
     try:
-        # 尝试使用getmac库获取MAC地址
-        mac = get_mac_address()
-        if mac:
-            logger.info(f"成功获取MAC地址: {mac}")
-            return mac
-        
-        # 如果获取失败，使用IP和用户代理作为替代标识
-        logger.warning("无法获取MAC地址，使用IP和用户代理作为替代")
+        # 使用IP和用户代理作为标识
         ip = request.remote_addr or '127.0.0.1'
         user_agent = request.headers.get('User-Agent', '')
         
         # 创建一个基于IP和用户代理的唯一标识
         identifier = f"{ip}_{user_agent}"
         # 使用MD5哈希生成一个固定长度的标识符
-        import hashlib
         hash_id = hashlib.md5(identifier.encode()).hexdigest()
         logger.info(f"使用哈希标识符: {hash_id}")
         return hash_id
     
     except Exception as e:
-        logger.error(f"获取MAC地址出错: {str(e)}", exc_info=True)
+        logger.error(f"获取用户标识出错: {str(e)}", exc_info=True)
         # 生成一个随机标识符作为后备
         random_id = f"unknown_{uuid.uuid4().hex[:12]}"
         logger.warning(f"使用随机标识符: {random_id}")
