@@ -1,5 +1,7 @@
 import os
 import zipfile
+import hashlib
+import json
 from flask import current_app
 
 def allowed_file(filename):
@@ -99,3 +101,127 @@ def group_files_by_type(file_paths):
         'xml': xml_files,
         'other': other_files
     } 
+
+def calculate_file_hash(file_path):
+    """计算文件的SHA-256哈希值"""
+    logger = current_app.logger
+    logger.debug(f"计算文件哈希: {file_path}")
+    
+    hash_sha256 = hashlib.sha256()
+    with open(file_path, 'rb') as f:
+        # 每次读取4MB数据进行哈希计算，避免一次性读取大文件
+        for chunk in iter(lambda: f.read(4 * 1024 * 1024), b''):
+            hash_sha256.update(chunk)
+    
+    file_hash = hash_sha256.hexdigest()
+    logger.debug(f"文件哈希值: {file_hash}")
+    return file_hash
+
+def save_file_hash(file_hash, file_info):
+    """保存文件哈希记录"""
+    logger = current_app.logger
+    hash_file = os.path.join(current_app.config['DATA_FOLDER'], 'file_hashes.json')
+    
+    # 加载现有哈希记录
+    hashes = {}
+    if os.path.exists(hash_file):
+        try:
+            with open(hash_file, 'r', encoding='utf-8') as f:
+                hashes = json.load(f)
+        except Exception as e:
+            logger.error(f"读取哈希记录文件出错: {str(e)}")
+    
+    # 添加新记录
+    hashes[file_hash] = file_info
+    
+    # 保存更新后的记录
+    try:
+        with open(hash_file, 'w', encoding='utf-8') as f:
+            json.dump(hashes, f, ensure_ascii=False, indent=2)
+        logger.info(f"文件哈希记录已保存: {file_hash}")
+    except Exception as e:
+        logger.error(f"保存哈希记录文件出错: {str(e)}")
+
+def check_file_exists(file_hash):
+    """检查文件是否已上传过（通过哈希值）"""
+    logger = current_app.logger
+    hash_file = os.path.join(current_app.config['DATA_FOLDER'], 'file_hashes.json')
+    
+    # 如果哈希记录文件不存在，说明没有上传过任何文件
+    if not os.path.exists(hash_file):
+        logger.debug("哈希记录文件不存在，文件未上传过")
+        return None
+    
+    # 加载哈希记录
+    try:
+        with open(hash_file, 'r', encoding='utf-8') as f:
+            hashes = json.load(f)
+    except Exception as e:
+        logger.error(f"读取哈希记录文件出错: {str(e)}")
+        return None
+    
+    # 检查哈希值是否存在
+    if file_hash in hashes:
+        logger.info(f"文件已上传过: {file_hash}")
+        return hashes[file_hash]
+    else:
+        logger.debug(f"文件未上传过: {file_hash}")
+        return None 
+
+def check_order_processed(order_id):
+    """检查订单是否已处理过"""
+    logger = current_app.logger
+    hash_file = os.path.join(current_app.config['DATA_FOLDER'], 'file_hashes.json')
+    
+    # 如果哈希记录文件不存在，说明没有处理过任何订单
+    if not os.path.exists(hash_file):
+        logger.debug(f"哈希记录文件不存在，订单 {order_id} 未处理过")
+        return False
+    
+    # 加载哈希记录
+    try:
+        with open(hash_file, 'r', encoding='utf-8') as f:
+            hashes = json.load(f)
+    except Exception as e:
+        logger.error(f"读取哈希记录文件出错: {str(e)}")
+        return False
+    
+    # 遍历所有文件记录，检查是否存在该订单ID
+    for file_hash, file_info in hashes.items():
+        if 'results' in file_info:
+            for result in file_info['results']:
+                if result.get('order_id') == order_id:
+                    logger.info(f"订单 {order_id} 已处理过，在文件 {file_info.get('filename', '未知')} 中")
+                    return True
+    
+    logger.debug(f"订单 {order_id} 未处理过")
+    return False
+
+def get_processed_orders():
+    """获取所有已处理过的订单ID列表"""
+    logger = current_app.logger
+    hash_file = os.path.join(current_app.config['DATA_FOLDER'], 'file_hashes.json')
+    
+    # 如果哈希记录文件不存在，返回空列表
+    if not os.path.exists(hash_file):
+        logger.debug("哈希记录文件不存在，返回空订单列表")
+        return []
+    
+    # 加载哈希记录
+    try:
+        with open(hash_file, 'r', encoding='utf-8') as f:
+            hashes = json.load(f)
+    except Exception as e:
+        logger.error(f"读取哈希记录文件出错: {str(e)}")
+        return []
+    
+    # 收集所有订单ID
+    processed_orders = set()
+    for file_hash, file_info in hashes.items():
+        if 'results' in file_info:
+            for result in file_info['results']:
+                if 'order_id' in result:
+                    processed_orders.add(result['order_id'])
+    
+    logger.info(f"找到 {len(processed_orders)} 个已处理过的订单")
+    return list(processed_orders) 

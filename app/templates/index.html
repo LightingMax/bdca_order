@@ -56,7 +56,7 @@
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">订单报销系统</h1>
+        <h1 class="text-center mb-4">打车行程单和发票文件处理系统</h1>
         
         <ul class="nav nav-tabs">
             <li class="nav-item">
@@ -258,12 +258,83 @@
                     
                     // 显示总处理结果统计
                     const totalFiles = response.results.length;
-                    const totalAmount = response.results.reduce((sum, result) => sum + result.amount, 0);
+                    const totalAmount = response.total_amount || response.results.reduce((sum, result) => sum + result.amount, 0);
                     
                     const summaryDiv = document.createElement('div');
                     summaryDiv.className = 'alert alert-success mb-3';
-                    summaryDiv.innerHTML = `成功处理 <strong>${totalFiles}</strong> 个订单，总金额: <strong>¥${totalAmount.toFixed(2)}</strong>`;
+                    
+                    // 添加重用文件信息和新处理订单信息
+                    let summaryText = `成功处理 <strong>${totalFiles}</strong> 个订单，总金额: <strong>¥${totalAmount.toFixed(2)}</strong>`;
+                    
+                    if (response.reused_files > 0 && response.new_results_count >= 0) {
+                        summaryText += `<br><small>其中 ${response.reused_files} 个文件已上传过，重用了之前的处理结果</small>`;
+                        
+                        if (response.new_results_count > 0) {
+                            summaryText += `<br><small>本次新处理 <strong>${response.new_results_count}</strong> 个订单，这些订单已计入统计</small>`;
+                        } else {
+                            summaryText += `<br><small class="text-warning">所有订单均为重复上传，统计数据未增加</small>`;
+                        }
+                    }
+                    
+                    summaryDiv.innerHTML = summaryText;
                     resultList.appendChild(summaryDiv);
+                    
+                    // 显示文件重用详情
+                    if (response.file_details && (response.file_details.reused.length > 0 || response.file_details.processed.length > 0)) {
+                        const fileDetailsDiv = document.createElement('div');
+                        fileDetailsDiv.className = 'mb-4';
+                        
+                        let fileDetailsHtml = '<h5>文件处理详情</h5>';
+                        
+                        // 新处理的文件
+                        if (response.file_details.processed.length > 0) {
+                            fileDetailsHtml += '<div class="mb-2"><strong>新处理的文件:</strong></div>';
+                            fileDetailsHtml += '<ul class="list-group mb-3">';
+                            response.file_details.processed.forEach(file => {
+                                const newBadge = file.new_result_count ? 
+                                    `<span class="badge bg-success ms-2">+${file.new_result_count} 新订单</span>` : 
+                                    '<span class="badge bg-secondary ms-2">无新订单</span>';
+                                
+                                fileDetailsHtml += `
+                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <span>${file.filename} ${newBadge}</span>
+                                            <small class="d-block text-muted">哈希: ${file.hash.substring(0, 8)}...${file.hash.substring(file.hash.length - 8)}</small>
+                                        </div>
+                                        <span class="badge bg-primary rounded-pill">${file.result_count} 个订单</span>
+                                    </li>
+                                `;
+                            });
+                            fileDetailsHtml += '</ul>';
+                        }
+                        
+                        // 重用的文件
+                        if (response.file_details.reused.length > 0) {
+                            fileDetailsHtml += '<div class="mb-2"><strong>重用的文件:</strong></div>';
+                            fileDetailsHtml += '<ul class="list-group">';
+                            response.file_details.reused.forEach(file => {
+                                fileDetailsHtml += `
+                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <span>${file.filename}</span>
+                                            <small class="d-block text-muted">哈希: ${file.hash.substring(0, 8)}...${file.hash.substring(file.hash.length - 8)}</small>
+                                            <small class="d-block text-muted">原上传时间: ${file.original_upload_time}</small>
+                                        </div>
+                                        <span class="badge bg-success rounded-pill">${file.result_count} 个订单</span>
+                                    </li>
+                                `;
+                            });
+                            fileDetailsHtml += '</ul>';
+                        }
+                        
+                        fileDetailsDiv.innerHTML = fileDetailsHtml;
+                        resultList.appendChild(fileDetailsDiv);
+                    }
+                    
+                    // 显示订单结果
+                    const ordersDiv = document.createElement('div');
+                    ordersDiv.innerHTML = '<h5>订单处理结果</h5>';
+                    resultList.appendChild(ordersDiv);
                     
                     response.results.forEach(function(result, index) {
                         const fileItem = document.createElement('div');

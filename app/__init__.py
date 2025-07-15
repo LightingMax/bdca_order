@@ -16,9 +16,9 @@ def create_app(config_class=Config):
     # 确保必要的目录存在
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     os.makedirs(app.config['TEMP_FOLDER'], exist_ok=True)
-    os.makedirs(app.config['DATA_FOLDER'], exist_ok=True)
     os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
     os.makedirs(app.config['LOG_FOLDER'], exist_ok=True)
+    os.makedirs(app.config['DATA_FOLDER'], exist_ok=True)
     
     # 配置日志
     setup_logging(app)
