@@ -69,8 +69,13 @@
         
         <div class="upload-area" id="uploadArea">
             <h3>拖拽ZIP文件到此处或点击上传</h3>
-            <p class="text-muted">支持的文件格式: .zip</p>
-            <input type="file" id="fileInput" accept=".zip" style="display: none;">
+            <p class="text-muted">支持的文件格式: .zip (可同时上传多个文件)</p>
+            <input type="file" id="fileInput" accept=".zip" multiple style="display: none;">
+        </div>
+        
+        <div id="fileList" class="mb-3" style="display: none;">
+            <h4>选择的文件</h4>
+            <ul class="list-group" id="selectedFiles"></ul>
         </div>
         
         <div class="progress">
@@ -136,31 +141,69 @@
                 const files = dt.files;
                 
                 if (files.length > 0) {
-                    handleFiles(files[0]);
+                    handleFiles(files);
                 }
             }
             
             // 处理选择的文件
             fileInput.addEventListener('change', function() {
                 if (fileInput.files.length > 0) {
-                    handleFiles(fileInput.files[0]);
+                    handleFiles(fileInput.files);
                 }
             });
             
             // 处理文件上传
-            function handleFiles(file) {
-                if (!file.name.toLowerCase().endsWith('.zip')) {
-                    alert('请上传ZIP格式的文件');
+            function handleFiles(files) {
+                if (files.length === 0) {
+                    alert('请选择一个ZIP文件');
                     return;
                 }
                 
-                uploadFile(file);
+                // 验证所有文件都是ZIP格式
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    if (!file.name.toLowerCase().endsWith('.zip')) {
+                        alert('请上传ZIP格式的文件');
+                        return;
+                    }
+                }
+                
+                // 显示选择的文件列表
+                const fileList = document.getElementById('fileList');
+                const selectedFiles = document.getElementById('selectedFiles');
+                selectedFiles.innerHTML = '';
+                
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    const li = document.createElement('li');
+                    li.className = 'list-group-item d-flex justify-content-between align-items-center';
+                    li.innerHTML = `
+                        <span>${file.name}</span>
+                        <span class="badge bg-primary rounded-pill">${formatFileSize(file.size)}</span>
+                    `;
+                    selectedFiles.appendChild(li);
+                }
+                
+                fileList.style.display = 'block';
+                
+                uploadFiles(files);
+            }
+            
+            // 格式化文件大小
+            function formatFileSize(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
             }
             
             // 上传文件到服务器
-            function uploadFile(file) {
+            function uploadFiles(files) {
                 const formData = new FormData();
-                formData.append('file', file);
+                for (let i = 0; i < files.length; i++) {
+                    formData.append('files', files[i]);
+                }
                 
                 const xhr = new XMLHttpRequest();
                 
@@ -187,12 +230,14 @@
                         } catch (e) {}
                         alert(errorMessage);
                         progress.style.display = 'none';
+                        document.getElementById('fileList').style.display = 'none';
                     }
                 });
                 
                 xhr.addEventListener('error', function() {
                     alert('上传过程中发生错误');
                     progress.style.display = 'none';
+                    document.getElementById('fileList').style.display = 'none';
                 });
                 
                 xhr.open('POST', '/api/upload');
@@ -205,8 +250,20 @@
                 resultArea.style.display = 'block';
                 resultList.innerHTML = '';
                 
+                // 隐藏文件列表
+                document.getElementById('fileList').style.display = 'none';
+                
                 if (response.success && response.results) {
                     processedFiles = response.results;
+                    
+                    // 显示总处理结果统计
+                    const totalFiles = response.results.length;
+                    const totalAmount = response.results.reduce((sum, result) => sum + result.amount, 0);
+                    
+                    const summaryDiv = document.createElement('div');
+                    summaryDiv.className = 'alert alert-success mb-3';
+                    summaryDiv.innerHTML = `成功处理 <strong>${totalFiles}</strong> 个订单，总金额: <strong>¥${totalAmount.toFixed(2)}</strong>`;
+                    resultList.appendChild(summaryDiv);
                     
                     response.results.forEach(function(result, index) {
                         const fileItem = document.createElement('div');

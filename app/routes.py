@@ -29,61 +29,80 @@ def upload_file():
     logger.info("收到文件上传请求")
     
     # 检查是否有文件
-    if 'file' not in request.files:
+    if 'files' not in request.files:
         logger.warning("上传请求中没有文件")
         return jsonify({'error': '没有文件'}), 400
     
-    file = request.files['file']
+    files = request.files.getlist('files')
     
-    # 检查文件名
-    if file.filename == '':
+    # 检查是否有文件被选择
+    if len(files) == 0 or files[0].filename == '':
         logger.warning("上传的文件名为空")
         return jsonify({'error': '没有选择文件'}), 400
-    
-    # 检查文件类型
-    if not allowed_file(file.filename):
-        logger.warning(f"不支持的文件类型: {file.filename}")
-        return jsonify({'error': '不支持的文件类型，请上传ZIP文件'}), 400
     
     # 生成唯一的临时目录
     session_id = str(uuid.uuid4())
     logger.info(f"创建会话: {session_id}")
     
-    # 保存文件
-    filename = secure_filename(file.filename)
     temp_folder = os.path.join(current_app.config['TEMP_FOLDER'], session_id)
     os.makedirs(temp_folder, exist_ok=True)
     
-    zip_path = os.path.join(temp_folder, filename)
-    file.save(zip_path)
-    logger.info(f"文件已保存到: {zip_path}")
-    
-    # 解压文件
     extract_dir = os.path.join(temp_folder, 'extracted')
     os.makedirs(extract_dir, exist_ok=True)
     
+    all_results = []
+    
     try:
-        logger.info("开始处理上传的ZIP文件")
-        extract_zip(zip_path, extract_dir)
+        logger.info(f"开始处理 {len(files)} 个上传的ZIP文件")
         
-        # 处理PDF文件
-        results = process_pdf_files(extract_dir)
+        for file in files:
+            # 检查文件类型
+            if not allowed_file(file.filename):
+                logger.warning(f"不支持的文件类型: {file.filename}")
+                continue
+                
+            # 保存文件
+            filename = secure_filename(file.filename)
+            zip_path = os.path.join(temp_folder, filename)
+            file.save(zip_path)
+            logger.info(f"文件已保存到: {zip_path}")
+            
+            # 为每个ZIP文件创建单独的提取目录
+            file_extract_dir = os.path.join(extract_dir, os.path.splitext(filename)[0])
+            os.makedirs(file_extract_dir, exist_ok=True)
+            
+            # 解压文件
+            try:
+                extract_zip(zip_path, file_extract_dir)
+                
+                # 处理PDF文件
+                results = process_pdf_files(file_extract_dir)
+                all_results.extend(results)
+                
+            except Exception as e:
+                logger.error(f"处理文件 {filename} 时出错: {str(e)}", exc_info=True)
+                # 如果一个ZIP文件处理失败，继续处理其他文件
+                continue
         
+        if not all_results:
+            logger.warning("没有成功处理任何订单")
+            return jsonify({'error': '没有成功处理任何订单'}), 400
+            
         # 获取用户MAC地址
         mac_address = get_user_mac()
         logger.info(f"用户MAC地址: {mac_address}")
         
         # 保存用户数据
-        total_amount = sum(result.get('amount', 0) for result in results)
-        save_user_data(mac_address, len(results), total_amount, [result.get('order_id') for result in results])
-        logger.info(f"用户数据已保存，订单数: {len(results)}, 总金额: {total_amount}")
+        total_amount = sum(result.get('amount', 0) for result in all_results)
+        save_user_data(mac_address, len(all_results), total_amount, [result.get('order_id') for result in all_results])
+        logger.info(f"用户数据已保存，订单数: {len(all_results)}, 总金额: {total_amount}")
         
         # 返回处理结果
-        logger.info(f"文件处理完成，成功处理 {len(results)} 个订单")
+        logger.info(f"文件处理完成，成功处理 {len(all_results)} 个订单")
         return jsonify({
             'success': True,
-            'message': f'成功处理 {len(results)} 个订单',
-            'results': results
+            'message': f'成功处理 {len(all_results)} 个订单',
+            'results': all_results
         })
         
     except Exception as e:

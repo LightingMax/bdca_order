@@ -13,14 +13,7 @@ def get_user_mac():
     try:
         # 使用IP和用户代理作为标识
         ip = request.remote_addr or '127.0.0.1'
-        user_agent = request.headers.get('User-Agent', '')
-        
-        # 创建一个基于IP和用户代理的唯一标识
-        identifier = f"{ip}_{user_agent}"
-        # 使用MD5哈希生成一个固定长度的标识符
-        hash_id = hashlib.md5(identifier.encode()).hexdigest()
-        logger.info(f"使用哈希标识符: {hash_id}")
-        return hash_id
+        return ip
     
     except Exception as e:
         logger.error(f"获取用户标识出错: {str(e)}", exc_info=True)
