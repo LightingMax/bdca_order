@@ -209,6 +209,19 @@ def merge_pdfs(itinerary_path, invoice_path, output_path):
     """合并行程单和发票PDF，并调整为一页显示"""
     logger = current_app.logger
     logger.info(f"开始合并PDF，行程单: {itinerary_path}, 发票: {invoice_path}")
+    
+    # 从文件名中 匹配发票/行程单中包含的行程数量 （实例文件名 【阳光出行-32.13元-3个行程】高德打车电子发票，匹配其中的3个行程）
+    itinerary_name = os.path.basename(itinerary_path)
+    invoice_name = os.path.basename(invoice_path)
+    itinerary_match = re.search(r'-(\d+)个行程', itinerary_name)
+    invoice_match = re.search(r'-(\d+)个行程', invoice_name)
+    itinerary_count = int(itinerary_match.group(1)) if itinerary_match else 1
+    invoice_count = int(invoice_match.group(1)) if invoice_match else 1
+    
+    assert itinerary_count == invoice_count, "行程单和发票的行程数量不一致"
+    
+    
+    
     A4_WIDTH, A4_HEIGHT = 2480, 3508
     try:
         from pdf2image import convert_from_path
