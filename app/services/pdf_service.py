@@ -221,35 +221,44 @@ def merge_pdfs(itinerary_path, invoice_path, output_path):
     assert itinerary_count == invoice_count, "行程单和发票的行程数量不一致"
     
     A4_WIDTH, A4_HEIGHT = 2480, 3508
-    per_count_height = A4_HEIGHT / 20
+    # 定义页边距（像素）
+    MARGIN = 100
+    # 考虑页边距后的实际可用宽度和高度
+    USABLE_WIDTH = A4_WIDTH - 2 * MARGIN
+    USABLE_HEIGHT = A4_HEIGHT - 2 * MARGIN
+    
+    per_count_height = USABLE_HEIGHT / 21
     try:
         from pdf2image import convert_from_path
         from PIL import Image
         images = convert_from_path(itinerary_path,dpi=300)
         itinerary_image = images[0]
         w, h = itinerary_image.size
-        # 计算需要裁剪的区域
-        top_half = itinerary_image.crop((0, 0, w, h // 2+ per_count_height*(itinerary_count-1)))
+        # 计算需要裁剪的区域 去除部分顶部无关内容
+        top_half = itinerary_image.crop((0, 4*per_count_height, w, h // 2+ per_count_height*(itinerary_count-1)))
         
         # resize top_half
-        ratio = A4_WIDTH / top_half.width
-        new_size = (A4_WIDTH, int(top_half.height * ratio))
+        ratio = USABLE_WIDTH / top_half.width
+        new_size = (USABLE_WIDTH, int(USABLE_HEIGHT*0.6))
         top_half = top_half.resize(new_size)
         
         images = convert_from_path(invoice_path,dpi=300)
         invoice_image = images[0]
         
-        ratio = A4_WIDTH / invoice_image.width
-        new_size = (A4_WIDTH, int(invoice_image.height * ratio))
+        ratio = 0.9*USABLE_WIDTH / invoice_image.width
+        new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.4))
         invoice_image = invoice_image.resize(new_size)
         
         combined = Image.new("RGB", (A4_WIDTH, A4_HEIGHT), (255, 255, 255))
 
-        # 粘贴上半部分
-        combined.paste(top_half, (0, 0))
+        # 粘贴上半部分（考虑页边距）
+        combined.paste(top_half, (MARGIN, MARGIN))
 
-        # 粘贴下半部分
-        combined.paste(invoice_image, (0, top_half.height))
+        # 粘贴下半部分（考虑页边距）
+        combined.paste(invoice_image, (MARGIN, MARGIN + top_half.height))
+        
+        # 最后再缩放到A4纸
+        combined = combined.resize((A4_WIDTH, A4_HEIGHT))
         
         combined.save(output_path)
         

@@ -3,81 +3,7 @@
     "ec:2a:72:3c:60:9d": {
       "print_history": [
         {
-          "timestamp": "2025-07-15 08:23:38",
-          "file_count": 2,
-          "total_amount": 0,
-          "order_ids": [
-            "í╛╖τ╘╧│÷╨╨-40.26╘¬-2╕÷╨╨│╠í┐╕▀╡┬┤≥│╡╡τ╫╙╖ó╞▒",
-            "í╛╖τ╘╧│÷╨╨-40.26╘¬-2╕÷╨╨│╠í┐╕▀╡┬┤≥│╡╡τ╫╙╨╨│╠╡Ñ"
-          ]
-        },
-        {
-          "timestamp": "2025-07-15 08:24:45",
-          "file_count": 2,
-          "total_amount": 0,
-          "order_ids": [
-            "í╛╖τ╘╧│÷╨╨-40.26╘¬-2╕÷╨╨│╠í┐╕▀╡┬┤≥│╡╡τ╫╙╖ó╞▒",
-            "í╛╖τ╘╧│÷╨╨-40.26╘¬-2╕÷╨╨│╠í┐╕▀╡┬┤≥│╡╡τ╫╙╨╨│╠╡Ñ"
-          ]
-        },
-        {
-          "timestamp": "2025-07-15 08:35:38",
-          "file_count": 1,
-          "total_amount": 0,
-          "order_ids": [
-            "-40.26-2"
-          ]
-        },
-        {
-          "timestamp": "2025-07-15 08:36:48",
-          "file_count": 4,
-          "total_amount": 0,
-          "order_ids": [
-            "T3-32.62-1",
-            "-19.85-1",
-            "-28.86-1",
-            "-32.13-1"
-          ]
-        },
-        {
-          "timestamp": "2025-07-15 08:40:12",
-          "file_count": 4,
-          "total_amount": 0,
-          "order_ids": [
-            "T3-32.62-1",
-            "-19.85-1",
-            "-28.86-1",
-            "-32.13-1"
-          ]
-        },
-        {
-          "timestamp": "2025-07-15 08:46:27",
-          "file_count": 0,
-          "total_amount": 0,
-          "order_ids": []
-        },
-        {
-          "timestamp": "2025-07-15 08:50:09",
-          "file_count": 0,
-          "total_amount": 0,
-          "order_ids": []
-        },
-        {
-          "timestamp": "2025-07-15 08:56:35",
-          "file_count": 0,
-          "total_amount": 0,
-          "order_ids": []
-        },
-        {
-          "timestamp": "2025-07-15 09:11:10",
-          "file_count": 1,
-          "total_amount": 40.26,
-          "order_ids": [
-            "-40.26-2"
-          ]
-        },
-        {
-          "timestamp": "2025-07-15 09:11:56",
+          "timestamp": "2025-07-15 13:58:53",
           "file_count": 4,
           "total_amount": 113.46000000000001,
           "order_ids": [
@@ -88,96 +14,7 @@
           ]
         },
         {
-          "timestamp": "2025-07-15 09:15:05",
-          "file_count": 1,
-          "total_amount": 40.26,
-          "order_ids": [
-            "-40.26-2"
-          ]
-        },
-        {
-          "timestamp": "2025-07-15 09:20:21",
-          "file_count": 1,
-          "total_amount": 40.26,
-          "order_ids": [
-            "-40.26-2"
-          ]
-        },
-        {
-          "timestamp": "2025-07-15 09:30:10",
-          "file_count": 1,
-          "total_amount": 40.26,
-          "order_ids": [
-            "-40.26-2"
-          ]
-        },
-        {
-          "timestamp": "2025-07-15 09:36:35",
-          "file_count": 1,
-          "total_amount": 17.71,
-          "order_ids": [
-            "-17.71-1"
-          ]
-        },
-        {
-          "timestamp": "2025-07-15 09:38:46",
-          "file_count": 1,
-          "total_amount": 17.71,
-          "order_ids": [
-            "-17.71-1"
-          ]
-        },
-        {
-          "timestamp": "2025-07-15 09:52:19",
-          "file_count": 1,
-          "total_amount": 40.26,
-          "order_ids": [
-            "-40.26-2"
-          ]
-        },
-        {
-          "timestamp": "2025-07-15 09:53:56",
-          "file_count": 4,
-          "total_amount": 113.46000000000001,
-          "order_ids": [
-            "T3-32.62-1",
-            "-19.85-1",
-            "-28.86-1",
-            "-32.13-1"
-          ]
-        },
-        {
-          "timestamp": "2025-07-15 09:59:33",
-          "file_count": 4,
-          "total_amount": 113.46000000000001,
-          "order_ids": [
-            "T3-32.62-1",
-            "-19.85-1",
-            "-28.86-1",
-            "-32.13-1"
-          ]
-        },
-        {
-          "timestamp": "2025-07-15 10:24:27",
-          "file_count": 4,
-          "total_amount": 113.46000000000001,
-          "order_ids": [
-            "T3-32.62-1",
-            "-19.85-1",
-            "-28.86-1",
-            "-32.13-1"
-          ]
-        },
-        {
-          "timestamp": "2025-07-15 10:24:36",
-          "file_count": 1,
-          "total_amount": 17.71,
-          "order_ids": [
-            "-17.71-1"
-          ]
-        },
-        {
-          "timestamp": "2025-07-15 10:24:42",
+          "timestamp": "2025-07-15 14:01:13",
           "file_count": 1,
           "total_amount": 40.26,
           "order_ids": [
@@ -185,8 +22,8 @@
           ]
         }
       ],
-      "total_amount": 748.5300000000001,
-      "total_prints": 38
+      "total_amount": 153.72,
+      "total_prints": 5
     }
   }
 }
