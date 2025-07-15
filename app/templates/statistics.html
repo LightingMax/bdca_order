@@ -118,15 +118,13 @@
                     const userCard = document.createElement('div');
                     userCard.className = 'stats-card';
                     
-                    // 截断用户ID显示
-                    const shortUserId = user.user_id.length > 12 
-                        ? user.user_id.substring(0, 6) + '...' + user.user_id.substring(user.user_id.length - 6)
-                        : user.user_id;
+                    // 显示完整用户ID
+                    const fullUserId = user.user_id;
                     
                     userCard.innerHTML = `
                         <div class="row">
                             <div class="col-md-6">
-                                <h5>用户ID: ${shortUserId}</h5>
+                                <h5>用户IP: ${fullUserId}</h5>
                                 <p class="text-muted mb-0">最后打印时间: ${user.last_print || '未知'}</p>
                             </div>
                             <div class="col-md-6 text-md-end">
