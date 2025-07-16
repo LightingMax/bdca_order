@@ -197,14 +197,22 @@ def print_file(filename):
         file_path = os.path.join(current_app.config['OUTPUT_FOLDER'], filename)
         if not os.path.exists(file_path):
             logger.warning(f"文件不存在: {file_path}")
-            return jsonify({'error': '文件不存在'}), 404
+            return jsonify({'success': False, 'message': '文件不存在', 'error': '文件不存在'}), 404
         
         print_result = print_pdf(file_path)
         logger.info(f"文件已发送至打印机: {file_path}")
-        return jsonify({'success': True, 'message': '文件已发送至打印机'})
+        
+        # 返回打印结果的详细信息
+        return jsonify({
+            'success': print_result.get('success', False),
+            'message': f"文件已发送至打印机: {print_result.get('message', '未知打印机')}",
+            'printer': print_result.get('printer', '未知打印机'),
+            'job_id': print_result.get('job_id', ''),
+            'debug': print_result.get('debug', False)
+        })
     except Exception as e:
         logger.error(f"打印文件时出错: {str(e)}", exc_info=True)
-        return jsonify({'error': f'打印文件时出错: {str(e)}'}), 500
+        return jsonify({'success': False, 'message': f'打印文件时出错: {str(e)}', 'error': str(e)}), 500
 
 @main_bp.route('/api/statistics', methods=['GET'])
 def get_statistics():

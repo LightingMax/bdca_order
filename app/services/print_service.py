@@ -87,9 +87,4 @@ def print_pdf(pdf_path, printer_name="NPIDC0D3D (HP LaserJet MFP M437-M443)"):
     
     except Exception as e:
         logger.error(f"打印PDF出错: {str(e)}", exc_info=True)
-        # 在开发环境中，如果打印失败，可以选择不抛出异常
-        if current_app.config.get('DEBUG', False):
-            logger.warning("调试模式：模拟打印成功")
-            return {"success": True, "printer": "模拟打印机", "debug": True}
-        else:
-            raise 
+        return {"success": False, "message": str(e)}

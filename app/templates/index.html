@@ -90,12 +90,10 @@
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         }
         
-        .upload-success {
+        .notification {
             position: fixed;
             top: 20px;
             right: 20px;
-            background-color: #28a745;
-            color: white;
             padding: 15px 20px;
             border-radius: 5px;
             box-shadow: 0 4px 10px rgba(0,0,0,0.2);
@@ -103,11 +101,29 @@
             opacity: 0;
             transform: translateY(-20px);
             transition: all 0.5s ease;
+            color: white;
         }
         
-        .upload-success.show {
+        .notification.show {
             opacity: 1;
             transform: translateY(0);
+        }
+        
+        .notification.success {
+            background-color: #28a745;
+        }
+        
+        .notification.warning {
+            background-color: #ffc107;
+            color: #212529;
+        }
+        
+        .notification.error {
+            background-color: #dc3545;
+        }
+        
+        .notification.info {
+            background-color: #17a2b8;
         }
     </style>
 </head>
@@ -146,9 +162,9 @@
         </div>
     </div>
     
-    <!-- 上传成功通知 -->
-    <div id="uploadSuccess" class="upload-success">
-        <i class="bi bi-check-circle-fill me-2"></i> 上传成功！
+    <!-- 通知提示 -->
+    <div id="notification" class="notification">
+        <i class="bi bi-info-circle-fill me-2"></i> <span id="notificationMessage"></span>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -163,8 +179,31 @@
             const resultArea = document.querySelector('.result-area');
             const resultList = document.getElementById('resultList');
             const printAllBtn = document.getElementById('printAllBtn');
+            const notification = document.getElementById('notification');
+            const notificationMessage = document.getElementById('notificationMessage');
             
             let processedFiles = [];
+            
+            // 显示通知
+            function showNotification(message, type = 'success', duration = 3000) {
+                notification.className = 'notification ' + type;
+                notificationMessage.textContent = message;
+                
+                // 设置图标
+                let icon = 'info-circle-fill';
+                if (type === 'success') icon = 'check-circle-fill';
+                if (type === 'warning') icon = 'exclamation-triangle-fill';
+                if (type === 'error') icon = 'x-circle-fill';
+                
+                // 更新图标
+                const iconElement = notification.querySelector('i');
+                iconElement.className = `bi bi-${icon} me-2`;
+                
+                notification.classList.add('show');
+                setTimeout(() => {
+                    notification.classList.remove('show');
+                }, duration);
+            }
             
             // 页面加载动画
             function initPageAnimations() {
@@ -316,11 +355,7 @@
                         const response = JSON.parse(xhr.responseText);
                         
                         // 显示上传成功通知
-                        const uploadSuccess = document.getElementById('uploadSuccess');
-                        uploadSuccess.classList.add('show');
-                        setTimeout(() => {
-                            uploadSuccess.classList.remove('show');
-                        }, 3000);
+                        showNotification('上传成功', 'success');
                         
                         displayResults(response);
                     } else {
@@ -329,14 +364,14 @@
                             const response = JSON.parse(xhr.responseText);
                             errorMessage = response.error || errorMessage;
                         } catch (e) {}
-                        alert(errorMessage);
+                        showNotification(errorMessage, 'error');
                         progress.style.display = 'none';
                         document.getElementById('fileList').style.display = 'none';
                     }
                 });
                 
                 xhr.addEventListener('error', function() {
-                    alert('上传过程中发生错误');
+                    showNotification('上传过程中发生错误', 'error');
                     progress.style.display = 'none';
                     document.getElementById('fileList').style.display = 'none';
                 });
@@ -511,15 +546,18 @@
                     }
                     
                     if (data.success) {
-                        // 显示成功通知
-                        const uploadSuccess = document.getElementById('uploadSuccess');
-                        uploadSuccess.innerHTML = '<i class="bi bi-printer-fill me-2"></i> 文件已发送至打印机';
-                        uploadSuccess.classList.add('show');
-                        setTimeout(() => {
-                            uploadSuccess.classList.remove('show');
-                        }, 3000);
+                        // 显示打印成功通知，包含打印机信息
+                        let message = `文件已发送至打印机: ${data.printer}`;
+                        if (data.job_id) {
+                            message += `，任务ID: ${data.job_id}`;
+                        }
+                        if (data.debug) {
+                            showNotification('调试模式：模拟打印成功', 'info');
+                        } else {
+                            showNotification(message, 'success');
+                        }
                     } else {
-                        alert('打印失败: ' + (data.error || '未知错误'));
+                        showNotification('打印失败: ' + (data.message || '未知错误'), 'error');
                     }
                 })
                 .catch(error => {
@@ -528,19 +566,21 @@
                         printBtn.innerHTML = '打印';
                         printBtn.disabled = false;
                     }
-                    alert('打印请求出错: ' + error);
+                    showNotification('打印请求出错: ' + error, 'error');
                 });
             }
             
             // 打印全部文件
             printAllBtn.addEventListener('click', function() {
                 if (processedFiles.length === 0) {
-                    alert('没有可打印的文件');
+                    showNotification('没有可打印的文件', 'warning');
                     return;
                 }
                 
                 if (confirm(`确定要打印全部 ${processedFiles.length} 个文件吗？`)) {
                     let printedCount = 0;
+                    let successCount = 0;
+                    let failCount = 0;
                     
                     // 添加加载动画
                     const originalText = printAllBtn.innerHTML;
@@ -554,26 +594,42 @@
                         .then(response => response.json())
                         .then(data => {
                             printedCount++;
+                            if (data.success) {
+                                successCount++;
+                            } else {
+                                failCount++;
+                            }
+                            
                             if (printedCount === processedFiles.length) {
                                 // 恢复按钮状态
                                 printAllBtn.innerHTML = originalText;
                                 printAllBtn.disabled = false;
                                 
-                                // 显示成功通知
-                                const uploadSuccess = document.getElementById('uploadSuccess');
-                                uploadSuccess.innerHTML = '<i class="bi bi-printer-fill me-2"></i> 所有文件已发送至打印机';
-                                uploadSuccess.classList.add('show');
-                                setTimeout(() => {
-                                    uploadSuccess.classList.remove('show');
-                                }, 3000);
+                                // 显示打印结果通知
+                                let message = `打印完成: ${successCount}个成功`;
+                                if (failCount > 0) {
+                                    message += `, ${failCount}个失败`;
+                                    showNotification(message, failCount > successCount ? 'warning' : 'success');
+                                } else {
+                                    showNotification(message, 'success');
+                                }
                             }
                         })
                         .catch(error => {
                             printedCount++;
+                            failCount++;
+                            
                             if (printedCount === processedFiles.length) {
                                 // 恢复按钮状态
                                 printAllBtn.innerHTML = originalText;
                                 printAllBtn.disabled = false;
+                                
+                                // 显示打印结果通知
+                                let message = `打印完成: ${successCount}个成功`;
+                                if (failCount > 0) {
+                                    message += `, ${failCount}个失败`;
+                                    showNotification(message, failCount > successCount ? 'warning' : 'success');
+                                }
                             }
                             console.error('打印请求出错:', error);
                         });
