@@ -4,6 +4,8 @@ import subprocess
 import requests
 import tempfile
 from flask import current_app
+from app.config import Config
+from app.services.config_service import ConfigService
 
 def get_available_printers():
     """获取系统可用的打印机列表"""
@@ -11,9 +13,9 @@ def get_available_printers():
     logger.info("正在获取可用打印机列表")
     
     try:
-        # 通过API获取打印机列表
-        api_url = "http://192.168.10.87:50003/printers"
-        headers = {"Authorization": f"Bearer TOKEN_PRINT_API_KEY_9527"}
+        # 通过配置服务获取API配置
+        api_url = ConfigService.get_print_api_url('printers')
+        headers = ConfigService.get_auth_headers()
         
         logger.debug(f"正在请求打印机API: {api_url}")
         response = requests.get(api_url, headers=headers)
@@ -35,7 +37,7 @@ def get_available_printers():
         logger.error(f"获取打印机列表出错: {str(e)}", exc_info=True)
         return []
 
-def print_pdf(pdf_path, printer_name="NPIDC0D3D (HP LaserJet MFP M437-M443)"):
+def print_pdf(pdf_path, printer_name=None):
     """打印PDF文件"""
     logger = current_app.logger
     logger.info(f"开始打印PDF文件: {pdf_path}")
@@ -45,23 +47,23 @@ def print_pdf(pdf_path, printer_name="NPIDC0D3D (HP LaserJet MFP M437-M443)"):
         raise FileNotFoundError(f"找不到文件: {pdf_path}")
     
     try:
-        # 通过API发送打印请求
-        api_url = "http://192.168.10.87:50003/print"
-        headers = {"Authorization": f"Bearer TOKEN_PRINT_API_KEY_9527"}
+        # 通过配置服务获取API配置
+        api_url = ConfigService.get_print_api_url('print')
+        headers = ConfigService.get_auth_headers()
         
         # 如果未指定打印机，使用默认打印机
         if not printer_name:
-            printer_name = "NPIDC0D3D (HP LaserJet MFP M437-M443)"
+            printer_name = Config.DEFAULT_PRINTER_NAME
             logger.debug(f"使用默认打印机: {printer_name}")
         
         logger.debug(f"正在发送文件到打印API，打印机: {printer_name}")
         
-        # 修改请求格式，确保参数正确传递
+        # 修改请求格式，确保参数正确传递，并指定使用pdftops方法进行PDF渲染
         with open(pdf_path, 'rb') as pdf_file:
             files = {'file': (os.path.basename(pdf_path), pdf_file, 'application/pdf')}
-            # 将printer_name作为查询参数而不是表单数据
+            # 将printer_name和method作为查询参数
             response = requests.post(
-                f"{api_url}?printer_name={printer_name}",
+                f"{api_url}?printer_name={printer_name}&method=pdftops",
                 headers=headers,
                 files=files
             )

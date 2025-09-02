@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>页面刷新调试</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .debug-info { background: #f0f0f0; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .upload-area { border: 2px dashed #ccc; padding: 40px; text-align: center; margin: 20px 0; }
+        .upload-area.dragover { border-color: #007bff; background: #f8f9fa; }
+        .result { margin: 20px 0; padding: 15px; background: #e9ecef; border-radius: 5px; }
+        .timestamp { color: #666; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <h1>页面刷新调试测试</h1>
+    
+    <div class="debug-info">
+        <h3>调试信息</h3>
+        <p><strong>页面加载时间:</strong> <span id="loadTime"></span></p>
+        <p><strong>当前时间:</strong> <span id="currentTime"></span></p>
+        <p><strong>页面刷新次数:</strong> <span id="refreshCount">0</span></p>
+        <p><strong>最后操作:</strong> <span id="lastAction">无</span></p>
+    </div>
+    
+    <div class="upload-area" id="uploadArea">
+        <h3>拖拽文件到此处测试</h3>
+        <p>这里只是测试拖拽事件，不会实际上传文件</p>
+    </div>
+    
+    <div class="result" id="result">
+        <h3>操作结果</h3>
+        <p>这里会显示拖拽操作的结果</p>
+    </div>
+    
+    <button onclick="addLog('手动点击按钮')">添加日志</button>
+    <button onclick="clearLogs()">清空日志</button>
+    
+    <div class="result" id="logs">
+        <h3>操作日志</h3>
+        <div id="logContent"></div>
+    </div>
+
+    <script>
+        // 页面加载时间
+        const loadTime = new Date();
+        document.getElementById('loadTime').textContent = loadTime.toLocaleString();
+        
+        // 更新当前时间
+        setInterval(() => {
+            document.getElementById('currentTime').textContent = new Date().toLocaleString();
+        }, 1000);
+        
+        // 页面刷新计数
+        let refreshCount = parseInt(localStorage.getItem('refreshCount') || '0');
+        refreshCount++;
+        localStorage.setItem('refreshCount', refreshCount.toString());
+        document.getElementById('refreshCount').textContent = refreshCount;
+        
+        // 操作日志
+        let logs = [];
+        
+        function addLog(action, details = '') {
+            const timestamp = new Date().toLocaleString();
+            const log = { timestamp, action, details };
+            logs.unshift(log);
+            
+            document.getElementById('lastAction').textContent = action;
+            updateLogDisplay();
+            
+            // 保存到localStorage
+            localStorage.setItem('debugLogs', JSON.stringify(logs));
+        }
+        
+        function updateLogDisplay() {
+            const logContent = document.getElementById('logContent');
+            logContent.innerHTML = logs.map(log => 
+                `<div class="timestamp">${log.timestamp} - ${log.action} ${log.details}</div>`
+            ).join('');
+        }
+        
+        function clearLogs() {
+            logs = [];
+            localStorage.removeItem('debugLogs');
+            updateLogDisplay();
+            addLog('清空日志');
+        }
+        
+        // 加载保存的日志
+        const savedLogs = localStorage.getItem('debugLogs');
+        if (savedLogs) {
+            logs = JSON.parse(savedLogs);
+            updateLogDisplay();
+        }
+        
+        // 页面加载事件
+        addLog('页面加载完成');
+        
+        // 拖拽事件
+        const uploadArea = document.getElementById('uploadArea');
+        
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+        });
+        
+        ['dragenter', 'dragover'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, () => {
+                uploadArea.classList.add('dragover');
+                addLog('文件拖拽进入区域');
+            });
+        });
+        
+        ['dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, () => {
+                uploadArea.classList.remove('dragover');
+                if (eventName === 'drop') {
+                    addLog('文件拖拽释放');
+                }
+            });
+        });
+        
+        // 文件拖拽处理
+        uploadArea.addEventListener('drop', (e) => {
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                addLog('检测到文件', `${files.length} 个文件`);
+                
+                // 显示文件信息
+                const result = document.getElementById('result');
+                result.innerHTML = `
+                    <h3>拖拽的文件信息</h3>
+                    <p>文件数量: ${files.length}</p>
+                    <ul>
+                        ${Array.from(files).map(file => 
+                            `<li>${file.name} (${file.size} bytes, ${file.type})</li>`
+                        ).join('')}
+                    </ul>
+                    <p class="timestamp">处理时间: ${new Date().toLocaleString()}</p>
+                `;
+            }
+        });
+        
+        // 页面可见性变化检测
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                addLog('页面隐藏');
+            } else {
+                addLog('页面显示');
+            }
+        });
+        
+        // 页面卸载检测
+        window.addEventListener('beforeunload', () => {
+            addLog('页面即将卸载');
+        });
+        
+        // 页面焦点检测
+        window.addEventListener('focus', () => {
+            addLog('页面获得焦点');
+        });
+        
+        window.addEventListener('blur', () => {
+            addLog('页面失去焦点');
+        });
+        
+        // 添加初始日志
+        addLog('调试页面初始化完成');
+    </script>
+</body>
+</html>

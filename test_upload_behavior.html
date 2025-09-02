@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>上传行为测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .upload-area { border: 2px dashed #ccc; padding: 40px; text-align: center; margin: 20px 0; }
+        .upload-area.dragover { border-color: #007bff; background: #f8f9fa; }
+        .result-area { margin: 20px 0; padding: 15px; background: #e9ecef; border-radius: 5px; }
+        .result-list { margin: 20px 0; padding: 15px; background: #f0f0f0; border-radius: 5px; }
+        .log { background: #f0f0f0; padding: 10px; margin: 5px 0; border-radius: 3px; font-size: 12px; }
+        .hidden { display: none; }
+        .visible { display: block; }
+    </style>
+</head>
+<body>
+    <h1>上传行为测试 - 检查结果覆盖问题</h1>
+    
+    <div class="upload-area" id="uploadArea">
+        <h3>拖拽ZIP文件到此处测试</h3>
+        <p>这里模拟真实的上传行为，检查结果是否被覆盖</p>
+    </div>
+    
+    <div class="result-area" id="resultArea">
+        <h3>结果区域</h3>
+        <div class="result-list" id="resultList">
+            <p>初始内容 - 这里应该保持不变</p>
+        </div>
+    </div>
+    
+    <div class="result-area">
+        <h3>操作日志</h3>
+        <div id="logContent"></div>
+    </div>
+
+    <script>
+        let logCount = 0;
+        let uploadCount = 0;
+        let processedFiles = [];
+        
+        function addLog(message) {
+            logCount++;
+            const timestamp = new Date().toLocaleTimeString();
+            const logDiv = document.createElement('div');
+            logDiv.className = 'log';
+            logDiv.innerHTML = `${logCount}. ${timestamp} - ${message}`;
+            document.getElementById('logContent').appendChild(logDiv);
+        }
+        
+        // 模拟 displayResults 函数
+        function displayResults(response) {
+            addLog('🔄 displayResults 被调用');
+            addLog(`📊 当前 processedFiles 长度: ${processedFiles.length}`);
+            addLog(`📊 显示结果前 resultList 内容长度: ${resultList.innerHTML.length}`);
+            
+            // 模拟显示结果区域
+            addLog('✅ 显示结果区域');
+            resultArea.style.display = 'block';
+            resultArea.classList.add('visible');
+            
+            // 不清空之前的结果，而是追加新结果
+            addLog('⚠️  注意：这里不会清空之前的结果！');
+            addLog(`📊 当前 resultList 内容: ${resultList.innerHTML.substring(0, 100)}...`);
+            
+            if (response.success && response.results) {
+                addLog('✅ 响应成功，开始处理结果');
+                
+                // 将新结果添加到现有结果中，而不是替换
+                if (typeof processedFiles === 'undefined') {
+                    addLog('🆕 processedFiles 未定义，初始化为空数组');
+                    processedFiles = [];
+                }
+                
+                addLog(`📥 添加新结果前，processedFiles 长度: ${processedFiles.length}`);
+                processedFiles = processedFiles.concat(response.results);
+                addLog(`📤 添加新结果后，processedFiles 长度: ${processedFiles.length}`);
+                
+                // 创建新的结果摘要
+                const summaryDiv = document.createElement('div');
+                summaryDiv.className = 'alert alert-success mb-3';
+                summaryDiv.innerHTML = `
+                    <h4>第${uploadCount}次上传结果</h4>
+                    <p>处理了 ${response.results.length} 个文件</p>
+                    <p>累计处理: ${processedFiles.length} 个文件</p>
+                    <p>时间: ${new Date().toLocaleString()}</p>
+                `;
+                
+                resultList.appendChild(summaryDiv);
+                addLog('✅ 新结果已追加到 resultList');
+            }
+        }
+        
+        // 模拟 uploadFiles 函数
+        function uploadFiles(files) {
+            addLog('🚀 uploadFiles 开始');
+            addLog(`📊 上传前 processedFiles 长度: ${processedFiles.length}`);
+            addLog(`📊 上传前 resultList 内容长度: ${resultList.innerHTML.length}`);
+            
+            // 模拟进度条显示
+            addLog('⚠️  隐藏结果区域，但不清空内容');
+            resultArea.style.display = 'none';
+            resultArea.classList.add('hidden');
+            
+            // 模拟上传延迟
+            setTimeout(() => {
+                uploadCount++;
+                
+                // 模拟服务器响应
+                const mockResponse = {
+                    success: true,
+                    results: [
+                        { filename: `file${uploadCount}_1.zip`, status: 'processed' },
+                        { filename: `file${uploadCount}_2.zip`, status: 'processed' }
+                    ]
+                };
+                
+                addLog(`📤 模拟上传完成，调用 displayResults`);
+                displayResults(mockResponse);
+                
+            }, 1000);
+        }
+        
+        // 页面加载事件
+        addLog('页面加载完成');
+        
+        // 拖拽事件
+        const uploadArea = document.getElementById('uploadArea');
+        
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+        });
+        
+        ['dragenter', 'dragover'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, () => {
+                uploadArea.classList.add('dragover');
+                addLog('文件拖拽进入区域');
+            });
+        });
+        
+        ['dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, () => {
+                uploadArea.classList.remove('dragover');
+                if (eventName === 'drop') {
+                    addLog('文件拖拽释放');
+                }
+            });
+        });
+        
+        // 文件拖拽处理
+        uploadArea.addEventListener('drop', (e) => {
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                addLog(`检测到文件: ${files.length} 个文件`);
+                uploadFiles(files);
+            }
+        });
+        
+        // 添加初始日志
+        addLog('测试页面初始化完成');
+        addLog('请拖拽ZIP文件到上方区域进行测试');
+        addLog('观察每次上传后结果是否被覆盖');
+    </script>
+</body>
+</html>

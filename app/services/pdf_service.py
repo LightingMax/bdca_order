@@ -119,55 +119,158 @@ def identify_pdf_type(pdf_path):
         return 'unknown'
 
 def extract_order_id(file_path):
-    """从文件名或内容中提取订单ID"""
+    """从文件名或内容中提取订单ID - 改进版，支持服务商前缀和发票【】格式"""
     logger = current_app.logger
     try:
         logger.info(f"正在提取订单ID: {file_path}")
-        # 从文件名中提取
         filename = os.path.basename(file_path)
-        # 假设订单ID是文件名中的数字部分
+        
+        # 方法0: 优先从发票文件名中提取【】内的内容
+        # 支持格式：【T3出行-77.06元-1个行程】*发票
+        bracket_pattern = r'【([^】]+)】'
+        bracket_match = re.search(bracket_pattern, filename)
+        if bracket_match:
+            bracket_content = bracket_match.group(1)
+            logger.info(f"从发票文件名【】中提取到内容: {bracket_content}")
+            return bracket_content
+        
+        # 方法1: 尝试从文件名中提取完整的订单信息
+        # 支持格式：阳光出行-32.13元-3个行程、T3-77.06-1等
+        order_patterns = [
+            r'([^-]+)-(\d+\.\d+)元?-(\d+)个行程',  # 阳光出行-32.13元-3个行程
+            r'([^-]+)-(\d+\.\d+)-(\d+)',           # T3-77.06-1
+            r'([^-]+)-(\d+\.\d+)',                 # 服务商-金额
+            r'订单(\d+)',                           # 订单12345
+            r'trip(\d+)',                           # trip001
+        ]
+        
+        for pattern in order_patterns:
+            match = re.search(pattern, filename)
+            if match:
+                if len(match.groups()) == 3:
+                    # 格式：服务商-金额-数量
+                    service, amount, count = match.groups()
+                    order_id = f"{service}-{amount}-{count}"
+                    logger.info(f"从文件名中提取到订单ID: {order_id}")
+                    return order_id
+                elif len(match.groups()) == 2:
+                    # 格式：服务商-金额
+                    service, amount = match.groups()
+                    order_id = f"{service}-{amount}"
+                    logger.info(f"从文件名中提取到订单ID: {order_id}")
+                    return order_id
+                elif len(match.groups()) == 1:
+                    # 格式：订单号或trip号
+                    order_id = match.group(1)
+                    logger.info(f"从文件名中提取到订单ID: {order_id}")
+                    return order_id
+        
+        # 方法2: 尝试查找6位以上的数字作为订单ID
         order_id_match = re.search(r'(\d{6,})', filename)
         if order_id_match:
             order_id = order_id_match.group(1)
-            logger.info(f"从文件名中提取到订单ID: {order_id}")
+            logger.info(f"从文件名中提取到数字订单ID: {order_id}")
             return order_id
         
-        # 如果是PDF，尝试从内容中提取
+        # 方法3: 如果是PDF，尝试从内容中提取
         if file_path.lower().endswith('.pdf'):
-            reader = PdfReader(file_path)
-            if len(reader.pages) > 0:
-                text = reader.pages[0].extract_text()
-                # 尝试查找订单号模式
-                order_id_match = re.search(r'订单[号#]?[：:]?\s*(\d{6,})', text)
-                if order_id_match:
-                    order_id = order_id_match.group(1)
-                    logger.info(f"从PDF内容中提取到订单ID: {order_id}")
-                    return order_id
+            try:
+                reader = PdfReader(file_path)
+                if len(reader.pages) > 0:
+                    text = reader.pages[0].extract_text()
+                    # 尝试查找订单号模式
+                    order_id_match = re.search(r'订单[号#]?[：:]?\s*(\d{6,})', text)
+                    if order_id_match:
+                        order_id = order_id_match.group(1)
+                        logger.info(f"从PDF内容中提取到订单ID: {order_id}")
+                        return order_id
+            except Exception as e:
+                logger.warning(f"从PDF内容提取订单ID失败: {e}")
         
-        # 如果是XML，尝试从内容中提取
+        # 方法4: 如果是XML，尝试从内容中提取
         if file_path.lower().endswith('.xml'):
-            tree = ET.parse(file_path)
-            root = tree.getroot()
-            # 尝试查找订单号元素
-            order_elem = root.find(".//OrderID") or root.find(".//OrderNumber")
-            if order_elem is not None and order_elem.text:
-                order_id = order_elem.text
-                logger.info(f"从XML内容中提取到订单ID: {order_id}")
-                return order_id
+            try:
+                tree = ET.parse(file_path)
+                root = tree.getroot()
+                # 尝试查找订单号元素
+                order_elem = root.find(".//OrderID") or root.find(".//OrderNumber")
+                if order_elem is not None and order_elem.text:
+                    order_id = order_elem.text
+                    logger.info(f"从XML内容中提取到订单ID: {order_id}")
+                    return order_id
+            except Exception as e:
+                logger.warning(f"从XML内容提取订单ID失败: {e}")
         
-        # 如果无法提取，使用文件名的ASCII部分作为标识
-        # 过滤掉非ASCII字符，避免乱码
+        # 方法5: 生成基于服务商的智能订单ID
+        smart_order_id = generate_smart_order_id(filename)
+        if smart_order_id:
+            logger.info(f"生成智能订单ID: {smart_order_id}")
+            return smart_order_id
+        
+        # 方法6: 如果所有方法都失败，使用文件名的ASCII部分作为标识
         ascii_filename = ''.join(c for c in os.path.splitext(filename)[0] if ord(c) < 128)
         if not ascii_filename:
             ascii_filename = str(uuid.uuid4())[:8]
         
         logger.warning(f"无法提取订单ID，使用文件名作为标识: {ascii_filename}")
         return ascii_filename
+        
     except Exception as e:
         logger.error(f"提取订单ID出错: {str(e)}")
         random_id = str(uuid.uuid4())[:8]
         logger.info(f"使用随机ID作为后备: {random_id}")
         return random_id  # 生成随机ID作为后备
+
+
+def generate_smart_order_id(filename):
+    """生成基于服务商的智能订单ID"""
+    try:
+        # 直接使用原始服务商名称，不进行缩写映射
+        # 尝试提取服务商名称和金额信息
+        service_patterns = [
+            r'([^-]+)-(\d+\.\d+)元?-(\d+)个行程',  # 阳光出行-32.13元-3个行程
+            r'([^-]+)-(\d+\.\d+)-(\d+)',           # T3-77.06-1
+            r'([^-]+)-(\d+\.\d+)',                 # 服务商-金额
+        ]
+        
+        for pattern in service_patterns:
+            match = re.search(pattern, filename)
+            if match:
+                if len(match.groups()) == 3:
+                    # 格式：服务商-金额-数量
+                    service, amount, count = match.groups()
+                    # 保持更自然的格式：服务商-金额元-数量个行程
+                    if '元' in filename and '个行程' in filename:
+                        return f"{service}-{amount}元-{count}个行程"
+                    else:
+                        return f"{service}-{amount}-{count}"
+                elif len(match.groups()) == 2:
+                    # 格式：服务商-金额
+                    service, amount = match.groups()
+                    # 保持更自然的格式：服务商-金额元
+                    if '元' in filename:
+                        return f"{service}-{amount}元"
+                    else:
+                        return f"{service}-{amount}"
+        
+        # 如果没有找到标准格式，尝试提取其他信息
+        # 例如：T3-77.06-1 格式
+        t3_match = re.search(r'(T3|t3)-(\d+\.\d+)-(\d+)', filename)
+        if t3_match:
+            service, amount, count = t3_match.groups()
+            return f"T3-{amount}-{count}"
+        
+        # 处理 "订单-53.21-1" 这种格式
+        order_match = re.search(r'订单-(\d+\.\d+)-(\d+)', filename)
+        if order_match:
+            amount, count = order_match.groups()
+            return f"订单-{amount}-{count}"
+        
+        return None
+        
+    except Exception as e:
+        logger.warning(f"生成智能订单ID失败: {e}")
+        return None
 
 def match_files_by_order(pdf_files, xml_files):
     """将PDF和XML文件按订单匹配"""

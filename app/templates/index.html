@@ -158,7 +158,10 @@
         <div class="result-area">
             <h3>处理结果</h3>
             <div id="resultList" class="mt-3"></div>
-            <button id="printAllBtn" class="btn btn-primary mt-3">打印全部</button>
+            <div class="mt-3">
+                <button id="printAllBtn" class="btn btn-primary me-2">打印全部</button>
+                <button id="clearResultsBtn" class="btn btn-outline-secondary">清空结果</button>
+            </div>
         </div>
     </div>
     
@@ -323,6 +326,10 @@
             
             // 上传文件到服务器
             function uploadFiles(files) {
+                console.log('🚀 uploadFiles 开始，文件数量:', files.length);
+                console.log('📊 上传前 processedFiles 长度:', processedFiles ? processedFiles.length : 'undefined');
+                console.log('📊 上传前 resultList 内容长度:', resultList.innerHTML.length);
+                
                 const formData = new FormData();
                 for (let i = 0; i < files.length; i++) {
                     formData.append('files', files[i]);
@@ -332,6 +339,7 @@
                 
                 // 进度条显示
                 progress.style.display = 'flex';
+                console.log('⚠️  隐藏结果区域，但不清空内容');
                 resultArea.style.display = 'none';
                 
                 xhr.upload.addEventListener('progress', function(e) {
@@ -382,26 +390,65 @@
             
             // 显示处理结果
             function displayResults(response) {
+                console.log('🔄 displayResults 被调用，响应:', response);
+                console.log('📊 当前 processedFiles 长度:', processedFiles ? processedFiles.length : 'undefined');
+                console.log('📊 显示结果前 resultList 内容长度:', resultList.innerHTML.length);
+                
                 progress.style.display = 'none';
+                console.log('✅ 显示结果区域');
                 resultArea.style.display = 'block';
                 resultArea.classList.add('animate-fade-in');
-                resultList.innerHTML = '';
+                
+                // 不清空之前的结果，而是追加新结果
+                console.log('⚠️  注意：这里不会清空之前的结果！');
+                console.log('📊 当前 resultList 内容:', resultList.innerHTML.substring(0, 100) + '...');
+                // resultList.innerHTML = ''; // 注释掉这行，避免清空之前的结果
                 
                 // 隐藏文件列表
                 document.getElementById('fileList').style.display = 'none';
                 
                 if (response.success && response.results) {
-                    processedFiles = response.results;
+                    console.log('✅ 响应成功，开始处理结果');
                     
-                    // 显示总处理结果统计
-                    const totalFiles = response.results.length;
-                    const totalAmount = response.total_amount || response.results.reduce((sum, result) => sum + result.amount, 0);
+                    // 将新结果添加到现有结果中，而不是替换
+                    if (typeof processedFiles === 'undefined') {
+                        console.log('🆕 processedFiles 未定义，初始化为空数组');
+                        processedFiles = [];
+                    }
                     
-                    const summaryDiv = document.createElement('div');
-                    summaryDiv.className = 'alert alert-success mb-3 animate-fade-in';
+                    console.log('📥 添加新结果前，processedFiles 长度:', processedFiles.length);
+                    console.log('📥 添加新结果前，processedFiles 内容:', JSON.stringify(processedFiles));
+                    
+                    // 确保新结果被正确添加
+                    const newResults = response.results || [];
+                    processedFiles = processedFiles.concat(newResults);
+                    
+                    console.log('📤 添加新结果后，processedFiles 长度:', processedFiles.length);
+                    console.log('📤 添加新结果后，processedFiles 内容:', JSON.stringify(processedFiles));
+                    
+                    // 显示本次处理结果统计
+                    const newFilesCount = newResults.length;
+                    const newAmount = response.total_amount || newResults.reduce((sum, result) => sum + (result.amount || 0), 0);
+                    
+                    // 计算累计统计 - 确保正确累加
+                    const totalFiles = processedFiles.length;
+                    const totalAmount = processedFiles.reduce((sum, result) => sum + (result.amount || 0), 0);
+                    
+                    console.log('📊 统计信息 - 本次:', newFilesCount, '累计:', totalFiles, '总金额:', totalAmount);
+                    console.log('📊 详细统计 - 新结果:', newResults, '累计结果:', processedFiles);
+                    
+                    // 检查是否已经有统计摘要，如果有则更新，没有则创建新的
+                    let summaryDiv = document.getElementById('current-summary');
+                    if (!summaryDiv) {
+                        summaryDiv = document.createElement('div');
+                        summaryDiv.className = 'alert alert-success mb-3 animate-fade-in';
+                        summaryDiv.id = 'current-summary';
+                        resultList.appendChild(summaryDiv);
+                    }
                     
                     // 添加重用文件信息和新处理订单信息
-                    let summaryText = `成功处理 <strong>${totalFiles}</strong> 个订单，总金额: <strong>¥${totalAmount.toFixed(2)}</strong>`;
+                    let summaryText = `本次处理 <strong>${newFilesCount}</strong> 个订单，金额: <strong>¥${newAmount.toFixed(2)}</strong>`;
+                    summaryText += `<br><small>累计处理 <strong>${totalFiles}</strong> 个订单，总金额: <strong>¥${totalAmount.toFixed(2)}</strong></small>`;
                     
                     if (response.reused_files > 0 && response.new_results_count >= 0) {
                         summaryText += `<br><small>其中 ${response.reused_files} 个文件已上传过，重用了之前的处理结果</small>`;
@@ -414,13 +461,35 @@
                     }
                     
                     summaryDiv.innerHTML = summaryText;
-                    resultList.appendChild(summaryDiv);
                     
-                    // 显示文件重用详情
+                    // 显示文件重用详情 - 累积显示所有重用过的文件
                     if (response.file_details && (response.file_details.reused.length > 0 || response.file_details.processed.length > 0)) {
-                        const fileDetailsDiv = document.createElement('div');
-                        fileDetailsDiv.className = 'mb-4 animate-fade-in';
-                        fileDetailsDiv.style.animationDelay = '0.2s';
+                        let fileDetailsDiv = document.getElementById('file-details-section');
+                        if (!fileDetailsDiv) {
+                            fileDetailsDiv = document.createElement('div');
+                            fileDetailsDiv.className = 'mb-4 animate-fade-in';
+                            fileDetailsDiv.style.animationDelay = '0.2s';
+                            fileDetailsDiv.id = 'file-details-section';
+                            resultList.appendChild(fileDetailsDiv);
+                        }
+                        
+                        // 初始化全局重用文件数组（如果不存在）
+                        if (typeof window.allReusedFiles === 'undefined') {
+                            window.allReusedFiles = [];
+                        }
+                        
+                        // 将新的重用文件添加到全局数组中（避免重复）
+                        if (response.file_details.reused && response.file_details.reused.length > 0) {
+                            response.file_details.reused.forEach(newReusedFile => {
+                                // 检查是否已经存在（基于哈希值）
+                                const exists = window.allReusedFiles.some(existingFile => 
+                                    existingFile.hash === newReusedFile.hash
+                                );
+                                if (!exists) {
+                                    window.allReusedFiles.push(newReusedFile);
+                                }
+                            });
+                        }
                         
                         let fileDetailsHtml = '<h5>文件处理详情</h5>';
                         
@@ -446,19 +515,31 @@
                             fileDetailsHtml += '</ul>';
                         }
                         
-                        // 重用的文件
-                        if (response.file_details.reused.length > 0) {
-                            fileDetailsHtml += '<div class="mb-2"><strong>重用的文件:</strong></div>';
+                        // 显示所有重用过的文件（累积显示）
+                        if (window.allReusedFiles.length > 0) {
+                            fileDetailsHtml += '<div class="mb-2"><strong>重用的文件 (累计):</strong></div>';
                             fileDetailsHtml += '<ul class="list-group">';
-                            response.file_details.reused.forEach((file, index) => {
+                            window.allReusedFiles.forEach((file, index) => {
+                                const printStatus = file.print_status || 'unknown';
+                                const lastPrintTime = file.last_print_time || '未打印';
+                                const statusBadge = printStatus === 'printed' ? 
+                                    '<span class="badge bg-success ms-2">已打印</span>' : 
+                                    '<span class="badge bg-warning ms-2">未打印</span>';
+                                
                                 fileDetailsHtml += `
                                     <li class="list-group-item d-flex justify-content-between align-items-center animate-slide-in" style="animation-delay: ${0.2 + index * 0.1}s">
                                         <div>
-                                            <span>${file.filename}</span>
+                                            <span>${file.filename} ${statusBadge}</span>
                                             <small class="d-block text-muted">哈希: ${file.hash.substring(0, 8)}...${file.hash.substring(file.hash.length - 8)}</small>
                                             <small class="d-block text-muted">原上传时间: ${file.original_upload_time}</small>
+                                            <small class="d-block text-muted">最后打印: ${lastPrintTime}</small>
                                         </div>
-                                        <span class="badge bg-success rounded-pill">${file.result_count} 个订单</span>
+                                        <div>
+                                            <span class="badge bg-success rounded-pill me-2">${file.result_count} 个订单</span>
+                                            <button class="btn btn-sm btn-outline-warning reprint-btn" data-hash="${file.hash}" data-filename="${file.filename}">
+                                                重新打印
+                                            </button>
+                                        </div>
                                     </li>
                                 `;
                             });
@@ -466,16 +547,33 @@
                         }
                         
                         fileDetailsDiv.innerHTML = fileDetailsHtml;
-                        resultList.appendChild(fileDetailsDiv);
                     }
                     
-                    // 显示订单结果
-                    const ordersDiv = document.createElement('div');
-                    ordersDiv.innerHTML = '<h5>订单处理结果</h5>';
-                    ordersDiv.className = 'animate-fade-in';
-                    ordersDiv.style.animationDelay = '0.3s';
-                    resultList.appendChild(ordersDiv);
+                    // 显示订单结果 - 追加新订单到现有结果中
+                    // 检查是否已有订单结果区域
+                    let ordersDiv = document.getElementById('orders-section');
+                    if (!ordersDiv) {
+                        // 如果不存在，创建新的订单结果区域
+                        ordersDiv = document.createElement('div');
+                        ordersDiv.id = 'orders-section';
+                        ordersDiv.innerHTML = '<h5>订单处理结果</h5>';
+                        ordersDiv.className = 'animate-fade-in';
+                        ordersDiv.style.animationDelay = '0.3s';
+                        resultList.appendChild(ordersDiv);
+                    }
                     
+                    // 为本次新处理的订单创建分组
+                    const newOrdersGroup = document.createElement('div');
+                    newOrdersGroup.className = 'mb-3 animate-fade-in';
+                    newOrdersGroup.style.animationDelay = '0.2s';
+                    
+                    // 添加本次处理的标题
+                    const groupTitle = document.createElement('div');
+                    groupTitle.className = 'text-muted mb-2';
+                    groupTitle.innerHTML = `<small>📁 本次处理 (${newFilesCount} 个订单)</small>`;
+                    newOrdersGroup.appendChild(groupTitle);
+                    
+                    // 显示本次新处理的订单
                     response.results.forEach(function(result, index) {
                         const fileItem = document.createElement('div');
                         fileItem.className = 'file-item animate-slide-in';
@@ -508,14 +606,26 @@
                             </div>
                         `;
                         
-                        resultList.appendChild(fileItem);
+                        newOrdersGroup.appendChild(fileItem);
                     });
+                    
+                    // 将新订单组添加到订单结果区域
+                    ordersDiv.appendChild(newOrdersGroup);
                     
                     // 添加打印按钮事件
                     document.querySelectorAll('.print-btn').forEach(function(btn) {
                         btn.addEventListener('click', function() {
                             const filename = this.getAttribute('data-file');
                             printFile(filename);
+                        });
+                    });
+                    
+                    // 添加重新打印按钮事件
+                    document.querySelectorAll('.reprint-btn').forEach(function(btn) {
+                        btn.addEventListener('click', function() {
+                            const fileHash = this.getAttribute('data-hash');
+                            const filename = this.getAttribute('data-filename');
+                            reprintFile(fileHash, filename);
                         });
                     });
                     
@@ -569,6 +679,73 @@
                     showNotification('打印请求出错: ' + error, 'error');
                 });
             }
+            
+            // 重新打印文件
+            function reprintFile(fileHash, filename) {
+                // 从DOM中获取订单数量
+                const reprintBtn = document.querySelector(`.reprint-btn[data-hash="${fileHash}"]`);
+                const orderCountElement = reprintBtn?.closest('.list-group-item')?.querySelector('.badge.bg-success');
+                const orderCount = orderCountElement ? orderCountElement.textContent.replace(' 个订单', '') : '0';
+                
+                const confirmMessage = `文件 "${filename}" 已上传过，是否要重新打印？\n\n这将打印该文件中的所有 ${orderCount} 个订单。`;
+                
+                if (confirm(confirmMessage)) {
+                    const reprintBtn = document.querySelector(`.reprint-btn[data-hash="${fileHash}"]`);
+                    if (reprintBtn) {
+                        // 添加加载动画
+                        const originalText = reprintBtn.innerHTML;
+                        reprintBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 打印中...';
+                        reprintBtn.disabled = true;
+                    }
+                    
+                    fetch(`/api/reprint/${fileHash}`, {
+                        method: 'POST'
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (reprintBtn) {
+                            // 恢复按钮状态
+                            reprintBtn.innerHTML = '重新打印';
+                            reprintBtn.disabled = false;
+                        }
+                        
+                        if (data.success) {
+                            showNotification(`重新打印成功！成功打印 ${data.success_count}/${data.total_files} 个文件`, 'success');
+                            
+                            // 更新UI状态
+                            setTimeout(() => {
+                                location.reload(); // 刷新页面以更新状态
+                            }, 2000);
+                        } else {
+                            showNotification('重新打印失败: ' + (data.message || '未知错误'), 'error');
+                        }
+                    })
+                    .catch(error => {
+                        if (reprintBtn) {
+                            // 恢复按钮状态
+                            reprintBtn.innerHTML = '重新打印';
+                            reprintBtn.disabled = false;
+                        }
+                        showNotification('重新打印请求出错: ' + error, 'error');
+                    });
+                }
+            }
+            
+            // 清空结果
+            document.getElementById('clearResultsBtn').addEventListener('click', function() {
+                if (confirm('确定要清空所有处理结果吗？这将清空所有已处理的订单信息。')) {
+                    // 清空结果列表
+                    resultList.innerHTML = '';
+                    // 重置处理文件数组
+                    processedFiles = [];
+                    // 重置重用文件数组
+                    if (typeof window.allReusedFiles !== 'undefined') {
+                        window.allReusedFiles = [];
+                    }
+                    // 显示通知
+                    showNotification('已清空所有处理结果', 'info');
+                }
+            });
             
             // 打印全部文件
             printAllBtn.addEventListener('click', function() {

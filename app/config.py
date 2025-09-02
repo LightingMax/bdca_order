@@ -25,4 +25,20 @@ class Config:
     ALLOWED_EXTENSIONS = {'zip'}
     
     # 最大上传文件大小 (50MB)
-    MAX_CONTENT_LENGTH = 50 * 1024 * 1024 
+    MAX_CONTENT_LENGTH = 50 * 1024 * 1024
+    
+    # 打印API服务配置
+    PRINT_API_BASE_URL = os.environ.get('PRINT_API_BASE_URL') or 'http://localhost:12346'
+    PRINT_API_TOKEN = os.environ.get('PRINT_API_TOKEN') or 'TOKEN_PRINT_API_KEY_9527'
+    PRINT_API_TIMEOUT = int(os.environ.get('PRINT_API_TIMEOUT', 30))
+    
+    # 默认打印机配置
+    DEFAULT_PRINTER_NAME = os.environ.get('DEFAULT_PRINTER_NAME') or 'HP-LaserJet-MFP-M437-M443'
+    
+    # 打印API端点
+    PRINT_API_ENDPOINTS = {
+        'printers': '/printers',
+        'default_printer': '/default-printer',
+        'print': '/print',
+        'health': '/health'
+    } 

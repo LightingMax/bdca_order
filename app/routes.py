@@ -7,7 +7,7 @@ from werkzeug.utils import secure_filename
 from app.services.file_service import (
     allowed_file, extract_zip, calculate_file_hash, 
     check_file_exists, save_file_hash, check_order_processed,
-    get_processed_orders
+    get_processed_orders, update_file_print_status
 )
 from app.services.pdf_service import process_pdf_files
 from app.services.print_service import print_pdf
@@ -96,7 +96,9 @@ def upload_file():
                         'filename': filename,
                         'hash': file_hash,
                         'original_upload_time': existing_file.get('upload_time', '未知'),
-                        'result_count': len(existing_file['results'])
+                        'result_count': len(existing_file['results']),
+                        'print_status': existing_file.get('print_status', 'unknown'),  # 添加打印状态
+                        'last_print_time': existing_file.get('last_print_time', '未打印')
                     })
                     continue
                 else:
@@ -148,7 +150,8 @@ def upload_file():
                 # 如果一个ZIP文件处理失败，继续处理其他文件
                 continue
         
-        if not all_results:
+        # 检查是否有任何结果（包括重用的）
+        if not all_results and not reused_files:
             logger.warning("没有成功处理任何订单")
             return jsonify({'error': '没有成功处理任何订单'}), 400
             
@@ -213,6 +216,77 @@ def print_file(filename):
     except Exception as e:
         logger.error(f"打印文件时出错: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'message': f'打印文件时出错: {str(e)}', 'error': str(e)}), 500
+
+
+@main_bp.route('/api/reprint/<file_hash>', methods=['POST'])
+def reprint_file(file_hash):
+    """重新打印指定哈希值的文件"""
+    logger = current_app.logger
+    logger.info(f"收到重新打印请求: {file_hash}")
+    
+    try:
+        # 获取文件信息
+        existing_file = check_file_exists(file_hash)
+        if not existing_file:
+            return jsonify({'success': False, 'message': '文件不存在', 'error': '文件不存在'}), 404
+        
+        # 获取文件结果
+        results = existing_file.get('results', [])
+        logger.info(f"文件 {file_hash} 包含 {len(results)} 个结果")
+        
+        if not results:
+            return jsonify({'success': False, 'message': '没有可打印的文件', 'error': '没有可打印的文件'}), 400
+        
+        # 打印所有PDF文件
+        print_results = []
+        success_count = 0
+        
+        for result in results:
+            logger.info(f"处理结果: {result}")
+            if 'output_file' in result:
+                output_filename = result['output_file']
+                file_path = os.path.join(current_app.config['OUTPUT_FOLDER'], output_filename)
+                logger.info(f"找到输出文件: {output_filename}, 路径: {file_path}")
+                
+                if os.path.exists(file_path):
+                    print_result = print_pdf(file_path)
+                    print_results.append({
+                        'filename': output_filename,
+                        'success': print_result.get('success', False),
+                        'message': print_result.get('message', '打印失败'),
+                        'printer': print_result.get('printer', '未知打印机'),
+                        'job_id': print_result.get('job_id', '')
+                    })
+                    
+                    if print_result.get('success', False):
+                        success_count += 1
+                else:
+                    print_results.append({
+                        'filename': output_filename,
+                        'success': False,
+                        'message': '文件不存在',
+                        'printer': '未知打印机',
+                        'job_id': ''
+                    })
+        
+        # 更新打印状态
+        if success_count > 0:
+            print_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            update_file_print_status(file_hash, 'printed', print_time)
+        
+        logger.info(f"重新打印完成，成功打印 {success_count}/{len(results)} 个文件")
+        
+        return jsonify({
+            'success': success_count > 0,
+            'message': f'重新打印完成，成功打印 {success_count}/{len(results)} 个文件',
+            'print_results': print_results,
+            'total_files': len(results),
+            'success_count': success_count
+        })
+        
+    except Exception as e:
+        logger.error(f"重新打印文件时出错: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'message': f'重新打印文件时出错: {str(e)}', 'error': str(e)}), 500
 
 @main_bp.route('/api/statistics', methods=['GET'])
 def get_statistics():

@@ -1,8 +1,17 @@
 Flask==2.0.1
 Flask-Cors==3.0.10
 PyPDF2==2.12.1
-pikepdf==7.1.0
+pikepdf==9.10.2
 getmac==0.8.3
 python-dotenv==0.19.0
 Werkzeug==2.0.1
-reportlab==3.6.12 
+reportlab==3.6.12
+# 打印API服务依赖
+fastapi==0.104.1
+uvicorn==0.24.0
+# 测试工具依赖
+requests==2.31.0
+# Linux打印支持
+pycups==2.0.1
+# Windows打印支持
+# pywin32==306 
