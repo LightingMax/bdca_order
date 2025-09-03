@@ -65,9 +65,15 @@ def test_order_id_extraction():
                 if '-' in order_id:
                     parts = order_id.split('-')
                     if len(parts) == 3:
-                        print(f"   📊 解析: 服务商={parts[0]}, 金额={parts[1]}, 数量={parts[2]}")
+                        if '元' in order_id and '个行程' in order_id:
+                            print(f"   📊 解析: 服务商={parts[0]}, 金额={parts[1]}, 数量={parts[2]}")
+                        else:
+                            print(f"   📊 解析: 服务商={parts[0]}, 金额={parts[1]}, 数量={parts[2]}")
                     elif len(parts) == 2:
-                        print(f"   📊 解析: 服务商={parts[0]}, 金额={parts[1]}")
+                        if '元' in order_id:
+                            print(f"   📊 解析: 服务商={parts[0]}, 金额={parts[1]}")
+                        else:
+                            print(f"   📊 解析: 服务商={parts[0]}, 金额={parts[1]}")
                 else:
                     print(f"   📊 解析: 订单号={order_id}")
                     
@@ -128,11 +134,11 @@ if __name__ == "__main__":
     print("\n📝 测试总结")
     print("=" * 60)
     print("改进后的订单ID提取逻辑支持以下格式：")
-    print("1. 服务商-金额-数量: 阳光出行-32.13-3")
+    print("1. 服务商-金额元-数量个行程: 阳光出行-32.13元-3个行程")
     print("2. 服务商-金额: T3-77.06")
     print("3. 订单号: 12345")
     print("4. 数字ID: 123456789")
-    print("5. 智能生成: 阳光出行-32.13-3, T3-77.06-1")
+    print("5. 智能生成: 阳光出行-32.13元-3个行程, T3-77.06-1")
     print()
-    print("💡 直接使用原始服务商名称，提高可读性")
+    print("💡 保持自然的表达格式，提高可读性")
     print("💡 避免生成像'T3'这样不完整的订单ID")

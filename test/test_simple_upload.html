@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>简单上传测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .upload-area { border: 2px dashed #ccc; padding: 40px; text-align: center; margin: 20px 0; }
+        .upload-area.dragover { border-color: #007bff; background: #f8f9fa; }
+        .result { margin: 20px 0; padding: 15px; background: #e9ecef; border-radius: 5px; }
+        .log { background: #f0f0f0; padding: 10px; margin: 5px 0; border-radius: 3px; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <h1>简单上传测试 - 检查页面刷新问题</h1>
+    
+    <div class="upload-area" id="uploadArea">
+        <h3>拖拽ZIP文件到此处测试</h3>
+        <p>这里只是测试拖拽事件，不会实际上传文件</p>
+    </div>
+    
+    <div class="result" id="result">
+        <h3>拖拽结果</h3>
+        <p>这里会显示拖拽操作的结果</p>
+    </div>
+    
+    <div class="result" id="logs">
+        <h3>操作日志</h3>
+        <div id="logContent"></div>
+    </div>
+
+    <script>
+        let logCount = 0;
+        let uploadCount = 0;
+        
+        function addLog(message) {
+            logCount++;
+            const timestamp = new Date().toLocaleTimeString();
+            const logDiv = document.createElement('div');
+            logDiv.className = 'log';
+            logDiv.innerHTML = `${logCount}. ${timestamp} - ${message}`;
+            document.getElementById('logContent').appendChild(logDiv);
+        }
+        
+        // 页面加载事件
+        addLog('页面加载完成');
+        
+        // 拖拽事件
+        const uploadArea = document.getElementById('uploadArea');
+        
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+        });
+        
+        ['dragenter', 'dragover'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, () => {
+                uploadArea.classList.add('dragover');
+                addLog('文件拖拽进入区域');
+            });
+        });
+        
+        ['dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, () => {
+                uploadArea.classList.remove('dragover');
+                if (eventName === 'drop') {
+                    addLog('文件拖拽释放');
+                }
+            });
+        });
+        
+        // 文件拖拽处理
+        uploadArea.addEventListener('drop', (e) => {
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                uploadCount++;
+                addLog(`检测到文件: ${files.length} 个文件 (第${uploadCount}次拖拽)`);
+                
+                // 显示文件信息
+                const result = document.getElementById('result');
+                result.innerHTML = `
+                    <h3>拖拽的文件信息 (第${uploadCount}次)</h3>
+                    <p>文件数量: ${files.length}</p>
+                    <ul>
+                        ${Array.from(files).map(file => 
+                            `<li>${file.name} (${file.size} bytes, ${file.type})</li>`
+                        ).join('')}
+                    </ul>
+                    <p><strong>重要:</strong> 如果页面刷新了，这些信息会消失！</p>
+                    <p>当前时间: ${new Date().toLocaleString()}</p>
+                `;
+                
+                // 检查是否有页面刷新
+                setTimeout(() => {
+                    if (document.getElementById('result').innerHTML.includes('拖拽的文件信息')) {
+                        addLog('✅ 页面没有刷新，结果正常显示');
+                    } else {
+                        addLog('❌ 页面可能刷新了，结果丢失');
+                    }
+                }, 1000);
+            }
+        });
+        
+        // 页面可见性变化检测
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                addLog('页面隐藏');
+            } else {
+                addLog('页面显示');
+            }
+        });
+        
+        // 页面卸载检测
+        window.addEventListener('beforeunload', () => {
+            addLog('页面即将卸载');
+        });
+        
+        // 添加初始日志
+        addLog('测试页面初始化完成');
+        addLog('请拖拽ZIP文件到上方区域进行测试');
+    </script>
+</body>
+</html>

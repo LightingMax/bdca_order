@@ -144,6 +144,19 @@ def extract_order_id(file_path):
             r'trip(\d+)',                           # trip001
         ]
         
+        # 但是，如果文件名包含"订单-"这种格式，我们优先尝试生成更好的格式
+        if '订单-' in filename:
+            logger.info(f"检测到'订单-'格式，尝试生成更好的订单ID")
+            # 尝试从文件名中提取金额和数量
+            amount_match = re.search(r'订单-(\d+\.\d+)-(\d+)', filename)
+            if amount_match:
+                amount, count = amount_match.groups()
+                # 生成更友好的格式：T3出行-77.06元-1个行程
+                # 这里可以根据金额和数量生成一个更有意义的ID
+                smart_id = f"T3出行-{amount}元-{count}个行程"
+                logger.info(f"生成智能订单ID: {smart_id}")
+                return smart_id
+        
         for pattern in order_patterns:
             match = re.search(pattern, filename)
             if match:
@@ -222,54 +235,44 @@ def extract_order_id(file_path):
         return random_id  # 生成随机ID作为后备
 
 
-def generate_smart_order_id(filename):
-    """生成基于服务商的智能订单ID"""
+def generate_smart_order_id_improved(filename):
+    """
+    生成智能订单ID - 修正版
+    1. 优先提取【】中的内容。
+    2. 修复'订单-'开头的格式。
+    3. 对于已符合标准格式但无特殊符号的文件，去除扩展名后返回。
+    """
     try:
-        # 直接使用原始服务商名称，不进行缩写映射
-        # 尝试提取服务商名称和金额信息
-        service_patterns = [
-            r'([^-]+)-(\d+\.\d+)元?-(\d+)个行程',  # 阳光出行-32.13元-3个行程
-            r'([^-]+)-(\d+\.\d+)-(\d+)',           # T3-77.06-1
-            r'([^-]+)-(\d+\.\d+)',                 # 服务商-金额
+        # 移除文件扩展名，方便处理
+        name_only = os.path.splitext(filename)[0]
+
+        # 核心逻辑：定义模式并按优先级排序
+        patterns = [
+            # 优先级 1: 提取【】内的完整内容
+            (r'【([^】]+)】', lambda m: m.group(1)),
+            
+            # 优先级 2: 修复 '订单-' 开头的格式
+            (r'^订单-(\d+\.\d+)-(\d+)$', lambda m: f"T3出行-{m.group(1)}元-{m.group(2)}个行程"),
+            
+            # 优先级 3: 匹配标准格式（为了防止它被下面的逻辑捕获）
+            (r'^[^-]+-\d+\.\d+元?-\d+个行程$', lambda m: m.group(0)),
+
+            # 优先级 4: 匹配简化的 '服务商-金额-数量' 格式
+            (r'^([^-]+)-(\d+\.\d+)-(\d+)$', lambda m: f"{m.group(1)}-{m.group(2)}元-{m.group(3)}个行程"),
         ]
         
-        for pattern in service_patterns:
-            match = re.search(pattern, filename)
+        for pattern, formatter in patterns:
+            # 我们在去除扩展名的文件名上进行匹配
+            match = re.search(pattern, name_only)
             if match:
-                if len(match.groups()) == 3:
-                    # 格式：服务商-金额-数量
-                    service, amount, count = match.groups()
-                    # 保持更自然的格式：服务商-金额元-数量个行程
-                    if '元' in filename and '个行程' in filename:
-                        return f"{service}-{amount}元-{count}个行程"
-                    else:
-                        return f"{service}-{amount}-{count}"
-                elif len(match.groups()) == 2:
-                    # 格式：服务商-金额
-                    service, amount = match.groups()
-                    # 保持更自然的格式：服务商-金额元
-                    if '元' in filename:
-                        return f"{service}-{amount}元"
-                    else:
-                        return f"{service}-{amount}"
+                return formatter(match)
         
-        # 如果没有找到标准格式，尝试提取其他信息
-        # 例如：T3-77.06-1 格式
-        t3_match = re.search(r'(T3|t3)-(\d+\.\d+)-(\d+)', filename)
-        if t3_match:
-            service, amount, count = t3_match.groups()
-            return f"T3-{amount}-{count}"
-        
-        # 处理 "订单-53.21-1" 这种格式
-        order_match = re.search(r'订单-(\d+\.\d+)-(\d+)', filename)
-        if order_match:
-            amount, count = order_match.groups()
-            return f"订单-{amount}-{count}"
-        
-        return None
+        # 如果以上所有特殊规则都未匹配，说明它可能是“其他格式”
+        # 直接返回去除扩展名后的文件名
+        return name_only
         
     except Exception as e:
-        logger.warning(f"生成智能订单ID失败: {e}")
+        logger.warning(f"生成智能订单ID失败: {filename}, 错误: {e}")
         return None
 
 def match_files_by_order(pdf_files, xml_files):
