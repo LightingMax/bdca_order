@@ -12,7 +12,7 @@ from app.services.file_service import (
 )
 from app.services.pdf_service import process_pdf_files
 from app.services.print_service import print_pdf
-from app.services.user_service import get_user_mac, save_user_data, get_all_user_stats
+from app.services.user_service import get_user_mac, save_user_data, get_all_user_stats, save_global_stats
 
 main_bp = Blueprint('main', __name__)
 
@@ -93,15 +93,45 @@ def upload_file():
                 if 'results' in existing_file:
                     # 将已有结果添加到总结果中
                     all_results.extend(existing_file['results'])
-                    reused_files.append({
-                        'filename': filename,
-                        'hash': file_hash,
-                        'original_upload_time': existing_file.get('upload_time', '未知'),
-                        'result_count': len(existing_file['results']),
-                        'print_status': existing_file.get('print_status', 'unknown'),  # 添加打印状态
-                        'last_print_time': existing_file.get('last_print_time', '未打印')
-                    })
-                    continue
+                    
+                    # 重新分析XML缺失情况，而不是直接重用之前的警告
+                    # 为每个ZIP文件创建单独的提取目录
+                    file_extract_dir = os.path.join(extract_dir, os.path.splitext(filename)[0])
+                    os.makedirs(file_extract_dir, exist_ok=True)
+                    
+                    # 重新解压并分析文件
+                    try:
+                        extract_zip(zip_path, file_extract_dir)
+                        
+                        # 重新分析PDF文件，获取最新的XML缺失警告
+                        _, current_xml_warnings = process_pdf_files(file_extract_dir)
+                        
+                        reused_files.append({
+                            'filename': filename,
+                            'hash': file_hash,
+                            'original_upload_time': existing_file.get('upload_time', '未知'),
+                            'result_count': len(existing_file['results']),
+                            'print_status': existing_file.get('print_status', 'unknown'),  # 添加打印状态
+                            'last_print_time': existing_file.get('last_print_time', '未打印'),
+                            'xml_missing_warnings': current_xml_warnings  # 使用最新的XML缺失警告
+                        })
+                        
+                        logger.info(f"文件 {filename} 重新分析完成，当前XML缺失警告数: {len(current_xml_warnings)}")
+                        continue
+                        
+                    except Exception as e:
+                        logger.error(f"重新分析文件 {filename} 时出错: {str(e)}")
+                        # 如果重新分析失败，使用之前的警告
+                        reused_files.append({
+                            'filename': filename,
+                            'hash': file_hash,
+                            'original_upload_time': existing_file.get('upload_time', '未知'),
+                            'result_count': len(existing_file['results']),
+                            'print_status': existing_file.get('print_status', 'unknown'),
+                            'last_print_time': existing_file.get('last_print_time', '未打印'),
+                            'xml_missing_warnings': existing_file.get('xml_missing_warnings', [])
+                        })
+                        continue
                 else:
                     logger.warning(f"文件 {filename} 之前的处理结果不完整，将重新处理")
             
@@ -114,7 +144,7 @@ def upload_file():
                 extract_zip(zip_path, file_extract_dir)
                 
                 # 处理PDF文件
-                results = process_pdf_files(file_extract_dir)
+                results, xml_missing_warnings = process_pdf_files(file_extract_dir)
                 
                 # 过滤结果，找出新的订单
                 file_new_results = []
@@ -141,7 +171,8 @@ def upload_file():
                     'filename': filename,
                     'hash': file_hash,
                     'result_count': len(results),
-                    'new_result_count': len(file_new_results)
+                    'new_result_count': len(file_new_results),
+                    'xml_missing_warnings': xml_missing_warnings  # 保存XML缺失警告
                 })
                 
                 logger.info(f"文件 {filename} 处理完成，订单总数: {len(results)}，新订单数: {len(file_new_results)}")
@@ -171,6 +202,21 @@ def upload_file():
         # 计算总金额（所有订单）
         total_amount = sum(result.get('amount', 0) for result in all_results)
         
+        # 🎉 彩蛋：更新全局统计数据（包括新处理和重用的订单）
+        total_itineraries = len(all_results)  # 所有订单数量
+        save_global_stats(total_itineraries, total_amount)
+        logger.info(f"🎉 全局统计已更新！累计行程单数: {total_itineraries}")
+        
+        # 收集所有XML缺失警告（包括新处理和重用的文件）
+        all_xml_warnings = []
+        for file_result in processed_files:
+            if 'xml_missing_warnings' in file_result:
+                all_xml_warnings.extend(file_result['xml_missing_warnings'])
+        
+        for file_result in reused_files:
+            if 'xml_missing_warnings' in file_result:
+                all_xml_warnings.extend(file_result['xml_missing_warnings'])
+        
         # 返回处理结果
         logger.info(f"文件处理完成，成功处理 {len(all_results)} 个订单，其中新处理 {len(new_results)} 个")
         return jsonify({
@@ -181,6 +227,7 @@ def upload_file():
             'reused_files': len(reused_files),
             'new_results_count': len(new_results),
             'total_amount': total_amount,
+            'xml_missing_warnings': all_xml_warnings,  # 添加XML缺失警告
             'file_details': {
                 'processed': processed_files,
                 'reused': reused_files
@@ -363,75 +410,60 @@ def print_raw_file():
         
         logger.info(f"找到文件: {file_path}")
         
-        # 调用FastAPI打印服务 (端口12346)
-        import requests
-        
-        # FastAPI打印服务的配置
-        PRINT_API_BASE_URL = "http://localhost:12346"
-        PRINT_API_TOKEN = "TOKEN_PRINT_API_KEY_9527"  # 从FastAPI服务获取的token
-        
+        # 直接调用linux_enhanced.py中的函数进行打印
         try:
-            # 准备打印请求 - 直接传递文件路径，不需要重新上传
-            print_url = f"{PRINT_API_BASE_URL}/print-file"
+            # 导入智能打印相关函数
+            import sys
             
-            # 发送打印请求到FastAPI服务，传递文件路径
-            response = requests.post(
-                print_url,
-                json={
-                    'file_path': file_path,
-                    'printer_name': 'HP-LaserJet-MFP-M437-M443',
-                    'copies': 1,
-                    'tray': 'auto'
-                },
-                headers={'Authorization': f'Bearer {PRINT_API_TOKEN}'},
-                timeout=30
-            )
+            # 添加项目根目录到Python路径
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            sys.path.insert(0, project_root)
             
-            if response.status_code == 200:
-                result = response.json()
-                if result.get('success'):
-                    logger.info(f"打印任务提交成功: {result.get('job_id', 'unknown')}")
-                    return jsonify({
-                        'success': True,
-                        'message': f'文件 {filename} 已发送至打印机',
-                        'printer': 'HP-LaserJet-MFP-M437-M443',
-                        'job_id': result.get('job_id', 'unknown')
-                    })
-                else:
-                    logger.error(f"FastAPI打印服务返回失败: {result.get('message', 'unknown error')}")
-                    return jsonify({
-                        'success': False,
-                        'message': f'打印服务失败: {result.get("message", "unknown error")}'
-                    }), 500
+            from print_api_service_linux_enhanced import smart_print_pdf
+            
+            logger.info(f"开始直接调用智能打印函数: {file_path}")
+            
+            # 设置打印选项
+            print_options = {
+                'copies': '1',
+                'tray': 'auto'
+            }
+            
+            # 直接调用智能打印函数
+            success = smart_print_pdf('HP-LaserJet-MFP-M437-M443', file_path, print_options)
+            
+            if success:
+                logger.info(f"打印任务提交成功")
+                return jsonify({
+                    'success': True,
+                    'message': f'文件 {filename} 已发送至打印机',
+                    'printer': 'HP-LaserJet-MFP-M437-M443',
+                    'job_id': 'direct_call'
+                })
             else:
-                logger.error(f"FastAPI打印服务HTTP错误: {response.status_code}")
+                logger.error(f"智能打印函数返回失败")
                 return jsonify({
                     'success': False,
-                    'message': f'打印服务HTTP错误: {response.status_code}'
+                    'message': '智能打印失败'
                 }), 500
                 
-        except requests.exceptions.ConnectionError:
-            logger.error("无法连接到FastAPI打印服务 (端口12346)")
+        except ImportError as e:
+            logger.error(f"导入智能打印函数失败: {e}")
             return jsonify({
                 'success': False,
-                'message': '无法连接到打印服务，请检查打印服务是否启动'
-            }), 503
-        except requests.exceptions.Timeout:
-            logger.error("打印服务请求超时")
-            return jsonify({
-                'success': False,
-                'message': '打印服务请求超时，请稍后重试'
-            }), 504
-        except Exception as e:
-            logger.error(f"调用FastAPI打印服务时出错: {str(e)}")
-            return jsonify({
-                'success': False,
-                'message': f'打印服务调用失败: {str(e)}'
+                'message': f'智能打印模块导入失败: {str(e)}'
             }), 500
-        
+        except Exception as e:
+            logger.error(f"智能打印失败: {str(e)}")
+            return jsonify({
+                'success': False,
+                'message': f'智能打印失败: {str(e)}'
+            }), 500
+            
     except Exception as e:
         logger.error(f"原始打印文件时出错: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'message': f'打印文件时出错: {str(e)}'}), 500
+
 
 @main_bp.route('/api/get-raw-file', methods=['POST'])
 def get_raw_file():
@@ -493,6 +525,63 @@ def get_raw_file():
     except Exception as e:
         logger.error(f"获取原始打印文件时出错: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'message': f'获取文件时出错: {str(e)}'}), 500
+
+@main_bp.route('/api/preview-smart-processed', methods=['POST'])
+def preview_smart_processed():
+    """预览智能处理后的PDF文件"""
+    logger = current_app.logger
+    logger.info("收到智能处理文件预览请求")
+    
+    try:
+        data = request.get_json()
+        if not data or 'order_data' not in data:
+            return jsonify({'success': False, 'message': '缺少订单数据参数'}), 400
+        
+        order_data = data['order_data']
+        logger.info(f"预览订单: {order_data}")
+        
+        # 智能处理阶段已经完成了拼接，这里直接预览生成的文件
+        try:
+            logger.info(f"开始智能拼接预览: {order_data}")
+            
+            # 根据订单数据找到对应的文件
+            # 智能处理阶段已经完成了拼接，这里直接预览生成的文件
+            output_file = order_data.get('output_file')
+            if not output_file:
+                return jsonify({
+                    'success': False,
+                    'message': '缺少输出文件信息'
+                }), 400
+            
+            # 构建完整的文件路径
+            output_path = os.path.join(current_app.config['OUTPUT_FOLDER'], output_file)
+            if not os.path.exists(output_path):
+                return jsonify({
+                    'success': False,
+                    'message': f'输出文件不存在: {output_path}'
+                }), 404
+            
+            # 直接返回输出文件的预览链接
+            # 这个文件已经是智能拼接后的结果，不需要重新拼接
+            preview_url = f"/output/{output_file}"
+            
+            logger.info(f"智能拼接预览成功: {preview_url}")
+            return jsonify({
+                'success': True,
+                'preview_url': preview_url,
+                'message': '智能拼接预览成功（文件已在处理阶段完成拼接）'
+            })
+            
+        except Exception as e:
+            logger.error(f"智能拼接预览失败: {str(e)}")
+            return jsonify({
+                'success': False,
+                'message': f'智能拼接预览失败: {str(e)}'
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"智能处理文件预览时出错: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'message': f'预览文件时出错: {str(e)}'}), 500
 
 @main_bp.route('/api/preview-file/<token>')
 def preview_file(token):
@@ -649,6 +738,21 @@ def get_statistics():
     except Exception as e:
         logger.error(f"获取统计数据时出错: {str(e)}", exc_info=True)
         return jsonify({'error': f'获取统计数据时出错: {str(e)}'}), 500
+
+@main_bp.route('/api/global-stats', methods=['GET'])
+def get_global_statistics():
+    """🎉 获取全局统计数据（彩蛋功能）"""
+    logger = current_app.logger
+    logger.info("收到获取全局统计数据请求")
+    
+    try:
+        from app.services.user_service import get_global_stats
+        global_stats = get_global_stats()
+        logger.info(f"🎉 返回全局统计数据，总行程单数: {global_stats.get('total_itineraries', 0)}")
+        return jsonify(global_stats)
+    except Exception as e:
+        logger.error(f"获取全局统计数据时出错: {str(e)}", exc_info=True)
+        return jsonify({'error': f'获取全局统计数据时出错: {str(e)}'}), 500
 
 @main_bp.route('/output/<filename>')
 def get_output_file(filename):

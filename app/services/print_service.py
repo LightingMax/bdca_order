@@ -38,7 +38,7 @@ def get_available_printers():
         return []
 
 def print_pdf(pdf_path, printer_name=None):
-    """打印PDF文件"""
+    """打印PDF文件 - 直接调用linux_enhanced.py中的函数"""
     logger = current_app.logger
     logger.info(f"开始打印PDF文件: {pdf_path}")
     
@@ -47,46 +47,43 @@ def print_pdf(pdf_path, printer_name=None):
         raise FileNotFoundError(f"找不到文件: {pdf_path}")
     
     try:
-        # 通过配置服务获取API配置
-        api_url = ConfigService.get_print_api_url('print')
-        headers = ConfigService.get_auth_headers()
-        
         # 如果未指定打印机，使用默认打印机
         if not printer_name:
             printer_name = Config.DEFAULT_PRINTER_NAME
             logger.debug(f"使用默认打印机: {printer_name}")
         
-        logger.debug(f"正在发送文件到打印API，打印机: {printer_name}")
+        logger.debug(f"开始直接调用智能打印函数，打印机: {printer_name}")
         
-        # 修改请求格式，确保参数正确传递，并指定使用pdftops方法进行PDF渲染
-        with open(pdf_path, 'rb') as pdf_file:
-            files = {'file': (os.path.basename(pdf_path), pdf_file, 'application/pdf')}
-            # 将printer_name和method作为查询参数
-            response = requests.post(
-                f"{api_url}?printer_name={printer_name}&method=pdftops",
-                headers=headers,
-                files=files
-            )
+        # 直接调用linux_enhanced.py中的函数进行打印
+        import sys
         
-        # 记录完整的请求和响应信息，便于调试
-        logger.debug(f"API请求URL: {api_url}?printer_name={printer_name}")
-        logger.debug(f"API响应状态码: {response.status_code}")
-        logger.debug(f"API响应内容: {response.text[:500]}")  # 只记录前500个字符，避免日志过大
+        # 添加项目根目录到Python路径
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        sys.path.insert(0, project_root)
         
-        if response.status_code == 200:
-            data = response.json()
-            if data["success"]:
-                logger.info(f"打印任务已提交，任务ID: {data.get('job_id')}")
-                return {"success": True, "printer": printer_name, "job_id": data.get('job_id')}
-            else:
-                error_msg = f"打印API返回错误: {data['message']}"
-                logger.error(error_msg)
-                raise Exception(error_msg)
+        from print_api_service_linux_enhanced import smart_print_pdf
+        
+        # 设置打印选项
+        print_options = {
+            'copies': '1',
+            'tray': 'auto'
+        }
+        
+        # 直接调用智能打印函数
+        success = smart_print_pdf(printer_name, pdf_path, print_options)
+        
+        if success:
+            logger.info(f"打印任务已提交")
+            return {"success": True, "printer": printer_name, "job_id": "direct_call"}
         else:
-            error_msg = f"打印API请求失败，状态码: {response.status_code}, 响应: {response.text[:200]}"
+            error_msg = "智能打印函数返回失败"
             logger.error(error_msg)
             raise Exception(error_msg)
     
+    except ImportError as e:
+        error_msg = f"导入智能打印函数失败: {e}"
+        logger.error(error_msg)
+        return {"success": False, "message": error_msg}
     except Exception as e:
         logger.error(f"打印PDF出错: {str(e)}", exc_info=True)
         return {"success": False, "message": str(e)}

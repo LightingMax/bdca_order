@@ -130,10 +130,98 @@
           "order_ids": [
             "及时用车-53.21元-2个行程"
           ]
+        },
+        {
+          "timestamp": "2025-09-03 15:05:32",
+          "file_count": 1,
+          "total_amount": 53.21,
+          "order_ids": [
+            "及时用车-53.21元-2个行程"
+          ]
+        },
+        {
+          "timestamp": "2025-09-03 16:16:16",
+          "file_count": 1,
+          "total_amount": 53.21,
+          "order_ids": [
+            "及时用车-53.21元-2个行程"
+          ]
+        },
+        {
+          "timestamp": "2025-09-03 16:37:22",
+          "file_count": 1,
+          "total_amount": 53.21,
+          "order_ids": [
+            "及时用车-53.21元-2个行程"
+          ]
+        },
+        {
+          "timestamp": "2025-09-03 17:03:57",
+          "file_count": 1,
+          "total_amount": 53.21,
+          "order_ids": [
+            "及时用车-53.21元-2个行程"
+          ]
+        },
+        {
+          "timestamp": "2025-09-03 17:12:35",
+          "file_count": 1,
+          "total_amount": 53.21,
+          "order_ids": [
+            "及时用车-53.21元-2个行程"
+          ]
+        },
+        {
+          "timestamp": "2025-09-03 21:31:23",
+          "file_count": 1,
+          "total_amount": 53.21,
+          "order_ids": [
+            "及时用车-53.21元-2个行程"
+          ]
+        },
+        {
+          "timestamp": "2025-09-03 21:33:14",
+          "file_count": 1,
+          "total_amount": 0,
+          "order_ids": [
+            "火箭出行-1079.92元-28个行程"
+          ]
+        },
+        {
+          "timestamp": "2025-09-03 21:40:47",
+          "file_count": 1,
+          "total_amount": 53.21,
+          "order_ids": [
+            "及时用车-53.21元-2个行程"
+          ]
+        },
+        {
+          "timestamp": "2025-09-03 21:41:25",
+          "file_count": 1,
+          "total_amount": 0,
+          "order_ids": [
+            "火箭出行-1079.92元-28个行程"
+          ]
+        },
+        {
+          "timestamp": "2025-09-03 22:04:49",
+          "file_count": 1,
+          "total_amount": 0,
+          "order_ids": [
+            "火箭出行-1079.92元-28个行程"
+          ]
+        },
+        {
+          "timestamp": "2025-09-03 22:20:11",
+          "file_count": 1,
+          "total_amount": 53.21,
+          "order_ids": [
+            "及时用车-53.21元-2个行程"
+          ]
         }
       ],
-      "total_amount": 53.21,
-      "total_prints": 3
+      "total_amount": 478.88999999999993,
+      "total_prints": 14
     }
   }
 }

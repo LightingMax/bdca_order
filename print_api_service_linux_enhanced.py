@@ -75,13 +75,25 @@ def identify_pdf_type(filename: str) -> str:
     """识别PDF文件类型（行程单或发票）"""
     filename_lower = filename.lower()
     
-    # 通过文件名判断
-    if any(keyword in filename_lower for keyword in ['发票', 'invoice', 'receipt', 'bill']):
-        return 'invoice'
-    elif any(keyword in filename_lower for keyword in ['行程', 'itinerary', 'trip', '订单']):
+    # 优先检查更具体的标识
+    if '行程单' in filename_lower:
         return 'itinerary'
-    else:
-        return 'unknown'
+    elif '发票' in filename_lower:
+        return 'invoice'
+    
+    # 然后检查其他关键词
+    if any(keyword in filename_lower for keyword in ['invoice', 'receipt', 'bill']):
+        return 'invoice'
+    elif any(keyword in filename_lower for keyword in ['itinerary', 'trip', '订单']):
+        return 'itinerary'
+    
+    # 最后检查通用关键词（但优先级较低）
+    if '行程' in filename_lower and '发票' not in filename_lower:
+        return 'itinerary'
+    elif '发票' in filename_lower and '行程' not in filename_lower:
+        return 'invoice'
+    
+    return 'unknown'
 
 
 def create_combined_first_page(itinerary_path: str, invoice_path: str, output_path: str) -> bool:
@@ -270,6 +282,9 @@ def create_smart_combined_first_page(itinerary_path: str, invoice_path: str, out
         return False
 
 
+# 单页智能拼接函数已移至 pdf_service.py
+
+
 def find_corresponding_invoice(itinerary_path: str) -> Optional[str]:
     """查找对应的发票文件 - 增强版"""
     try:
@@ -309,6 +324,13 @@ def find_corresponding_invoice(itinerary_path: str) -> Optional[str]:
             "app/static/outputs",                         # Flask输出目录
             "temp_files",                                 # 其他临时目录
         ]
+        
+        # 方法2.5：添加Flask ZIP解压目录到搜索路径
+        # Flask上传ZIP后解压到 temp/{session_id}/extracted/ 目录
+        flask_temp_dir = "temp"  # Flask的临时目录
+        if os.path.exists(flask_temp_dir):
+            search_dirs.append(flask_temp_dir)
+            logger.info(f"🔍 添加Flask临时目录到搜索路径: {flask_temp_dir}")
         
         for search_dir in search_dirs:
             if not os.path.exists(search_dir):
@@ -371,7 +393,7 @@ def find_corresponding_invoice(itinerary_path: str) -> Optional[str]:
 
 
 def smart_print_pdf(printer_name: str, file_path: str, print_options: dict) -> bool:
-    """智能PDF打印 - 处理多页PDF的特殊情况，支持多页行程单智能拼接"""
+    """智能PDF打印 - 简化版本，主要调用pdf_service.py的函数进行文件处理"""
     try:
         # 获取PDF页数
         page_count = get_pdf_page_count(file_path)
@@ -380,62 +402,76 @@ def smart_print_pdf(printer_name: str, file_path: str, print_options: dict) -> b
         
         logger.info(f"智能打印PDF: {filename}, 页数: {page_count}, 类型: {pdf_type}")
         
-        # 如果页数=1，直接打印
-        if page_count == 1:
-            logger.info(f"PDF页数=1，直接打印")
-            return print_with_cups(printer_name, file_path, print_options)
-        
-        # 如果页数>=2且是行程单，进行智能处理
-        if page_count >= 2 and pdf_type == 'itinerary':
-            logger.info(f"检测到多页行程单（{page_count}页），开始智能拼接处理")
-            
-            # 查找对应的发票文件
+        # 如果是行程单，检查是否需要智能拼接
+        if pdf_type == 'itinerary':
+            logger.info(f"检测到行程单，页数: {page_count}")
             invoice_path = find_corresponding_invoice(file_path)
+            
             if invoice_path and os.path.exists(invoice_path):
                 logger.info(f"找到对应发票: {os.path.basename(invoice_path)}")
                 
-                # 创建智能拼接的第一页（发票在上 + 行程单第一页内容）
-                combined_first_page = os.path.join(TEMP_DIR, f"smart_combined_{uuid.uuid4().hex[:8]}.pdf")
-                if create_smart_combined_first_page(file_path, invoice_path, combined_first_page):
-                    logger.info("✅ 成功创建智能拼接第一页（发票+行程单第一页内容）")
+                # 调用pdf_service.py的函数进行智能拼接
+                try:
+                    import sys
+                    import os
                     
-                    # 打印智能拼接的第一页
-                    logger.info("🖨️ 打印智能拼接第一页（发票+行程单第一页内容）")
-                    first_page_success = print_with_cups(printer_name, combined_first_page, print_options)
+                    # 添加项目根目录到Python路径
+                    project_root = os.path.dirname(os.path.abspath(__file__))
+                    sys.path.insert(0, project_root)
                     
-                    if first_page_success:
-                        # 打印剩余的行程单页面（从第2页开始）
-                        remaining_pages = os.path.join(TEMP_DIR, f"remaining_itinerary_{uuid.uuid4().hex[:8]}.pdf")
-                        try:
-                            # 使用pdftk提取第2页到最后一页
-                            subprocess.run(['pdftk', file_path, 'cat', '2-end', 'output', remaining_pages], check=True)
-                            logger.info(f"🖨️ 打印行程单剩余页面（第2页到第{page_count}页）")
-                            remaining_success = print_with_cups(printer_name, remaining_pages, print_options)
-                            
-                            # 清理临时文件
-                            os.remove(combined_first_page)
-                            os.remove(remaining_pages)
-                            
-                            if remaining_success:
-                                logger.info("✅ 多页行程单智能打印完成：第一页（发票+行程单）+ 剩余页面")
-                                return True
+                    from app.services.pdf_service import create_smart_combined_pdf
+                    
+                    # 创建智能拼接的PDF
+                    combined_page = os.path.join(TEMP_DIR, f"smart_combined_{uuid.uuid4().hex[:8]}.pdf")
+                    if create_smart_combined_pdf(file_path, invoice_path, combined_page, page_count):
+                        logger.info("✅ 成功创建智能拼接页面")
+                        
+                        # 打印智能拼接的页面
+                        success = print_with_cups(printer_name, combined_page, print_options)
+                        
+                        # 清理临时文件
+                        os.remove(combined_page)
+                        
+                        if success:
+                            # 如果是多页行程单，还需要打印剩余页面
+                            if page_count > 1:
+                                logger.info(f"🖨️ 打印行程单剩余页面（第2页到第{page_count}页）")
+                                remaining_pages = os.path.join(TEMP_DIR, f"remaining_itinerary_{uuid.uuid4().hex[:8]}.pdf")
+                                try:
+                                    # 使用pdftk提取第2页到最后一页
+                                    subprocess.run(['pdftk', file_path, 'cat', '2-end', 'output', remaining_pages], check=True)
+                                    remaining_success = print_with_cups(printer_name, remaining_pages, print_options)
+                                    
+                                    # 清理临时文件
+                                    os.remove(remaining_pages)
+                                    
+                                    if remaining_success:
+                                        logger.info("✅ 多页行程单智能打印完成：第一页（发票+行程单）+ 剩余页面")
+                                        return True
+                                    else:
+                                        logger.warning("⚠️ 第一页打印成功，但剩余页面打印失败")
+                                        return False
+                                        
+                                except Exception as e:
+                                    logger.error(f"❌ 处理行程单剩余页面失败: {e}")
+                                    logger.info("⚠️ 只打印了智能拼接的第一页")
+                                    return success
                             else:
-                                logger.warning("⚠️ 第一页打印成功，但剩余页面打印失败")
-                                return False
-                                
-                        except Exception as e:
-                            logger.error(f"❌ 处理行程单剩余页面失败: {e}")
-                            os.remove(combined_first_page)
-                            logger.info("⚠️ 只打印了智能拼接的第一页")
-                            return first_page_success
+                                logger.info("✅ 单页行程单智能打印完成")
+                                return success
+                        else:
+                            logger.error("❌ 智能拼接页面打印失败")
+                            return False
                     else:
-                        logger.error("❌ 智能拼接第一页打印失败")
-                        os.remove(combined_first_page)
-                        return False
-                else:
-                    logger.warning("⚠️ 创建智能拼接第一页失败，回退到直接打印")
+                        logger.warning("⚠️ 创建智能拼接页面失败，回退到直接打印")
+                except ImportError as e:
+                    logger.error(f"❌ 导入pdf_service失败: {e}")
+                    logger.info("回退到直接打印")
+                except Exception as e:
+                    logger.error(f"❌ 智能拼接失败: {e}")
+                    logger.info("回退到直接打印")
             else:
-                logger.info("ℹ️ 未找到对应发票，直接打印多页行程单")
+                logger.info("ℹ️ 未找到对应发票，直接打印行程单")
         
         # 默认情况：直接打印
         logger.info("🖨️ 使用默认打印方式")
@@ -1060,6 +1096,44 @@ async def get_printer_status(printer_name: str, token: str = Depends(verify_toke
             "message": f"获取打印机状态失败: {str(e)}"
         }
 
+
+@app.post("/preview-smart-processed")
+async def preview_smart_processed(
+    request: dict,
+    token: str = Depends(verify_token)
+):
+    """预览智能处理后的PDF文件"""
+    try:
+        order_data = request.get('order_data', {})
+        action = request.get('action', 'preview')
+        
+        logger.info(f"收到智能拼接预览请求: {order_data}")
+        
+        if action != 'preview':
+            return {
+                "success": False,
+                "message": "不支持的操作类型"
+            }
+        
+        # 这里需要实现智能拼接预览逻辑
+        # 由于这是一个预览请求，我们需要：
+        # 1. 根据订单数据找到对应的文件
+        # 2. 进行智能拼接
+        # 3. 生成预览PDF
+        # 4. 返回预览链接
+        
+        # TODO: 实现真正的智能拼接预览功能
+        return {
+            "success": False,
+            "message": "智能拼接预览功能开发中，请使用打印功能查看最终效果"
+        }
+        
+    except Exception as e:
+        logger.error(f"智能拼接预览失败: {e}")
+        return {
+            "success": False,
+            "message": f"智能拼接预览失败: {str(e)}"
+        }
 
 @app.get("/jobs")
 async def get_jobs(token: str = Depends(verify_token)):

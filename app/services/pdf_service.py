@@ -332,11 +332,29 @@ def match_files_by_order(pdf_files, xml_files):
             orders[order_id]['pdfs'][pdf_type] = pdf_path
             logger.info(f"为订单 {order_id} 添加 {pdf_type} 类型的PDF: {pdf_path}")
     
-    logger.info(f"文件匹配完成，共找到 {len(orders)} 个订单")
-    return orders
+    # 检查所有订单的XML状态
+    xml_missing_warnings = []
+    for order_id, order_data in orders.items():
+        if order_data['xml'] is None:
+            xml_missing_warnings.append({
+                'order_id': order_id,
+                'reason': 'XML文件缺失',
+                'impact': '金额统计可能不准确'
+            })
+            logger.warning(f"⚠️ 订单 {order_id} 缺少XML文件，金额统计可能不准确")
+        elif order_data['amount'] == 0:
+            xml_missing_warnings.append({
+                'order_id': order_id,
+                'reason': 'XML中未找到金额信息',
+                'impact': '金额统计为0，可能不准确'
+            })
+            logger.warning(f"⚠️ 订单 {order_id} XML中未找到金额信息，金额统计为0，可能不准确")
+    
+    logger.info(f"文件匹配完成，共找到 {len(orders)} 个订单，XML缺失警告: {len(xml_missing_warnings)} 个")
+    return orders, xml_missing_warnings
 
 def merge_pdfs(itinerary_path, invoice_path, output_path):
-    """合并行程单和发票PDF，并调整为一页显示"""
+    """合并行程单和发票PDF，并调整为一页显示（智能处理阶段使用）"""
     logger = current_app.logger
     logger.info(f"开始合并PDF，行程单: {itinerary_path}, 发票: {invoice_path}")
     
@@ -425,6 +443,7 @@ def merge_pdfs(itinerary_path, invoice_path, output_path):
             images = convert_from_path(invoice_path,dpi=300)
             invoice_image = images[0]
             
+            # 调整发票尺寸
             ratio = 0.9*USABLE_WIDTH / invoice_image.width
             new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.4))
             invoice_image = invoice_image.resize(new_size)
@@ -448,6 +467,385 @@ def merge_pdfs(itinerary_path, invoice_path, output_path):
         
         return output_path
 
+
+def create_smart_combined_pdf(itinerary_path: str, invoice_path: str, output_path: str, page_count: int = 1) -> bool:
+    """
+    创建智能拼接PDF - 统一处理1页和多页行程单的拼接逻辑
+    
+    Args:
+        itinerary_path: 行程单文件路径
+        invoice_path: 发票文件路径  
+        output_path: 输出文件路径
+        page_count: 行程单页数，1表示单页，>1表示多页
+    
+    Returns:
+        bool: 拼接是否成功
+    """
+    logger = current_app.logger
+    logger.info(f"开始智能拼接PDF，行程单页数: {page_count}")
+    
+    try:
+        if page_count == 1:
+            # 单页行程单：发票在上，行程单在下，压缩到一页
+            logger.info("🔄 处理单页行程单：发票在上 + 行程单在下，压缩到一页")
+            return create_smart_combined_single_page(itinerary_path, invoice_path, output_path)
+        else:
+            # 多页行程单：生成完整的拼接文件
+            # 第一页：发票+行程单第一页内容
+            # 后续页面：行程单的剩余页面
+            logger.info("🔄 处理多页行程单：生成完整的拼接文件（发票+行程单所有页面）")
+            return create_smart_combined_multi_page(itinerary_path, invoice_path, output_path, page_count)
+            
+    except Exception as e:
+        logger.error(f"❌ 智能拼接PDF失败: {e}")
+        return False
+
+
+def create_smart_combined_single_page(itinerary_path: str, invoice_path: str, output_path: str) -> bool:
+    """
+    创建单页智能拼接：发票在上（占40%高度），行程单在下（占60%高度），压缩到一页
+    
+    采用图片拼接方式，更加稳定可靠，避免PDF工具拼接的黑色区域问题
+    """
+    logger = current_app.logger
+    logger.info(f"🚀 开始创建单页智能拼接：发票在上（40%）+ 行程单在下（60%），压缩到一页")
+    
+    try:
+        # 导入必要的库
+        try:
+            from pdf2image import convert_from_path
+            from PIL import Image
+        except ImportError as e:
+            logger.error(f"❌ 缺少必要的库: {e}")
+            logger.info("请安装: pip install pdf2image Pillow")
+            return False
+        
+        # 从文件名中匹配发票/行程单中包含的行程数量
+        # 实例文件名：【阳光出行-32.13元-3个行程】高德打车电子发票，匹配其中的3个行程
+        itinerary_name = os.path.basename(itinerary_path)
+        invoice_name = os.path.basename(invoice_path)
+        itinerary_match = re.search(r'-(\d+)个行程', itinerary_name)
+        invoice_match = re.search(r'-(\d+)个行程', invoice_name)
+        itinerary_count = int(itinerary_match.group(1)) if itinerary_match else 1
+        invoice_count = int(invoice_match.group(1)) if invoice_match else 1
+        
+        # 验证行程数量一致性
+        if itinerary_count != invoice_count:
+            logger.warning(f"⚠️ 行程单和发票的行程数量不一致：行程单{itinerary_count}个，发票{invoice_count}个")
+            logger.info("使用行程单的数量作为标准")
+            itinerary_count = max(itinerary_count, invoice_count)
+        
+        logger.info(f"📊 检测到行程数量: {itinerary_count}个")
+        
+        # A4尺寸（像素，300 DPI）
+        A4_WIDTH, A4_HEIGHT = 2480, 3508
+        # 定义页边距（像素）
+        MARGIN = 100
+        # 考虑页边距后的实际可用宽度和高度
+        USABLE_WIDTH = A4_WIDTH - 2 * MARGIN
+        USABLE_HEIGHT = A4_HEIGHT - 2 * MARGIN
+        
+        # 计算每个行程的高度比例
+        per_count_height = USABLE_HEIGHT / 21
+        
+        try:
+            # 转换行程单为图片
+            logger.info("📄 转换行程单为图片")
+            itinerary_images = convert_from_path(itinerary_path, dpi=300)
+            itinerary_image = itinerary_images[0]
+            w, h = itinerary_image.size
+            
+            # 计算需要裁剪的区域，去除部分顶部无关内容
+            # 根据行程数量动态调整裁剪区域
+            crop_top = int(4 * per_count_height)
+            crop_bottom = int(h // 2 + per_count_height * (itinerary_count - 1))
+            top_half = itinerary_image.crop((0, crop_top, w, crop_bottom))
+            
+            logger.info(f"✂️ 行程单裁剪区域: 顶部{crop_top}px, 底部{crop_bottom}px")
+            
+            # 调整行程单尺寸（占下半部分，约60%高度）
+            ratio = USABLE_WIDTH / top_half.width
+            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.6))
+            top_half = top_half.resize(new_size, Image.Resampling.LANCZOS)
+            
+            # 转换发票为图片
+            logger.info("🧾 转换发票为图片")
+            invoice_images = convert_from_path(invoice_path, dpi=300)
+            invoice_image = invoice_images[0]
+            
+            # 调整发票尺寸（占上半部分，约40%高度）
+            ratio = 0.9 * USABLE_WIDTH / invoice_image.width
+            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.4))
+            invoice_image = invoice_image.resize(new_size, Image.Resampling.LANCZOS)
+            
+            # 创建新的空白图片
+            combined = Image.new("RGB", (A4_WIDTH, A4_HEIGHT), (255, 255, 255))
+            
+            # 粘贴发票到上半部分（考虑页边距）
+            combined.paste(invoice_image, (MARGIN, MARGIN))
+            
+            # 粘贴行程单到下半部分（考虑页边距）
+            combined.paste(top_half, (MARGIN, MARGIN + invoice_image.height))
+            
+            # 最后再缩放到A4纸
+            combined = combined.resize((A4_WIDTH, A4_HEIGHT), Image.Resampling.LANCZOS)
+            
+            # 保存为PDF
+            logger.info("💾 保存拼接后的图片为PDF")
+            combined.save(output_path, "PDF", resolution=300.0)
+            
+            # 验证输出文件
+            if os.path.exists(output_path):
+                file_size = os.path.getsize(output_path)
+                logger.info(f"📊 单页拼接文件大小: {file_size} bytes")
+                
+                # 验证文件质量
+                if file_size < 1000:
+                    logger.error("❌ 拼接文件过小，可能拼接失败")
+                    return False
+                
+                logger.info("✅ 单页智能拼接成功（发票+行程单图片拼接到一页）")
+                logger.info(f"   文件路径: {output_path}")
+                logger.info(f"   文件大小: {file_size} bytes")
+                return True
+            else:
+                logger.error("❌ 单页拼接输出文件未生成")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ 图片拼接过程中出错: {str(e)}")
+            raise
+            
+    except Exception as e:
+        logger.error(f"❌ 创建单页智能拼接失败: {e}")
+        return False
+
+
+def create_smart_combined_multi_page(itinerary_path: str, invoice_path: str, output_path: str, page_count: int) -> bool:
+    """
+    创建多页智能拼接：生成完整的拼接文件
+    
+    第一页：发票+行程单第一页内容
+    后续页面：行程单的剩余页面（第2页、第3页...）
+    
+    这样预览时可以看到完整内容，打印时也能正确处理
+    """
+    logger = current_app.logger
+    try:
+        logger.info(f"🚀 开始创建多页智能拼接，行程单总页数: {page_count}")
+        
+        # 检查是否有必要的工具
+        import subprocess
+        import shutil
+        if not shutil.which('pdftk'):
+            logger.warning("未找到pdftk工具，无法合并PDF")
+            return False
+        
+        # 创建临时文件
+        import tempfile
+        temp_dir = tempfile.gettempdir()
+        temp_invoice_first = os.path.join(temp_dir, f"temp_invoice_first_{uuid.uuid4().hex[:8]}.pdf")
+        temp_itinerary_first = os.path.join(temp_dir, f"temp_itinerary_first_{uuid.uuid4().hex[:8]}.pdf")
+        temp_remaining_pages = os.path.join(temp_dir, f"temp_remaining_{uuid.uuid4().hex[:8]}.pdf")
+        
+        try:
+            # 1. 提取发票第一页
+            logger.info("🧾 提取发票第一页")
+            subprocess.run(['pdftk', invoice_path, 'cat', '1', 'output', temp_invoice_first], check=True)
+            
+            # 2. 提取行程单第一页
+            logger.info("📄 提取行程单第一页")
+            subprocess.run(['pdftk', itinerary_path, 'cat', '1', 'output', temp_itinerary_first], check=True)
+            
+            # 3. 提取行程单剩余页面（第2页到最后一页）
+            if page_count > 1:
+                logger.info(f"📄 提取行程单剩余页面（第2页到第{page_count}页）")
+                subprocess.run(['pdftk', itinerary_path, 'cat', '2-end', 'output', temp_remaining_pages], check=True)
+            
+            # 4. 拼接第一页：发票+行程单第一页内容
+            logger.info("🔗 拼接第一页：发票在上 + 行程单第一页内容")
+            first_page_combined = os.path.join(temp_dir, f"first_page_combined_{uuid.uuid4().hex[:8]}.pdf")
+            
+            subprocess.run([
+                'pdftk', temp_invoice_first, temp_itinerary_first, 
+                'cat', 'output', first_page_combined
+            ], check=True)
+            
+            # 5. 合并所有页面
+            logger.info("🔗 合并所有页面：第一页（发票+行程单第一页）+ 剩余页面")
+            
+            if page_count > 1:
+                # 多页：第一页拼接 + 剩余页面
+                subprocess.run([
+                    'pdftk', first_page_combined, temp_remaining_pages, 
+                    'cat', 'output', output_path
+                ], check=True)
+            else:
+                # 单页：直接使用第一页拼接结果
+                import shutil
+                shutil.copy2(first_page_combined, output_path)
+            
+            # 验证输出文件
+            if os.path.exists(output_path):
+                file_size = os.path.getsize(output_path)
+                logger.info(f"📊 多页拼接文件大小: {file_size} bytes")
+                
+                # 验证文件质量
+                if file_size < 1000:
+                    logger.warning("⚠️ 拼接文件过小，可能拼接失败")
+                    return False
+                
+                # 验证PDF页数
+                result = subprocess.run(['pdftk', output_path, 'dump_data'], 
+                                      capture_output=True, text=True, timeout=10)
+                if result.returncode == 0:
+                    output_page_count = 0
+                    for line in result.stdout.split('\n'):
+                        if line.startswith('NumberOfPages:'):
+                            output_page_count = int(line.split(':')[1].strip())
+                            break
+                    
+                    expected_pages = 1 + page_count  # 1页（发票+行程单第一页）+ 行程单剩余页面
+                    if output_page_count == expected_pages:
+                        logger.info(f"✅ 多页拼接成功：{output_page_count}页")
+                        logger.info(f"   文件路径: {output_path}")
+                        logger.info(f"   文件大小: {file_size} bytes")
+                        logger.info(f"   预期页数: {expected_pages}页")
+                        return True
+                    else:
+                        logger.warning(f"⚠️ 页数不匹配：实际{output_page_count}页，预期{expected_pages}页")
+                        return False
+                        
+                else:
+                    logger.warning("⚠️ 无法验证PDF页数")
+                    return False
+                    
+            else:
+                logger.error("❌ 输出文件创建失败")
+                return False
+                
+        finally:
+            # 清理临时文件
+            temp_files = [temp_invoice_first, temp_itinerary_first, temp_remaining_pages, first_page_combined]
+            for temp_file in temp_files:
+                if os.path.exists(temp_file):
+                    try:
+                        os.remove(temp_file)
+                    except Exception as e:
+                        logger.warning(f"清理临时文件失败: {temp_file}, 错误: {e}")
+        
+    except Exception as e:
+        logger.error(f"❌ 创建多页智能拼接失败: {e}")
+        return False
+
+
+def create_smart_combined_first_page(itinerary_path: str, invoice_path: str, output_path: str) -> bool:
+    """
+    创建智能拼接第一页（发票在上 + 行程单第一页内容）
+    
+    这是多页行程单的第一页，应该包含：
+    1. 发票内容（上半部分）
+    2. 行程单第一页内容（下半部分）
+    
+    后续的行程单页面（第2页、第3页...）将单独打印
+    """
+    logger = current_app.logger
+    try:
+        logger.info(f"🚀 开始创建智能拼接第一页（发票在上 + 行程单第一页内容）")
+        
+        # 检查是否有必要的工具
+        import subprocess
+        import shutil
+        if not shutil.which('pdftk'):
+            logger.warning("未找到pdftk工具，无法合并PDF")
+            return False
+        
+        # 创建临时文件
+        import tempfile
+        temp_dir = tempfile.gettempdir()
+        temp_itinerary_first = os.path.join(temp_dir, f"temp_itinerary_first_{uuid.uuid4().hex[:8]}.pdf")
+        temp_invoice_first = os.path.join(temp_dir, f"temp_invoice_first_{uuid.uuid4().hex[:8]}.pdf")
+        
+        try:
+            # 提取行程单第一页
+            logger.info("📄 提取行程单第一页")
+            subprocess.run(['pdftk', itinerary_path, 'cat', '1', 'output', temp_itinerary_first], check=True)
+            
+            # 提取发票第一页
+            logger.info("🧾 提取发票第一页")
+            subprocess.run(['pdftk', invoice_path, 'cat', '1', 'output', temp_invoice_first], check=True)
+            
+            # 智能拼接：发票在上，行程单第一页内容在下
+            # 使用pdftk的cat功能进行垂直拼接（已验证有效的方法）
+            logger.info("🔗 开始智能拼接：发票在上 + 行程单第一页内容")
+            
+            try:
+                logger.info("🔄 使用pdftk cat功能进行垂直拼接")
+                
+                # 直接使用pdftk cat拼接，无需复杂的尺寸检查
+                # 测试显示：即使页面尺寸不同，pdftk cat也能正确处理
+                subprocess.run([
+                    'pdftk', temp_invoice_first, temp_itinerary_first, 
+                    'cat', 'output', output_path
+                ], check=True)
+                
+                logger.info("✅ 使用pdftk cat功能成功拼接")
+                
+                # 验证拼接结果
+                if os.path.exists(output_path):
+                    file_size = os.path.getsize(output_path)
+                    logger.info(f"📊 拼接文件大小: {file_size} bytes")
+                    
+                    # 验证文件质量
+                    if file_size < 1000:
+                        logger.warning("⚠️ 拼接文件过小，可能拼接失败")
+                        return False
+                    
+                    # 验证PDF有效性
+                    result = subprocess.run(['pdftk', output_path, 'dump_data'], 
+                                          capture_output=True, text=True, timeout=10)
+                    if result.returncode == 0:
+                        page_count = 0
+                        for line in result.stdout.split('\n'):
+                            if line.startswith('NumberOfPages:'):
+                                page_count = int(line.split(':')[1].strip())
+                                break
+                        
+                        if page_count >= 2:  # 拼接后应该有2页（发票+行程单第1页）
+                            logger.info(f"✅ 拼接验证成功：{page_count}页")
+                            logger.info(f"   文件路径: {output_path}")
+                            logger.info(f"   文件大小: {file_size} bytes")
+                            return True
+                        else:
+                            logger.warning(f"⚠️ 拼接页数异常：{page_count}页")
+                            return False
+                        
+                    else:
+                        logger.warning("⚠️ 无法验证PDF有效性")
+                        return False
+                        
+                else:
+                    logger.error("❌ 输出文件创建失败")
+                    return False
+                    
+            except subprocess.CalledProcessError as e:
+                logger.error(f"❌ pdftk cat功能失败: {e}")
+                return False
+                
+        finally:
+            # 清理临时文件
+            try:
+                if os.path.exists(temp_itinerary_first):
+                    os.remove(temp_itinerary_first)
+                if os.path.exists(temp_invoice_first):
+                    os.remove(temp_invoice_first)
+            except Exception as e:
+                logger.warning(f"清理临时文件时出错: {e}")
+        
+    except Exception as e:
+        logger.error(f"❌ 创建智能拼接第一页失败: {e}")
+        return False
+
 def process_pdf_files(extract_dir):
     """处理解压后的PDF和XML文件"""
     logger = current_app.logger
@@ -458,7 +856,7 @@ def process_pdf_files(extract_dir):
     grouped_files = group_files_by_type(file_paths)
     
     # 按订单匹配文件
-    orders = match_files_by_order(grouped_files['pdf'], grouped_files['xml'])
+    orders, xml_missing_warnings = match_files_by_order(grouped_files['pdf'], grouped_files['xml'])
     
     results = []
     
@@ -482,21 +880,46 @@ def process_pdf_files(extract_dir):
         
         logger.info(f"处理订单 {order_id} (序号 {order_count})，输出文件: {output_filename}")
         
-        # 合并PDF
+        # 智能拼接PDF（根据行程单页数决定拼接方式）
         try:
-            merge_pdfs(itinerary_path, invoice_path, output_path)
+            # 获取行程单页数
+            page_count = 1  # 默认1页
+            try:
+                from PyPDF2 import PdfReader
+                with open(itinerary_path, 'rb') as f:
+                    reader = PdfReader(f)
+                    page_count = len(reader.pages)
+                    logger.info(f"行程单页数: {page_count}")
+            except Exception as e:
+                logger.warning(f"无法获取行程单页数，使用默认值1: {e}")
             
-            # 添加处理结果
-            results.append({
-                'order_id': order_id,
-                'amount': order_data['amount'],
-                'output_file': output_filename,
-                'has_itinerary': itinerary_path is not None,
-                'has_invoice': invoice_path is not None
-            })
-            logger.info(f"订单 {order_id} 处理成功")
+            # 使用智能拼接函数
+            if create_smart_combined_pdf(itinerary_path, invoice_path, output_path, page_count):
+                logger.info(f"智能拼接成功，输出文件: {output_path}")
+                
+                # 添加处理结果
+                results.append({
+                    'order_id': order_id,
+                    'amount': order_data['amount'],
+                    'output_file': output_filename,
+                    'has_itinerary': itinerary_path is not None,
+                    'has_invoice': invoice_path is not None,
+                    'page_count': page_count,
+                    'combined_type': 'single_page' if page_count == 1 else 'multi_page'
+                })
+                logger.info(f"订单 {order_id} 处理成功")
+            else:
+                logger.error(f"智能拼接失败，订单 {order_id}")
+                
         except Exception as e:
             logger.error(f"处理订单 {order_id} 时出错: {str(e)}")
     
     logger.info(f"所有订单处理完成，成功处理 {len(results)} 个订单")
-    return results 
+    
+    # 如果有XML缺失警告，记录详细信息
+    if xml_missing_warnings:
+        logger.warning(f"⚠️ 发现 {len(xml_missing_warnings)} 个XML相关问题，金额统计可能不准确:")
+        for warning in xml_missing_warnings:
+            logger.warning(f"   - 订单 {warning['order_id']}: {warning['reason']} -> {warning['impact']}")
+    
+    return results, xml_missing_warnings 

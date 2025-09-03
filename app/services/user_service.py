@@ -106,4 +106,180 @@ def get_all_user_stats():
     stats.sort(key=lambda x: x["total_amount"], reverse=True)
     
     logger.info(f"返回 {len(stats)} 个用户的统计数据")
-    return stats 
+    return stats
+
+def load_global_stats():
+    """加载全局统计数据"""
+    logger = current_app.logger
+    global_stats_file = current_app.config.get('GLOBAL_STATS_FILE', 'global_stats.json')
+    logger.debug(f"尝试加载全局统计数据文件: {global_stats_file}")
+    
+    if os.path.exists(global_stats_file):
+        try:
+            with open(global_stats_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                logger.info(f"成功加载全局统计数据，总行程单数: {data.get('total_itineraries', 0)}")
+                return data
+        except Exception as e:
+            logger.error(f"读取全局统计数据文件出错: {str(e)}", exc_info=True)
+    else:
+        logger.warning(f"全局统计数据文件不存在: {global_stats_file}")
+    
+    # 如果文件不存在或读取出错，返回初始结构
+    logger.info("返回空的全局数据结构")
+    return {
+        "total_itineraries": 0,
+        "total_amount": 0.0,
+        "first_run": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        "last_update": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        "run_count": 0
+    }
+
+def save_global_stats(itinerary_count, total_amount):
+    """保存全局统计数据"""
+    logger = current_app.logger
+    logger.info(f"保存全局统计数据: 行程单数={itinerary_count}, 总金额={total_amount}")
+    
+    data = load_global_stats()
+    
+    # 更新统计数据
+    data["total_itineraries"] += itinerary_count
+    data["total_amount"] += total_amount
+    data["last_update"] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    data["run_count"] += 1
+    
+    logger.info(f"全局统计更新: 累计行程单数={data['total_itineraries']}, 累计金额={data['total_amount']}, 运行次数={data['run_count']}")
+    
+    # 保存到文件
+    global_stats_file = current_app.config.get('GLOBAL_STATS_FILE', 'global_stats.json')
+    try:
+        with open(global_stats_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        logger.info("全局统计数据保存成功")
+    except Exception as e:
+        logger.error(f"保存全局统计数据出错: {str(e)}", exc_info=True)
+    
+    return data
+
+def get_global_stats():
+    """获取全局统计数据"""
+    logger = current_app.logger
+    logger.info("获取全局统计数据")
+    
+    data = load_global_stats()
+    
+    # 计算运行时长
+    if data.get('first_run'):
+        try:
+            first_run = datetime.datetime.strptime(data['first_run'], '%Y-%m-%d %H:%M:%S')
+            current_time = datetime.datetime.now()
+            run_duration = current_time - first_run
+            days = run_duration.days
+            hours = run_duration.seconds // 3600
+            minutes = (run_duration.seconds % 3600) // 60
+            
+            if days > 0:
+                duration_str = f"{days}天{hours}小时{minutes}分钟"
+            elif hours > 0:
+                duration_str = f"{hours}小时{minutes}分钟"
+            else:
+                duration_str = f"{minutes}分钟"
+                
+            data['run_duration'] = duration_str
+        except Exception as e:
+            logger.warning(f"计算运行时长时出错: {e}")
+            data['run_duration'] = "未知"
+    
+    logger.info(f"返回全局统计数据，总行程单数: {data.get('total_itineraries', 0)}")
+    return data
+
+# 🎉 彩蛋：直接运行此文件时显示统计信息
+if __name__ == "__main__":
+    print("🎉 订单报销系统 - 全局统计彩蛋 🎉")
+    print("=" * 50)
+    
+    try:
+        import os
+        import json
+        
+        # 自动检测数据文件路径
+        current_dir = os.path.abspath(os.path.dirname(__file__))
+        project_root = current_dir
+        
+        # 向上查找，直到找到包含data目录的根目录
+        while project_root != os.path.dirname(project_root):
+            if os.path.exists(os.path.join(project_root, 'data')):
+                break
+            project_root = os.path.dirname(project_root)
+        
+        data_folder = os.path.join(project_root, 'data')
+        user_data_file = os.path.join(data_folder, 'user_data.json')
+        global_stats_file = os.path.join(data_folder, 'global_stats.json')
+        
+        print(f"🔍 数据路径: {data_folder}")
+        
+        # 读取用户统计数据
+        print("\n📊 用户统计信息:")
+        print("-" * 30)
+        if os.path.exists(user_data_file):
+            with open(user_data_file, 'r', encoding='utf-8') as f:
+                user_data = json.load(f)
+            
+            users = user_data.get('users', {})
+            if users:
+                for i, (user_id, user_info) in enumerate(users.items(), 1):
+                    print(f"{i}. 用户: {user_id}")
+                    print(f"   总打印次数: {user_info.get('total_prints', 0)}")
+                    print(f"   总金额: ¥{user_info.get('total_amount', 0):.2f}")
+                    last_print = user_info.get('print_history', [{}])[-1].get('timestamp', '无') if user_info.get('print_history') else '无'
+                    print(f"   最后打印: {last_print}")
+                    print()
+            else:
+                print("暂无用户数据")
+        else:
+            print("用户数据文件不存在")
+        
+        # 读取全局统计数据
+        print("\n🌍 全局统计信息:")
+        print("-" * 30)
+        if os.path.exists(global_stats_file):
+            with open(global_stats_file, 'r', encoding='utf-8') as f:
+                global_stats = json.load(f)
+            
+            print(f"累计行程单数: {global_stats.get('total_itineraries', 0)} 份")
+            print(f"累计总金额: ¥{global_stats.get('total_amount', 0):.2f}")
+            print(f"系统运行次数: {global_stats.get('run_count', 0)} 次")
+            print(f"首次运行: {global_stats.get('first_run', '未知')}")
+            print(f"最后更新: {global_stats.get('last_update', '未知')}")
+            
+            # 计算运行时长
+            if global_stats.get('first_run'):
+                try:
+                    from datetime import datetime
+                    first_run = datetime.strptime(global_stats['first_run'], '%Y-%m-%d %H:%M:%S')
+                    current_time = datetime.now()
+                    run_duration = current_time - first_run
+                    days = run_duration.days
+                    hours = run_duration.seconds // 3600
+                    minutes = (run_duration.seconds % 3600) // 60
+                    
+                    if days > 0:
+                        duration_str = f"{days}天{hours}小时{minutes}分钟"
+                    elif hours > 0:
+                        duration_str = f"{hours}小时{minutes}分钟"
+                    else:
+                        duration_str = f"{minutes}分钟"
+                    
+                    print(f"系统运行时长: {duration_str}")
+                except Exception as e:
+                    print(f"系统运行时长: 计算失败 ({e})")
+        else:
+            print("全局统计文件不存在")
+        
+        print("\n" + "=" * 50)
+        print("🎯 彩蛋提示: 每次上传文件后，系统会自动更新这些统计数据！")
+        
+    except Exception as e:
+        print(f"❌ 获取统计信息时出错: {e}")
+        import traceback
+        traceback.print_exc() 
