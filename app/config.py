@@ -27,6 +27,10 @@ class Config:
     # 最大上传文件大小 (50MB)
     MAX_CONTENT_LENGTH = 50 * 1024 * 1024
     
+    # 上传优化配置
+    UPLOAD_CHUNK_SIZE = 8192  # 8KB块大小
+    UPLOAD_TIMEOUT = 300  # 5分钟超时
+    
     # 打印API服务配置
     PRINT_API_BASE_URL = os.environ.get('PRINT_API_BASE_URL') or 'http://localhost:12346'
     PRINT_API_TOKEN = os.environ.get('PRINT_API_TOKEN') or 'TOKEN_PRINT_API_KEY_9527'

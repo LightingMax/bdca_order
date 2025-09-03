@@ -145,6 +145,85 @@ def extract_zip(zip_path, extract_dir):
     
     return extract_dir
 
+def extract_zip_for_raw_print(zip_path, extract_dir):
+    """专门为原始打印解压ZIP文件，返回解压后的文件信息列表"""
+    logger = current_app.logger
+    
+    try:
+        logger.info(f"开始为原始打印解压ZIP文件: {zip_path}")
+        
+        # 先解压文件
+        extract_zip(zip_path, extract_dir)
+        
+        # 获取解压后的文件信息
+        extracted_files = []
+        extract_path = Path(extract_dir)
+        
+        for file_path in extract_path.rglob('*'):
+            if file_path.is_file():
+                # 获取文件信息
+                file_info = {
+                    'name': file_path.name,  # 显示名称使用原始文件名
+                    'filename': str(file_path.name),  # 存储名称也使用原始文件名
+                    'file_path': str(file_path),
+                    'relative_path': str(file_path.relative_to(extract_path)),
+                    'size': file_path.stat().st_size,
+                    'file_size': file_path.stat().st_size,
+                    'type': get_file_type(file_path.name),
+                    'file_type': get_file_type(file_path.name),
+                    'extension': file_path.suffix.lower(),
+                    'is_printable': is_printable_file(file_path.name)
+                }
+                extracted_files.append(file_info)
+        
+        logger.info(f"ZIP解压完成，共解压 {len(extracted_files)} 个文件")
+        return extracted_files
+        
+    except Exception as e:
+        logger.error(f"为原始打印解压ZIP文件时发生错误: {str(e)}")
+        raise
+
+def get_file_type(filename):
+    """根据文件名获取文件类型"""
+    if not filename:
+        return 'unknown'
+    
+    ext = Path(filename).suffix.lower()
+    
+    # 图片文件
+    if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']:
+        return 'image'
+    # PDF文件
+    elif ext == '.pdf':
+        return 'pdf'
+    # 文档文件
+    elif ext in ['.doc', '.docx', '.txt', '.rtf']:
+        return 'document'
+    # 表格文件
+    elif ext in ['.xls', '.xlsx', '.csv']:
+        return 'spreadsheet'
+    # 压缩文件
+    elif ext in ['.zip', '.rar', '.7z', '.tar', '.gz']:
+        return 'archive'
+    # 其他文件
+    else:
+        return 'other'
+
+def is_printable_file(filename):
+    """检查文件是否可打印"""
+    if not filename:
+        return False
+    
+    ext = Path(filename).suffix.lower()
+    
+    # 可打印的文件类型
+    printable_extensions = [
+        '.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff',
+        '.doc', '.docx', '.txt', '.rtf', '.xls', '.xlsx', '.csv'
+    ]
+    
+    return ext in printable_extensions
+
 def get_file_paths(directory):
     """获取目录中所有文件的路径 - 使用pathlib库"""
     directory_path = Path(directory)

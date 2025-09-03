@@ -119,20 +119,22 @@ def identify_pdf_type(pdf_path):
         return 'unknown'
 
 def extract_order_id(file_path):
-    """从文件名或内容中提取订单ID - 改进版，支持服务商前缀和发票【】格式"""
+    """从文件名或内容中提取订单ID - 支持服务商前缀和发票【】格式"""
     logger = current_app.logger
     try:
         logger.info(f"正在提取订单ID: {file_path}")
         filename = os.path.basename(file_path)
         
-        # 方法0: 优先从发票文件名中提取【】内的内容
-        # 支持格式：【T3出行-77.06元-1个行程】*发票
+        # 方法0: 最高优先级 - 从发票文件名中提取【】内的内容
+        # 支持格式：【及时用车-53.21元-2个行程】高德打车电子发票
         bracket_pattern = r'【([^】]+)】'
         bracket_match = re.search(bracket_pattern, filename)
         if bracket_match:
             bracket_content = bracket_match.group(1)
             logger.info(f"从发票文件名【】中提取到内容: {bracket_content}")
             return bracket_content
+        
+        logger.info(f"文件名 '{filename}' 未匹配【】格式，继续尝试其他方法")
         
         # 方法1: 尝试从文件名中提取完整的订单信息
         # 支持格式：阳光出行-32.13元-3个行程、T3-77.06-1等
@@ -163,15 +165,25 @@ def extract_order_id(file_path):
                 if len(match.groups()) == 3:
                     # 格式：服务商-金额-数量
                     service, amount, count = match.groups()
-                    order_id = f"{service}-{amount}-{count}"
-                    logger.info(f"从文件名中提取到订单ID: {order_id}")
-                    return order_id
+                    # 验证服务商名称不为空
+                    if service and service.strip():
+                        order_id = f"{service}-{amount}-{count}"
+                        logger.info(f"从文件名中提取到订单ID: {order_id}")
+                        return order_id
+                    else:
+                        logger.warning(f"服务商名称为空，跳过模式: {pattern}")
+                        continue
                 elif len(match.groups()) == 2:
                     # 格式：服务商-金额
                     service, amount = match.groups()
-                    order_id = f"{service}-{amount}"
-                    logger.info(f"从文件名中提取到订单ID: {order_id}")
-                    return order_id
+                    # 验证服务商名称不为空
+                    if service and service.strip():
+                        order_id = f"{service}-{amount}"
+                        logger.info(f"从文件名中提取到订单ID: {order_id}")
+                        return order_id
+                    else:
+                        logger.warning(f"服务商名称为空，跳过模式: {pattern}")
+                        continue
                 elif len(match.groups()) == 1:
                     # 格式：订单号或trip号
                     order_id = match.group(1)
@@ -235,7 +247,7 @@ def extract_order_id(file_path):
         return random_id  # 生成随机ID作为后备
 
 
-def generate_smart_order_id_improved(filename):
+def generate_smart_order_id(filename):
     """
     生成智能订单ID - 修正版
     1. 优先提取【】中的内容。
@@ -248,11 +260,14 @@ def generate_smart_order_id_improved(filename):
 
         # 核心逻辑：定义模式并按优先级排序
         patterns = [
-            # 优先级 1: 提取【】内的完整内容
+            # 优先级 1: 最高优先级 - 提取【】内的完整内容
             (r'【([^】]+)】', lambda m: m.group(1)),
             
             # 优先级 2: 修复 '订单-' 开头的格式
             (r'^订单-(\d+\.\d+)-(\d+)$', lambda m: f"T3出行-{m.group(1)}元-{m.group(2)}个行程"),
+            
+            # 优先级 2.5: 修复 '订单T3-' 开头的格式
+            (r'^订单T3-(\d+\.\d+)-(\d+)$', lambda m: f"T3出行-{m.group(1)}元-{m.group(2)}个行程"),
             
             # 优先级 3: 匹配标准格式（为了防止它被下面的逻辑捕获）
             (r'^[^-]+-\d+\.\d+元?-\d+个行程$', lambda m: m.group(0)),
@@ -265,7 +280,11 @@ def generate_smart_order_id_improved(filename):
             # 我们在去除扩展名的文件名上进行匹配
             match = re.search(pattern, name_only)
             if match:
-                return formatter(match)
+                result = formatter(match)
+                logger.info(f"文件名 '{filename}' 匹配模式 '{pattern}'，生成结果: '{result}'")
+                return result
+        
+        logger.info(f"文件名 '{filename}' 未匹配任何模式，返回原文件名: '{name_only}'")
         
         # 如果以上所有特殊规则都未匹配，说明它可能是“其他格式”
         # 直接返回去除扩展名后的文件名
@@ -284,7 +303,9 @@ def match_files_by_order(pdf_files, xml_files):
     
     # 处理XML文件
     for xml_path in xml_files:
+        logger.info(f"正在处理XML文件: {xml_path}")
         order_id = extract_order_id(xml_path)
+        logger.info(f"从XML文件提取到订单ID: '{order_id}'")
         amount = extract_amount_from_xml(xml_path)
         
         if order_id not in orders:
@@ -297,8 +318,11 @@ def match_files_by_order(pdf_files, xml_files):
     
     # 处理PDF文件
     for pdf_path in pdf_files:
+        logger.info(f"正在处理PDF文件: {pdf_path}")
         order_id = extract_order_id(pdf_path)
+        logger.info(f"从PDF文件提取到订单ID: '{order_id}'")
         pdf_type = identify_pdf_type(pdf_path)
+        logger.info(f"PDF文件类型: {pdf_type}")
         
         if pdf_type != 'unknown':
             if order_id not in orders:
@@ -326,53 +350,103 @@ def merge_pdfs(itinerary_path, invoice_path, output_path):
     
     assert itinerary_count == invoice_count, "行程单和发票的行程数量不一致"
     
-    A4_WIDTH, A4_HEIGHT = 2480, 3508
-    # 定义页边距（像素）
-    MARGIN = 100
-    # 考虑页边距后的实际可用宽度和高度
-    USABLE_WIDTH = A4_WIDTH - 2 * MARGIN
-    USABLE_HEIGHT = A4_HEIGHT - 2 * MARGIN
-    
-    per_count_height = USABLE_HEIGHT / 21
+    # 方法1：优先使用pdftk进行快速合并（毫秒级，推荐）
     try:
-        from pdf2image import convert_from_path
-        from PIL import Image
-        images = convert_from_path(itinerary_path,dpi=300)
-        itinerary_image = images[0]
-        w, h = itinerary_image.size
-        # 计算需要裁剪的区域 去除部分顶部无关内容
-        top_half = itinerary_image.crop((0, 4*per_count_height, w, h // 2+ per_count_height*(itinerary_count-1)))
+        import subprocess
+        logger.info("🚀 使用pdftk进行超快速PDF合并...")
         
-        # resize top_half
-        ratio = USABLE_WIDTH / top_half.width
-        new_size = (USABLE_WIDTH, int(USABLE_HEIGHT*0.6))
-        top_half = top_half.resize(new_size)
+        # 使用pdftk cat进行垂直拼接
+        subprocess.run([
+            'pdftk', invoice_path, itinerary_path, 
+            'cat', 'output', output_path
+        ], check=True, timeout=5)  # 设置5秒超时
         
-        images = convert_from_path(invoice_path,dpi=300)
-        invoice_image = images[0]
+        logger.info("✅ 使用pdftk超快速合并成功")
+        return output_path
         
-        ratio = 0.9*USABLE_WIDTH / invoice_image.width
-        new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.4))
-        invoice_image = invoice_image.resize(new_size)
+    except (ImportError, subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
+        logger.info(f"pdftk不可用或失败，尝试PyPDF2: {e}")
         
-        combined = Image.new("RGB", (A4_WIDTH, A4_HEIGHT), (255, 255, 255))
+        # 方法2：使用PyPDF2进行快速合并（秒级）
+        try:
+            from PyPDF2 import PdfReader, PdfWriter
+            logger.info("🔄 使用PyPDF2进行快速PDF合并...")
+            
+            # 读取两个PDF文件
+            with open(invoice_path, 'rb') as invoice_file:
+                invoice_reader = PdfReader(invoice_file)
+                invoice_page = invoice_reader.pages[0]
+            
+            with open(itinerary_path, 'rb') as itinerary_file:
+                itinerary_reader = PdfReader(itinerary_file)
+                itinerary_page = itinerary_reader.pages[0]
+            
+            # 创建新的PDF
+            writer = PdfWriter()
+            writer.add_page(invoice_page)
+            writer.add_page(itinerary_page)
+            
+            # 保存合并后的PDF
+            with open(output_path, 'wb') as output_file:
+                writer.write(output_file)
+            
+            logger.info("✅ 使用PyPDF2快速合并成功")
+            return output_path
+            
+        except ImportError:
+            logger.info("PyPDF2不可用，回退到图像处理方式")
+        except Exception as e:
+            logger.info(f"PyPDF2合并失败: {e}")
+        
+        # 方法3：回退到原有的图像处理方式（慢速，最后备选）
+        logger.info("⚠️ 回退到图像处理方式（较慢）")
+        A4_WIDTH, A4_HEIGHT = 2480, 3508
+        # 定义页边距（像素）
+        MARGIN = 100
+        # 考虑页边距后的实际可用宽度和高度
+        USABLE_WIDTH = A4_WIDTH - 2 * MARGIN
+        USABLE_HEIGHT = A4_HEIGHT - 2 * MARGIN
+        
+        per_count_height = USABLE_HEIGHT / 21
+        try:
+            from pdf2image import convert_from_path
+            from PIL import Image
+            images = convert_from_path(itinerary_path,dpi=300)
+            itinerary_image = images[0]
+            w, h = itinerary_image.size
+            # 计算需要裁剪的区域 去除部分顶部无关内容
+            top_half = itinerary_image.crop((0, 4*per_count_height, w, h // 2+ per_count_height*(itinerary_count-1)))
+            
+            # resize top_half
+            ratio = USABLE_WIDTH / top_half.width
+            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT*0.6))
+            top_half = top_half.resize(new_size)
+            
+            images = convert_from_path(invoice_path,dpi=300)
+            invoice_image = images[0]
+            
+            ratio = 0.9*USABLE_WIDTH / invoice_image.width
+            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.4))
+            invoice_image = invoice_image.resize(new_size)
+            
+            combined = Image.new("RGB", (A4_WIDTH, A4_HEIGHT), (255, 255, 255))
 
-        # 粘贴上半部分（考虑页边距）
-        combined.paste(top_half, (MARGIN, MARGIN))
+            # 粘贴上半部分（考虑页边距）
+            combined.paste(top_half, (MARGIN, MARGIN))
 
-        # 粘贴下半部分（考虑页边距）
-        combined.paste(invoice_image, (MARGIN, MARGIN + top_half.height))
+            # 粘贴下半部分（考虑页边距）
+            combined.paste(invoice_image, (MARGIN, MARGIN + top_half.height))
+            
+            # 最后再缩放到A4纸
+            combined = combined.resize((A4_WIDTH, A4_HEIGHT))
+            
+            combined.save(output_path)
+            
+        except Exception as e:
+            logger.error(f"合并PDF时出错: {str(e)}")
+            raise
         
-        # 最后再缩放到A4纸
-        combined = combined.resize((A4_WIDTH, A4_HEIGHT))
-        
-        combined.save(output_path)
-        
-    except Exception as e:
-        logger.error(f"合并PDF时出错: {str(e)}")
-        raise
-    
-    return output_path
+        return output_path
 
 def process_pdf_files(extract_dir):
     """处理解压后的PDF和XML文件"""

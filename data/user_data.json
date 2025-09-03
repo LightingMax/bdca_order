@@ -82,10 +82,58 @@
             "-94.42-2",
             "T3-77.06-1"
           ]
+        },
+        {
+          "timestamp": "2025-09-02 19:51:40",
+          "file_count": 3,
+          "total_amount": 201.07,
+          "order_ids": [
+            "旅程约车-29.59元-1个行程",
+            "曹操出行-94.42元-2个行程",
+            "T3出行-77.06元-1个行程"
+          ]
+        },
+        {
+          "timestamp": "2025-09-02 19:52:24",
+          "file_count": 1,
+          "total_amount": 53.21,
+          "order_ids": [
+            "及时用车-53.21元-2个行程"
+          ]
         }
       ],
-      "total_amount": 254.28,
-      "total_prints": 5
+      "total_amount": 508.56,
+      "total_prints": 9
+    },
+    "192.168.20.96": {
+      "print_history": [
+        {
+          "timestamp": "2025-09-03 13:39:17",
+          "file_count": 1,
+          "total_amount": 0,
+          "order_ids": [
+            "火箭出行-1079.92元-28个行程"
+          ]
+        },
+        {
+          "timestamp": "2025-09-03 14:17:57",
+          "file_count": 1,
+          "total_amount": 0,
+          "order_ids": [
+            "火箭出行-1079.92元-28个行程"
+          ]
+        },
+        {
+          "timestamp": "2025-09-03 14:39:21",
+          "file_count": 1,
+          "total_amount": 53.21,
+          "order_ids": [
+            "及时用车-53.21元-2个行程"
+          ]
+        }
+      ],
+      "total_amount": 53.21,
+      "total_prints": 3
     }
   }
 }

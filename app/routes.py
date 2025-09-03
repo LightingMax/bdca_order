@@ -1,11 +1,12 @@
 import os
 import uuid
 import datetime
+import requests
 from flask import Blueprint, render_template, request, jsonify, current_app, send_from_directory
 from werkzeug.utils import secure_filename
 
 from app.services.file_service import (
-    allowed_file, extract_zip, calculate_file_hash, 
+    allowed_file, extract_zip, extract_zip_for_raw_print, calculate_file_hash, 
     check_file_exists, save_file_hash, check_order_processed,
     get_processed_orders, update_file_print_status
 )
@@ -29,9 +30,9 @@ def statistics():
 
 @main_bp.route('/api/upload', methods=['POST'])
 def upload_file():
-    """处理文件上传"""
+    """处理ZIP文件上传（智能处理功能）"""
     logger = current_app.logger
-    logger.info("收到文件上传请求")
+    logger.info("收到ZIP文件上传请求（智能处理）")
     
     # 检查是否有文件
     if 'files' not in request.files:
@@ -189,6 +190,353 @@ def upload_file():
     except Exception as e:
         logger.error(f"处理文件时出错: {str(e)}", exc_info=True)
         return jsonify({'error': f'处理文件时出错: {str(e)}'}), 500
+
+@main_bp.route('/api/upload-raw', methods=['POST'])
+def upload_raw_file():
+    """处理原始打印文件上传，支持ZIP文件自动解压"""
+    logger = current_app.logger
+    logger.info("收到原始打印文件上传请求")
+    
+    # 检查是否有文件
+    if 'files' not in request.files:
+        logger.warning("上传请求中没有文件")
+        return jsonify({'error': '没有文件'}), 400
+    
+    files = request.files.getlist('files')
+    
+    # 检查是否有文件被选择
+    if len(files) == 0 or files[0].filename == '':
+        logger.warning("上传的文件名为空")
+        return jsonify({'error': '没有选择文件'}), 400
+    
+    try:
+        # 生成唯一的临时目录
+        session_id = str(uuid.uuid4())
+        logger.info(f"创建原始打印会话: {session_id}")
+        
+        temp_folder = os.path.join(current_app.config['TEMP_FOLDER'], f'raw_{session_id}')
+        os.makedirs(temp_folder, exist_ok=True)
+        
+        uploaded_files = []
+        extracted_files = []
+        
+        for file in files:
+            # 保存文件
+            original_filename = file.filename
+            filename = secure_filename(file.filename)
+            file_path = os.path.join(temp_folder, filename)
+            file.save(file_path)
+            logger.info(f"原始打印文件已保存到: {file_path}")
+            logger.info(f"原始文件名: {original_filename}, 安全文件名: {filename}")
+            
+            # 检查是否为ZIP文件（使用原始文件名检查，因为secure_filename可能移除扩展名）
+            if original_filename.lower().endswith('.zip') or filename.lower().endswith('.zip'):
+                logger.info(f"发现ZIP文件: {filename}，开始解压")
+                try:
+                    # 为ZIP文件创建解压目录
+                    extract_dir = os.path.join(temp_folder, f'extracted_{filename[:-4]}')
+                    os.makedirs(extract_dir, exist_ok=True)
+                    
+                    # 使用专门的ZIP解压函数
+                    from app.services.file_service import extract_zip_for_raw_print
+                    extracted_file_list = extract_zip_for_raw_print(file_path, extract_dir)
+                    
+                    # 将解压后的文件添加到结果中
+                    extracted_files.extend(extracted_file_list)
+                    logger.info(f"ZIP文件 {filename} 解压完成，解压出 {len(extracted_file_list)} 个文件")
+                    
+                except Exception as e:
+                    logger.error(f"解压ZIP文件 {filename} 时出错: {str(e)}")
+                    # 解压失败时，仍然将ZIP文件本身作为可打印文件
+                    uploaded_files.append({
+                        'name': filename,
+                        'filename': filename,
+                        'file_path': file_path,
+                        'size': os.path.getsize(file_path),
+                        'type': 'archive',
+                        'file_type': 'archive',
+                        'extension': '.zip',
+                        'is_printable': True
+                    })
+                    logger.info(f"ZIP文件解压失败，将ZIP文件本身添加到可打印文件列表")
+            else:
+                # 普通文件直接添加
+                uploaded_files.append({
+                    'name': original_filename,  # 使用原始文件名显示
+                    'filename': filename,       # 使用安全文件名存储
+                    'file_path': file_path,
+                    'size': os.path.getsize(file_path),
+                    'type': get_file_type(filename),
+                    'file_type': get_file_type(filename),
+                    'extension': os.path.splitext(filename)[1].lower(),
+                    'is_printable': True
+                })
+        
+        # 合并所有文件（解压后的文件优先）
+        all_files = extracted_files + uploaded_files
+        
+        logger.info(f"原始打印文件处理完成，共 {len(all_files)} 个文件（包含解压后的文件）")
+        logger.info(f"解压后的文件数量: {len(extracted_files)}")
+        logger.info(f"普通文件数量: {len(uploaded_files)}")
+        
+        # 如果有解压后的文件，返回解压后的文件列表
+        if extracted_files:
+            logger.info(f"返回解压后的文件列表，共 {len(extracted_files)} 个文件")
+            return jsonify({
+                'success': True,
+                'message': f'成功上传并解压 {len(files)} 个文件，解压出 {len(extracted_files)} 个文件',
+                'extracted_files': extracted_files,
+                'original_files': uploaded_files,
+                'total_files': len(all_files)
+            })
+        else:
+            # 没有ZIP文件，返回普通文件列表
+            logger.info(f"没有解压后的文件，返回普通文件列表，共 {len(uploaded_files)} 个文件")
+            return jsonify({
+                'success': True,
+                'message': f'成功上传 {len(uploaded_files)} 个文件',
+                'files': uploaded_files,
+                'total_files': len(uploaded_files)
+            })
+        
+    except Exception as e:
+        logger.error(f"上传原始打印文件时出错: {str(e)}", exc_info=True)
+        return jsonify({'error': f'上传文件时出错: {str(e)}'}), 500
+
+def get_file_type(filename):
+    """根据文件名获取文件类型"""
+    if not filename:
+        return 'unknown'
+    
+    ext = os.path.splitext(filename)[1].lower()
+    
+    # 图片文件
+    if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']:
+        return 'image'
+    # PDF文件
+    elif ext == '.pdf':
+        return 'pdf'
+    # 文档文件
+    elif ext in ['.doc', '.docx', '.txt', '.rtf']:
+        return 'document'
+    # 表格文件
+    elif ext in ['.xls', '.xlsx', '.csv']:
+        return 'spreadsheet'
+    # 压缩文件
+    elif ext in ['.zip', '.rar', '.7z', '.tar', '.gz']:
+        return 'archive'
+    # 其他文件
+    else:
+        return 'other'
+
+@main_bp.route('/api/print-raw', methods=['POST'])
+def print_raw_file():
+    """原始打印文件 - 调用FastAPI打印服务"""
+    logger = current_app.logger
+    logger.info("收到原始打印请求")
+    
+    try:
+        data = request.get_json()
+        if not data or 'filename' not in data:
+            return jsonify({'success': False, 'message': '缺少文件名参数'}), 400
+        
+        filename = data.get('filename')
+        action = data.get('action', 'print')
+        
+        logger.info(f"原始打印文件: {filename}, 操作: {action}")
+        
+        # 在临时目录中查找文件
+        temp_folder = current_app.config['TEMP_FOLDER']
+        file_found = False
+        file_path = None
+        
+        # 递归搜索临时目录中的文件
+        for root, dirs, files in os.walk(temp_folder):
+            if filename in files:
+                file_path = os.path.join(root, filename)
+                file_found = True
+                break
+        
+        if not file_found or not os.path.exists(file_path):
+            logger.error(f"文件未找到: {filename}")
+            return jsonify({'success': False, 'message': f'文件 {filename} 未找到，可能已被清理或移动'}), 404
+        
+        logger.info(f"找到文件: {file_path}")
+        
+        # 调用FastAPI打印服务 (端口12346)
+        import requests
+        
+        # FastAPI打印服务的配置
+        PRINT_API_BASE_URL = "http://localhost:12346"
+        PRINT_API_TOKEN = "TOKEN_PRINT_API_KEY_9527"  # 从FastAPI服务获取的token
+        
+        try:
+            # 准备打印请求 - 直接传递文件路径，不需要重新上传
+            print_url = f"{PRINT_API_BASE_URL}/print-file"
+            
+            # 发送打印请求到FastAPI服务，传递文件路径
+            response = requests.post(
+                print_url,
+                json={
+                    'file_path': file_path,
+                    'printer_name': 'HP-LaserJet-MFP-M437-M443',
+                    'copies': 1,
+                    'tray': 'auto'
+                },
+                headers={'Authorization': f'Bearer {PRINT_API_TOKEN}'},
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    logger.info(f"打印任务提交成功: {result.get('job_id', 'unknown')}")
+                    return jsonify({
+                        'success': True,
+                        'message': f'文件 {filename} 已发送至打印机',
+                        'printer': 'HP-LaserJet-MFP-M437-M443',
+                        'job_id': result.get('job_id', 'unknown')
+                    })
+                else:
+                    logger.error(f"FastAPI打印服务返回失败: {result.get('message', 'unknown error')}")
+                    return jsonify({
+                        'success': False,
+                        'message': f'打印服务失败: {result.get("message", "unknown error")}'
+                    }), 500
+            else:
+                logger.error(f"FastAPI打印服务HTTP错误: {response.status_code}")
+                return jsonify({
+                    'success': False,
+                    'message': f'打印服务HTTP错误: {response.status_code}'
+                }), 500
+                
+        except requests.exceptions.ConnectionError:
+            logger.error("无法连接到FastAPI打印服务 (端口12346)")
+            return jsonify({
+                'success': False,
+                'message': '无法连接到打印服务，请检查打印服务是否启动'
+            }), 503
+        except requests.exceptions.Timeout:
+            logger.error("打印服务请求超时")
+            return jsonify({
+                'success': False,
+                'message': '打印服务请求超时，请稍后重试'
+            }), 504
+        except Exception as e:
+            logger.error(f"调用FastAPI打印服务时出错: {str(e)}")
+            return jsonify({
+                'success': False,
+                'message': f'打印服务调用失败: {str(e)}'
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"原始打印文件时出错: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'message': f'打印文件时出错: {str(e)}'}), 500
+
+@main_bp.route('/api/get-raw-file', methods=['POST'])
+def get_raw_file():
+    """获取原始打印文件路径用于预览"""
+    logger = current_app.logger
+    logger.info("收到获取原始打印文件请求")
+    
+    try:
+        data = request.get_json()
+        if not data or 'filename' not in data:
+            return jsonify({'success': False, 'message': '缺少文件名参数'}), 400
+        
+        filename = data.get('filename')
+        logger.info(f"请求预览文件: {filename}")
+        
+        # 在临时目录中查找文件
+        temp_folder = current_app.config['TEMP_FOLDER']
+        file_found = False
+        file_path = None
+        
+        # 递归搜索临时目录中的文件
+        for root, dirs, files in os.walk(temp_folder):
+            if filename in files:
+                file_path = os.path.join(root, filename)
+                file_found = True
+                break
+        
+        if file_found and os.path.exists(file_path):
+            logger.info(f"找到文件: {file_path}")
+            
+            # 生成一个安全的访问令牌
+            import hashlib
+            import time
+            token = hashlib.md5(f"{filename}_{time.time()}".encode()).hexdigest()
+            
+            # 将文件路径和令牌存储到会话中（临时解决方案）
+            # 在实际生产环境中，应该使用Redis等缓存系统
+            if not hasattr(current_app, 'file_tokens'):
+                current_app.file_tokens = {}
+            current_app.file_tokens[token] = file_path
+            
+            # 返回文件访问URL
+            preview_url = f"/api/preview-file/{token}"
+            
+            return jsonify({
+                'success': True,
+                'preview_url': preview_url,
+                'filename': filename,
+                'size': os.path.getsize(file_path),
+                'message': f'文件 {filename} 预览链接生成成功'
+            })
+        else:
+            logger.warning(f"文件未找到: {filename}")
+            return jsonify({
+                'success': False,
+                'message': f'文件 {filename} 未找到，可能已被清理或移动'
+            }), 404
+        
+    except Exception as e:
+        logger.error(f"获取原始打印文件时出错: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'message': f'获取文件时出错: {str(e)}'}), 500
+
+@main_bp.route('/api/preview-file/<token>')
+def preview_file(token):
+    """通过令牌预览文件"""
+    logger = current_app.logger
+    logger.info(f"收到文件预览请求，令牌: {token}")
+    
+    try:
+        # 从令牌中获取文件路径
+        if not hasattr(current_app, 'file_tokens') or token not in current_app.file_tokens:
+            logger.warning(f"无效的预览令牌: {token}")
+            return jsonify({'error': '无效的预览令牌'}), 404
+        
+        file_path = current_app.file_tokens[token]
+        
+        if not os.path.exists(file_path):
+            logger.warning(f"文件不存在: {file_path}")
+            return jsonify({'error': '文件不存在'}), 404
+        
+        # 获取文件信息
+        filename = os.path.basename(file_path)
+        file_size = os.path.getsize(file_path)
+        
+        # 检查文件类型
+        file_ext = os.path.splitext(filename)[1].lower()
+        
+        # 对于图片和PDF文件，直接返回文件内容
+        if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.pdf']:
+            logger.info(f"直接预览文件: {filename}")
+            return send_from_directory(os.path.dirname(file_path), filename)
+        
+        # 对于其他文件类型，返回下载链接
+        else:
+            logger.info(f"提供文件下载: {filename}")
+            return send_from_directory(
+                os.path.dirname(file_path), 
+                filename, 
+                as_attachment=True,
+                download_name=filename
+            )
+            
+    except Exception as e:
+        logger.error(f"预览文件时出错: {str(e)}", exc_info=True)
+        return jsonify({'error': f'预览文件时出错: {str(e)}'}), 500
 
 @main_bp.route('/api/print/<filename>', methods=['POST'])
 def print_file(filename):
