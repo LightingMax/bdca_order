@@ -87,10 +87,15 @@ def upload_file():
             file_hash = calculate_file_hash(zip_path)
             logger.info(f"文件 {filename} 的哈希值: {file_hash}")
             
-            # 检查文件是否已上传过
-            existing_file = check_file_exists(file_hash)
-            if existing_file:
-                logger.info(f"文件 {filename} 已上传过，重用之前的处理结果")
+            # 获取会话级别的已处理文件哈希列表
+            session_processed_hashes = session.get('processed_file_hashes', [])
+            
+            # 检查文件是否在当前会话中已上传过
+            if file_hash in session_processed_hashes:
+                # 从全局存储中获取文件信息
+                existing_file = check_file_exists(file_hash)
+                if existing_file:
+                    logger.info(f"文件 {filename} 在当前会话中已上传过，重用之前的处理结果")
                 
                 # 如果文件已上传过，使用之前的处理结果
                 if 'results' in existing_file:
@@ -149,7 +154,9 @@ def upload_file():
                         })
                         continue
                 else:
-                    logger.warning(f"文件 {filename} 之前的处理结果不完整，将重新处理")
+                    logger.warning(f"文件 {filename} 在全局存储中不存在，将重新处理")
+            else:
+                logger.info(f"文件 {filename} 在当前会话中首次上传，将进行处理")
             
             # 为每个ZIP文件创建单独的提取目录
             file_extract_dir = os.path.join(extract_dir, os.path.splitext(filename)[0])
@@ -183,6 +190,11 @@ def upload_file():
                     'results': results
                 }
                 save_file_hash(file_hash, file_info)
+                
+                # 将文件哈希添加到会话级别的已处理列表中
+                if file_hash not in session_processed_hashes:
+                    session_processed_hashes.append(file_hash)
+                    session['processed_file_hashes'] = session_processed_hashes
                 
                 processed_files.append({
                     'filename': filename,
@@ -225,7 +237,7 @@ def upload_file():
             if 'xml_missing_warnings' in file_result:
                 all_xml_warnings.extend(file_result['xml_missing_warnings'])
         
-        # 计算本次新增的分类统计（只计算新处理的文件）
+        # 计算本次新增的分类统计（包括新处理和重用的文件）
         current_taxi_amount = 0
         current_hotel_amount = 0
         current_taxi_orders = 0
@@ -233,7 +245,8 @@ def upload_file():
         current_taxi_warnings = []
         current_hotel_warnings = []
         
-        for file_result in processed_files:
+        # 聚合所有文件的分类统计信息（包括新处理和重用的文件）
+        for file_result in all_files:
             if 'classification_info' in file_result:
                 info = file_result['classification_info']
                 current_taxi_amount += info.get('taxi_amount', 0)

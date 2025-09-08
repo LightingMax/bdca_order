@@ -2,13 +2,13 @@
   "93f94ebb804d23e5b925a241a9dcd2638c4d986a9002acd2fb15800b152c9811": {
     "filename": "6.zip",
     "original_filename": "高德打车电子发票 (6).zip",
-    "upload_time": "2025-09-08 20:35:56",
-    "session_id": "37794597-6429-466e-84bc-6270d98aa96f",
+    "upload_time": "2025-09-08 20:57:02",
+    "session_id": "0347d147-9e98-410a-876a-fe4065038bc2",
     "results": [
       {
         "order_id": "曹操出行-83.92元-2个行程",
         "amount": 83.92,
-        "output_file": "order_1_ac83a215.pdf",
+        "output_file": "order_1_441bee9c.pdf",
         "has_itinerary": true,
         "has_invoice": true,
         "has_hotel_bill": false,
@@ -18,7 +18,7 @@
       {
         "order_id": "首汽约车-101.61元-1个行程",
         "amount": 101.61,
-        "output_file": "order_2_7c249303.pdf",
+        "output_file": "order_2_80bb834e.pdf",
         "has_itinerary": true,
         "has_invoice": true,
         "has_hotel_bill": false,
@@ -28,7 +28,7 @@
       {
         "order_id": "曹操出行-89.66元-1个行程",
         "amount": 89.66,
-        "output_file": "order_3_eecb7eb8.pdf",
+        "output_file": "order_3_f8411955.pdf",
         "has_itinerary": true,
         "has_invoice": true,
         "has_hotel_bill": false,
@@ -38,7 +38,7 @@
       {
         "order_id": "火箭出行-724.37元-19个行程",
         "amount": 724.37,
-        "output_file": "order_4_54356496.pdf",
+        "output_file": "order_4_8839e616.pdf",
         "has_itinerary": true,
         "has_invoice": true,
         "has_hotel_bill": false,
@@ -86,13 +86,13 @@
   "e145a04d4c7f1f90d37106ebfa857d06148bc49e29e94f20adc9f4693cf82eb7": {
     "filename": "25114000000003462819.zip",
     "original_filename": "【华住酒店集团】桔子北京石景山八角游乐园酒店发票已开具，感谢您的支持！（发票号码：25114000000003462819）.zip",
-    "upload_time": "2025-09-08 20:36:06",
-    "session_id": "87262417-550e-4adf-98f7-53d5980aa555",
+    "upload_time": "2025-09-08 20:58:01",
+    "session_id": "34dc628d-e79d-43f0-b90b-b2060b839422",
     "results": [
       {
         "order_id": "hotel_25114000000003462819",
         "amount": 1224.97,
-        "output_file": "order_1_65427e67.pdf",
+        "output_file": "order_1_4dd321dc.pdf",
         "has_itinerary": false,
         "has_invoice": true,
         "has_hotel_bill": true,
@@ -104,13 +104,13 @@
   "5a3f273e179cdea246e5c77f4eef1bc956c1d9db333d21803f74455501c62ecf": {
     "filename": "25114000000003472725.zip",
     "original_filename": "【华住酒店集团】桔子北京石景山八角游乐园酒店发票已开具，感谢您的支持！（发票号码：25114000000003472725）.zip",
-    "upload_time": "2025-09-08 20:36:22",
-    "session_id": "d664e6ae-00e2-4ce4-b5e3-a0b137c1d251",
+    "upload_time": "2025-09-08 20:57:17",
+    "session_id": "dfeeb821-1446-484c-80bb-d92f484c8b89",
     "results": [
       {
         "order_id": "hotel_25114000000003472725",
         "amount": 1409.87,
-        "output_file": "order_1_6a06909d.pdf",
+        "output_file": "order_1_f9fe7d60.pdf",
         "has_itinerary": false,
         "has_invoice": true,
         "has_hotel_bill": true,
@@ -122,13 +122,187 @@
   "a7f913ca08e18908a668ed6161710e44a89dec136e1a42acff4bb57277158678": {
     "filename": "25114000000003482806.zip",
     "original_filename": "【华住酒店集团】桔子北京石景山八角游乐园酒店发票已开具，感谢您的支持！（发票号码：25114000000003482806）.zip",
-    "upload_time": "2025-09-08 20:40:30",
-    "session_id": "c4492b39-8a7c-4469-a23c-8947c88daaec",
+    "upload_time": "2025-09-08 20:57:17",
+    "session_id": "dfeeb821-1446-484c-80bb-d92f484c8b89",
     "results": [
       {
         "order_id": "hotel_25114000000003482806",
         "amount": 1676.36,
-        "output_file": "order_1_8d9a2e48.pdf",
+        "output_file": "order_1_f5ba8fd8.pdf",
+        "has_itinerary": false,
+        "has_invoice": true,
+        "has_hotel_bill": true,
+        "page_count": 1,
+        "combined_type": "hotel_accommodation"
+      }
+    ]
+  },
+  "f2d2b6fc272c3eda192ce602cc8d269db6059801cfea82a012067778aa904fb7": {
+    "filename": "25114000000003442854.zip",
+    "original_filename": "【华住酒店集团】桔子北京石景山八角游乐园酒店发票已开具，感谢您的支持！（发票号码：25114000000003442854）.zip",
+    "upload_time": "2025-09-08 20:53:56",
+    "session_id": "fcd2ee14-825e-4eef-aa78-e449daa47fc0",
+    "results": [
+      {
+        "order_id": "hotel_25114000000003442854",
+        "amount": 438.15,
+        "output_file": "order_1_ba3898bd.pdf",
+        "has_itinerary": false,
+        "has_invoice": true,
+        "has_hotel_bill": true,
+        "page_count": 1,
+        "combined_type": "hotel_accommodation"
+      }
+    ]
+  },
+  "4554e4ec16d1e0180213f61d07bee3431d87d13062798c170ecf318b5ea4071f": {
+    "filename": "25114000000003452699.zip",
+    "original_filename": "【华住酒店集团】桔子北京石景山八角游乐园酒店发票已开具，感谢您的支持！（发票号码：25114000000003452699）.zip",
+    "upload_time": "2025-09-08 20:53:57",
+    "session_id": "fcd2ee14-825e-4eef-aa78-e449daa47fc0",
+    "results": [
+      {
+        "order_id": "hotel_25114000000003452699",
+        "amount": 1391.45,
+        "output_file": "order_1_a9281a1f.pdf",
+        "has_itinerary": false,
+        "has_invoice": true,
+        "has_hotel_bill": true,
+        "page_count": 1,
+        "combined_type": "hotel_accommodation"
+      }
+    ]
+  },
+  "a4224a3feeb1d4d08b7d7fd444edaa85c07343cc8b71b7cd8428f08ef0f53af3": {
+    "filename": "25112000000184120470.zip",
+    "original_filename": "【华住酒店集团】汉庭北京房山龙湖天街酒店发票已开具，感谢您的支持！（发票号码：25112000000184120470）.zip",
+    "upload_time": "2025-09-08 20:54:09",
+    "session_id": "673dad68-0a64-4409-817d-2ddade41efa1",
+    "results": [
+      {
+        "order_id": "hotel_25112000000184120470",
+        "amount": 399.0,
+        "output_file": "order_1_1857c6a7.pdf",
+        "has_itinerary": false,
+        "has_invoice": true,
+        "has_hotel_bill": true,
+        "page_count": 1,
+        "combined_type": "hotel_accommodation"
+      }
+    ]
+  },
+  "2a3b2ba56ded937f618aa90cfa2dfdab2a24f2b7950dcce2455337564a912efa": {
+    "filename": "8.zip",
+    "original_filename": "高德打车电子发票 (8).zip",
+    "upload_time": "2025-09-08 20:54:19",
+    "session_id": "43c08ae3-06f4-431b-9a19-a1738360b8fc",
+    "results": [
+      {
+        "order_id": "旗妙出行-21.01元-1个行程",
+        "amount": 21.01,
+        "output_file": "order_1_f0a22876.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "飞嘀打车-80.72元-1个行程",
+        "amount": 80.72,
+        "output_file": "order_2_cc66382f.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "c49b2f00775506d9d1dcc33627a4159d73c7c571edc65c3d9308d9a016592ccc": {
+    "filename": "12.zip",
+    "original_filename": "高德打车电子发票 (12).zip",
+    "upload_time": "2025-09-08 20:54:20",
+    "session_id": "43c08ae3-06f4-431b-9a19-a1738360b8fc",
+    "results": [
+      {
+        "order_id": "曹操出行-14.50元-1个行程",
+        "amount": 14.5,
+        "output_file": "order_1_5ac7ee85.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "曹操出行-18.45元-1个行程",
+        "amount": 18.45,
+        "output_file": "order_2_05df6ecd.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "有序出行-148.12元-1个行程",
+        "amount": 148.12,
+        "output_file": "order_3_d108c76e.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "88ced7631558079bd1bd3a0ddf20ff6b7d5f5edcc29222baf1aa21aaf625a784": {
+    "filename": "25114000000003472723.zip",
+    "original_filename": "【华住酒店集团】桔子北京石景山八角游乐园酒店发票已开具，感谢您的支持！（发票号码：25114000000003472723）.zip",
+    "upload_time": "2025-09-08 20:54:39",
+    "session_id": "f2078478-25f1-4468-9ac8-d7fcf84f5e18",
+    "results": [
+      {
+        "order_id": "hotel_25114000000003472723",
+        "amount": 1732.88,
+        "output_file": "order_1_2ceee323.pdf",
+        "has_itinerary": false,
+        "has_invoice": true,
+        "has_hotel_bill": true,
+        "page_count": 1,
+        "combined_type": "hotel_accommodation"
+      }
+    ]
+  },
+  "63a568c5f5b41893f290cea25bc200ae0633d44da3f8390f08e3e657dd7f8c1a": {
+    "filename": "25112000000184120469.zip",
+    "original_filename": "【华住酒店集团】汉庭北京房山龙湖天街酒店发票已开具，感谢您的支持！（发票号码：25112000000184120469）.zip",
+    "upload_time": "2025-09-08 20:58:05",
+    "session_id": "34dc628d-e79d-43f0-b90b-b2060b839422",
+    "results": [
+      {
+        "order_id": "hotel_25112000000184120469",
+        "amount": 458.15,
+        "output_file": "order_1_94a39296.pdf",
+        "has_itinerary": false,
+        "has_invoice": true,
+        "has_hotel_bill": true,
+        "page_count": 1,
+        "combined_type": "hotel_accommodation"
+      }
+    ]
+  },
+  "a2ac9f063ea44f6fc3130394cded894136948dd723baa0764e0ac649b5d8ccf6": {
+    "filename": "25112000000184110556.zip",
+    "original_filename": "【华住酒店集团】汉庭北京房山龙湖天街酒店发票已开具，感谢您的支持！（发票号码：25112000000184110556）.zip",
+    "upload_time": "2025-09-08 20:58:05",
+    "session_id": "34dc628d-e79d-43f0-b90b-b2060b839422",
+    "results": [
+      {
+        "order_id": "hotel_25112000000184110556",
+        "amount": 288.15,
+        "output_file": "order_1_bf3da7d8.pdf",
         "has_itinerary": false,
         "has_invoice": true,
         "has_hotel_bill": true,

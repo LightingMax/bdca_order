@@ -1174,8 +1174,8 @@ def process_pdf_files(extract_dir, zip_filename=None):
     
     # 记录分类统计结果
     logger.info(f"📊 金额统计结果:")
-    logger.info(f"   🚗 网约车总金额: {taxi_amount:.2f}元 ({len([o for o in orders.values() if not o.get('order_id', '').startswith('hotel_')])}个订单)")
-    logger.info(f"   🏨 酒店总金额: {hotel_amount:.2f}元 ({len([o for o in orders.values() if o.get('order_id', '').startswith('hotel_')])}个订单)")
+    logger.info(f"   🚗 网约车总金额: {taxi_amount:.2f}元 ({len([order_id for order_id in orders.keys() if not order_id.startswith('hotel_')])}个订单)")
+    logger.info(f"   🏨 酒店总金额: {hotel_amount:.2f}元 ({len([order_id for order_id in orders.keys() if order_id.startswith('hotel_')])}个订单)")
     logger.info(f"   💰 总金额: {taxi_amount + hotel_amount:.2f}元")
     
     # 记录分类警告
@@ -1194,8 +1194,8 @@ def process_pdf_files(extract_dir, zip_filename=None):
         'taxi_amount': taxi_amount,
         'hotel_amount': hotel_amount,
         'total_amount': taxi_amount + hotel_amount,
-        'taxi_orders': len([o for o in orders.values() if not o.get('order_id', '').startswith('hotel_')]),
-        'hotel_orders': len([o for o in orders.values() if o.get('order_id', '').startswith('hotel_')]),
+        'taxi_orders': len([order_id for order_id in orders.keys() if not order_id.startswith('hotel_')]),
+        'hotel_orders': len([order_id for order_id in orders.keys() if order_id.startswith('hotel_')]),
         'taxi_warnings': taxi_warnings,
         'hotel_warnings': hotel_warnings
     }
