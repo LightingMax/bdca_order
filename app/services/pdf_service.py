@@ -1,7 +1,7 @@
-import os
 import re
 import uuid
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from PyPDF2 import PdfReader, PdfWriter
 from flask import current_app
 from app.services.file_service import get_file_paths, group_files_by_type
@@ -13,7 +13,7 @@ def extract_amount_from_xml(xml_path):
         logger.info(f"正在从XML文件提取金额: {xml_path}")
         
         # 首先尝试从文件名提取金额
-        filename = os.path.basename(xml_path)
+        filename = Path(xml_path).name
         amount_match = re.search(r'(\d+\.\d+)元', filename)
         if not amount_match:
             amount_match = re.search(r'-(\d+\.\d+)元?-', filename)
@@ -85,11 +85,116 @@ def extract_amount_from_xml(xml_path):
         logger.error(f"解析XML文件出错: {str(e)}")
         return 0
 
-def identify_pdf_type(pdf_path):
-    """识别PDF文件类型（行程单或发票）"""
+
+def extract_amount_from_pdf(pdf_path):
+    """从PDF文件中提取金额（轻量级方法）"""
     logger = current_app.logger
     try:
-        filename = os.path.basename(pdf_path).lower()
+        logger.info(f"正在从PDF文件提取金额: {pdf_path}")
+        
+        # 首先尝试从文件名提取金额
+        filename = Path(pdf_path).name
+        amount_match = re.search(r'(\d+\.\d+)元', filename)
+        if not amount_match:
+            amount_match = re.search(r'-(\d+\.\d+)元?-', filename)
+        if not amount_match:
+            amount_match = re.search(r'-(\d+\.\d+)-', filename)
+            
+        if amount_match:
+            amount = float(amount_match.group(1))
+            logger.info(f"从PDF文件名中提取到金额: {amount}")
+            return amount
+        
+        # 使用PyMuPDF (fitz)提取PDF文本内容
+        try:
+            import fitz  # PyMuPDF
+            doc = fitz.open(pdf_path)
+            if len(doc) == 0:
+                logger.warning(f"PDF文件没有页面: {pdf_path}")
+                doc.close()
+                return 0
+            
+            # 提取所有页面的文本
+            full_text = ""
+            for page_num in range(len(doc)):
+                try:
+                    page = doc.load_page(page_num)
+                    page_text = page.get_text()
+                    if page_text:
+                        full_text += page_text + "\n"
+                except Exception as e:
+                    logger.warning(f"提取第{page_num+1}页文本失败: {e}")
+                    continue
+            
+            doc.close()
+            
+            if not full_text.strip():
+                logger.warning(f"PDF文件没有可提取的文本内容: {pdf_path}")
+                return 0
+            
+            logger.info(f"成功提取PDF文本，长度: {len(full_text)} 字符")
+            
+            # 使用正则表达式匹配金额
+            # 酒店发票常见的金额模式
+            amount_patterns = [
+                # 标准金额格式：123.45元、123.45
+                r'(\d+\.\d{2})元?',
+                # 发票金额：价税合计、合计金额等
+                r'价税合计[：:]\s*(\d+\.\d{2})',
+                r'合计金额[：:]\s*(\d+\.\d{2})',
+                r'总金额[：:]\s*(\d+\.\d{2})',
+                r'金额[：:]\s*(\d+\.\d{2})',
+                # 发票号码后的金额
+                r'发票号码[：:].*?(\d+\.\d{2})',
+                # 大写金额后的数字金额
+                r'[壹贰叁肆伍陆柒捌玖拾佰仟万亿圆角分]+.*?(\d+\.\d{2})',
+                # 简单的数字.数字格式（更宽松的匹配）
+                r'(\d+\.\d{1,2})',
+            ]
+            
+            # 按优先级尝试匹配
+            for pattern in amount_patterns:
+                matches = re.findall(pattern, full_text)
+                if matches:
+                    # 过滤掉明显不是金额的数字（如日期、发票号码等）
+                    valid_amounts = []
+                    for match in matches:
+                        amount = float(match)
+                        # 过滤条件：金额应该在合理范围内（1-10000元）
+                        if 1.0 <= amount <= 10000.0:
+                            valid_amounts.append(amount)
+                    
+                    if valid_amounts:
+                        # 如果有多个匹配，选择最大的（通常是总金额）
+                        amount = max(valid_amounts)
+                        logger.info(f"从PDF文本中使用模式'{pattern}'提取到金额: {amount}")
+                        return amount
+            
+            # 如果正则匹配失败，尝试查找包含"元"的数字
+            yuan_matches = re.findall(r'(\d+\.\d{2})元', full_text)
+            if yuan_matches:
+                amounts = [float(match) for match in yuan_matches if 1.0 <= float(match) <= 10000.0]
+                if amounts:
+                    amount = max(amounts)
+                    logger.info(f"从PDF文本中提取到含'元'的金额: {amount}")
+                    return amount
+            
+            logger.warning(f"无法从PDF文件中提取金额: {pdf_path}")
+            return 0
+            
+        except Exception as e:
+            logger.error(f"使用PyMuPDF提取PDF文本失败: {e}")
+            return 0
+            
+    except Exception as e:
+        logger.error(f"从PDF文件提取金额出错: {str(e)}")
+        return 0
+
+def identify_pdf_type(pdf_path):
+    """识别PDF文件类型（行程单、发票或结账单）"""
+    logger = current_app.logger
+    try:
+        filename = Path(pdf_path).name.lower()
         logger.info(f"正在识别PDF类型: {pdf_path}")
         
         # 通过文件名判断
@@ -99,6 +204,9 @@ def identify_pdf_type(pdf_path):
         elif '行程' in filename or 'itinerary' in filename or 'trip' in filename:
             logger.info(f"通过文件名识别为行程单: {pdf_path}")
             return 'itinerary'
+        elif '结账单' in filename or '账单' in filename or 'bill' in filename:
+            logger.info(f"通过文件名识别为结账单: {pdf_path}")
+            return 'hotel_bill'
         
         # 通过文件内容判断（简单版）
         reader = PdfReader(pdf_path)
@@ -110,6 +218,9 @@ def identify_pdf_type(pdf_path):
             elif '行程' in text or 'itinerary' in text or 'trip' in text:
                 logger.info(f"通过内容识别为行程单: {pdf_path}")
                 return 'itinerary'
+            elif '结账单' in text or '账单' in text or '客人姓名' in text or '房间号' in text or '入住日期' in text:
+                logger.info(f"通过内容识别为结账单: {pdf_path}")
+                return 'hotel_bill'
         
         # 默认返回未知类型
         logger.warning(f"无法识别PDF类型: {pdf_path}")
@@ -123,7 +234,7 @@ def extract_order_id(file_path):
     logger = current_app.logger
     try:
         logger.info(f"正在提取订单ID: {file_path}")
-        filename = os.path.basename(file_path)
+        filename = Path(file_path).name
         
         # 方法0: 最高优先级 - 从发票文件名中提取【】内的内容
         # 支持格式：【及时用车-53.21元-2个行程】高德打车电子发票
@@ -197,6 +308,26 @@ def extract_order_id(file_path):
             logger.info(f"从文件名中提取到数字订单ID: {order_id}")
             return order_id
         
+        # 方法2.5: 特殊处理华住酒店文件
+        # 华住酒店发票格式：dzfp_25114000000003462819_杭州大数云智科技有限公司_20250831201746.pdf
+        # 华住酒店结账单格式：结账单20250831.pdf
+        if 'dzfp_' in filename and '_' in filename:
+            # 提取发票号码作为订单ID
+            parts = filename.split('_')
+            if len(parts) >= 2:
+                invoice_number = parts[1]  # 25114000000003462819
+                logger.info(f"从华住酒店发票文件名提取到发票号码: {invoice_number}")
+                return invoice_number
+        elif '结账单' in filename:
+            # 对于结账单，尝试从发票号码中提取日期部分进行匹配
+            # 这里我们需要一个更智能的匹配策略
+            date_match = re.search(r'(\d{8})', filename)  # 20250831
+            if date_match:
+                date_str = date_match.group(1)
+                logger.info(f"从结账单文件名提取到日期: {date_str}")
+                # 返回一个通用的订单ID，让系统能够匹配
+                return f"hotel_{date_str}"
+        
         # 方法3: 如果是PDF，尝试从内容中提取
         if file_path.lower().endswith('.pdf'):
             try:
@@ -233,7 +364,7 @@ def extract_order_id(file_path):
             return smart_order_id
         
         # 方法6: 如果所有方法都失败，使用文件名的ASCII部分作为标识
-        ascii_filename = ''.join(c for c in os.path.splitext(filename)[0] if ord(c) < 128)
+        ascii_filename = ''.join(c for c in Path(filename).stem if ord(c) < 128)
         if not ascii_filename:
             ascii_filename = str(uuid.uuid4())[:8]
         
@@ -257,7 +388,7 @@ def generate_smart_order_id(filename):
     logger = current_app.logger
     try:
         # 移除文件扩展名，方便处理
-        name_only = os.path.splitext(filename)[0]
+        name_only = Path(filename).stem
 
         # 核心逻辑：定义模式并按优先级排序
         patterns = [
@@ -327,146 +458,209 @@ def match_files_by_order(pdf_files, xml_files):
         
         if pdf_type != 'unknown':
             if order_id not in orders:
-                orders[order_id] = {'xml': None, 'amount': 0, 'pdfs': {'invoice': None, 'itinerary': None}}
+                orders[order_id] = {'xml': None, 'amount': 0, 'pdfs': {'invoice': None, 'itinerary': None, 'hotel_bill': None}}
                 logger.info(f"创建新订单(来自PDF): {order_id}")
+            
+            # 确保pdfs字典包含所有类型
+            if 'hotel_bill' not in orders[order_id]['pdfs']:
+                orders[order_id]['pdfs']['hotel_bill'] = None
             
             orders[order_id]['pdfs'][pdf_type] = pdf_path
             logger.info(f"为订单 {order_id} 添加 {pdf_type} 类型的PDF: {pdf_path}")
     
-    # 检查所有订单的XML状态
+    # 检查所有订单的XML状态（针对网约车文件）
     xml_missing_warnings = []
     for order_id, order_data in orders.items():
         if order_data['xml'] is None:
             xml_missing_warnings.append({
                 'order_id': order_id,
                 'reason': 'XML文件缺失',
-                'impact': '金额统计可能不准确'
+                'impact': '金额统计可能不准确',
+                'type': 'taxi'
             })
-            logger.warning(f"⚠️ 订单 {order_id} 缺少XML文件，金额统计可能不准确")
+            logger.warning(f"⚠️ 网约车订单 {order_id} 缺少XML文件，金额统计可能不准确")
         elif order_data['amount'] == 0:
             xml_missing_warnings.append({
                 'order_id': order_id,
                 'reason': 'XML中未找到金额信息',
-                'impact': '金额统计为0，可能不准确'
+                'impact': '金额统计为0，可能不准确',
+                'type': 'taxi'
             })
-            logger.warning(f"⚠️ 订单 {order_id} XML中未找到金额信息，金额统计为0，可能不准确")
+            logger.warning(f"⚠️ 网约车订单 {order_id} XML中未找到金额信息，金额统计为0，可能不准确")
     
-    logger.info(f"文件匹配完成，共找到 {len(orders)} 个订单，XML缺失警告: {len(xml_missing_warnings)} 个")
+    logger.info(f"网约车文件匹配完成，共找到 {len(orders)} 个订单，XML缺失警告: {len(xml_missing_warnings)} 个")
     return orders, xml_missing_warnings
 
-def merge_pdfs(itinerary_path, invoice_path, output_path):
-    """合并行程单和发票PDF，并调整为一页显示（智能处理阶段使用）"""
+
+def smart_match_hotel_files(orders, extract_dir):
+    """智能匹配华住酒店文件"""
     logger = current_app.logger
-    logger.info(f"开始合并PDF，行程单: {itinerary_path}, 发票: {invoice_path}")
+    logger.info("🔍 开始智能匹配华住酒店文件")
     
-    # 从文件名中 匹配发票/行程单中包含的行程数量 （实例文件名 【阳光出行-32.13元-3个行程】高德打车电子发票，匹配其中的3个行程）
-    itinerary_name = os.path.basename(itinerary_path)
-    invoice_name = os.path.basename(invoice_path)
-    itinerary_match = re.search(r'-(\d+)个行程', itinerary_name)
-    invoice_match = re.search(r'-(\d+)个行程', invoice_name)
-    itinerary_count = int(itinerary_match.group(1)) if itinerary_match else 1
-    invoice_count = int(invoice_match.group(1)) if invoice_match else 1
+    # 查找所有华住酒店相关文件
+    hotel_invoices = []
+    hotel_bills = []
     
-    assert itinerary_count == invoice_count, "行程单和发票的行程数量不一致"
+    for order_id, order_data in orders.items():
+        if order_data['pdfs']['invoice']:
+            invoice_path = order_data['pdfs']['invoice']
+            if 'dzfp_' in Path(invoice_path).name:
+                hotel_invoices.append((order_id, invoice_path))
+        
+        if order_data['pdfs'].get('hotel_bill'):
+            bill_path = order_data['pdfs']['hotel_bill']
+            if '结账单' in Path(bill_path).name:
+                hotel_bills.append((order_id, bill_path))
     
-    # 方法1：优先使用pdftk进行快速合并（毫秒级，推荐）
-    try:
-        import subprocess
-        logger.info("🚀 使用pdftk进行超快速PDF合并...")
+    logger.info(f"找到华住酒店发票: {len(hotel_invoices)}个")
+    logger.info(f"找到华住酒店结账单: {len(hotel_bills)}个")
+    
+    # 如果发票和结账单数量相同，尝试匹配
+    if len(hotel_invoices) == 1 and len(hotel_bills) == 1:
+        invoice_order_id, invoice_path = hotel_invoices[0]
+        bill_order_id, bill_path = hotel_bills[0]
         
-        # 使用pdftk cat进行垂直拼接
-        subprocess.run([
-            'pdftk', invoice_path, itinerary_path, 
-            'cat', 'output', output_path
-        ], check=True, timeout=5)  # 设置5秒超时
-        
-        logger.info("✅ 使用pdftk超快速合并成功")
-        return output_path
-        
-    except (ImportError, subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
-        logger.info(f"pdftk不可用或失败，尝试PyPDF2: {e}")
-        
-        # 方法2：使用PyPDF2进行快速合并（秒级）
-        try:
-            from PyPDF2 import PdfReader, PdfWriter
-            logger.info("🔄 使用PyPDF2进行快速PDF合并...")
+        # 如果它们在不同的订单中，合并它们
+        if invoice_order_id != bill_order_id:
+            logger.info(f"🔄 合并华住酒店订单: {invoice_order_id} + {bill_order_id}")
             
-            # 读取两个PDF文件
-            with open(invoice_path, 'rb') as invoice_file:
-                invoice_reader = PdfReader(invoice_file)
-                invoice_page = invoice_reader.pages[0]
+            # 使用发票的订单ID作为主订单ID
+            main_order_id = invoice_order_id
+            main_order = orders[invoice_order_id]
             
-            with open(itinerary_path, 'rb') as itinerary_file:
-                itinerary_reader = PdfReader(itinerary_file)
-                itinerary_page = itinerary_reader.pages[0]
+            # 将结账单添加到主订单中
+            main_order['pdfs']['hotel_bill'] = bill_path
+            logger.info(f"✅ 将结账单 {Path(bill_path).name} 添加到订单 {main_order_id}")
             
-            # 创建新的PDF
-            writer = PdfWriter()
-            writer.add_page(invoice_page)
-            writer.add_page(itinerary_page)
-            
-            # 保存合并后的PDF
-            with open(output_path, 'wb') as output_file:
-                writer.write(output_file)
-            
-            logger.info("✅ 使用PyPDF2快速合并成功")
-            return output_path
-            
-        except ImportError:
-            logger.info("PyPDF2不可用，回退到图像处理方式")
-        except Exception as e:
-            logger.info(f"PyPDF2合并失败: {e}")
-        
-        # 方法3：回退到原有的图像处理方式（慢速，最后备选）
-        logger.info("⚠️ 回退到图像处理方式（较慢）")
-        A4_WIDTH, A4_HEIGHT = 2480, 3508
-        # 定义页边距（像素）
-        MARGIN = 100
-        # 考虑页边距后的实际可用宽度和高度
-        USABLE_WIDTH = A4_WIDTH - 2 * MARGIN
-        USABLE_HEIGHT = A4_HEIGHT - 2 * MARGIN
-        
-        per_count_height = USABLE_HEIGHT / 21
-        try:
-            from pdf2image import convert_from_path
-            from PIL import Image
-            images = convert_from_path(itinerary_path,dpi=300)
-            itinerary_image = images[0]
-            w, h = itinerary_image.size
-            # 计算需要裁剪的区域 去除部分顶部无关内容
-            top_half = itinerary_image.crop((0, 4*per_count_height, w, h // 2+ per_count_height*(itinerary_count-1)))
-            
-            # resize top_half
-            ratio = USABLE_WIDTH / top_half.width
-            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT*0.6))
-            top_half = top_half.resize(new_size)
-            
-            images = convert_from_path(invoice_path,dpi=300)
-            invoice_image = images[0]
-            
-            # 调整发票尺寸
-            ratio = 0.9*USABLE_WIDTH / invoice_image.width
-            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.4))
-            invoice_image = invoice_image.resize(new_size)
-            
-            combined = Image.new("RGB", (A4_WIDTH, A4_HEIGHT), (255, 255, 255))
+            # 删除原来的结账单订单
+            if bill_order_id in orders:
+                del orders[bill_order_id]
+                logger.info(f"🗑️ 删除重复的结账单订单: {bill_order_id}")
+    
+    return orders
 
-            # 粘贴上半部分（考虑页边距）
-            combined.paste(top_half, (MARGIN, MARGIN))
 
-            # 粘贴下半部分（考虑页边距）
-            combined.paste(invoice_image, (MARGIN, MARGIN + top_half.height))
-            
-            # 最后再缩放到A4纸
-            combined = combined.resize((A4_WIDTH, A4_HEIGHT))
-            
-            combined.save(output_path)
-            
-        except Exception as e:
-            logger.error(f"合并PDF时出错: {str(e)}")
-            raise
+def identify_zip_type_from_filename(zip_filename):
+    """根据ZIP文件名识别类型"""
+    if not zip_filename:
+        return 'unknown'
+    
+    filename_lower = zip_filename.lower()
+    
+    # 检查住宿相关关键词
+    hotel_keywords = [
+        '华住', '酒店', 'hotel', '住宿', 'accommodation', 
+        '桔子', '汉庭', '全季', '如家', '7天', '锦江',
+        '结账单', '账单', 'bill'
+    ]
+    
+    # 检查打车相关关键词
+    taxi_keywords = [
+        '打车', '出行', '行程', 'trip', 'itinerary',
+        '高德', '滴滴', '曹操', '首汽', '阳光', 't3',
+        '火箭', '及时', '约车'
+    ]
+    
+    # 优先检查住宿关键词
+    if any(keyword in filename_lower for keyword in hotel_keywords):
+        return 'hotel'
+    
+    # 然后检查打车关键词
+    if any(keyword in filename_lower for keyword in taxi_keywords):
+        return 'taxi'
+    
+    return 'unknown'
+
+
+def match_hotel_files_by_hash(pdf_files, xml_files, extract_dir):
+    """使用hash前缀匹配住宿文件"""
+    logger = current_app.logger
+    logger.info(f"🏨 开始使用hash前缀匹配住宿文件")
+    logger.info(f"PDF文件数: {len(pdf_files)}, XML文件数: {len(xml_files)}")
+    
+    orders = {}
+    
+    # 处理XML文件
+    for xml_path in xml_files:
+        logger.info(f"正在处理XML文件: {xml_path}")
+        order_id = extract_order_id(xml_path)
+        logger.info(f"从XML文件提取到订单ID: '{order_id}'")
+        amount = extract_amount_from_xml(xml_path)
         
-        return output_path
+        if order_id not in orders:
+            orders[order_id] = {'xml': xml_path, 'amount': amount, 'pdfs': {'invoice': None, 'itinerary': None, 'hotel_bill': None}}
+            logger.info(f"创建新订单: {order_id}, 金额: {amount}")
+        else:
+            orders[order_id]['xml'] = xml_path
+            orders[order_id]['amount'] = amount
+            logger.info(f"更新订单信息: {order_id}, 金额: {amount}")
+    
+    # 处理PDF文件 - 使用hash前缀关联
+    # 从extract_dir路径中提取hash前缀
+    # 路径格式: /path/to/temp/session_id/extracted/hash_prefix/
+    path_parts = Path(extract_dir).parts
+    hash_prefix = None
+    for part in reversed(path_parts):
+        if len(part) >= 8:  # hash前缀通常是8位或更长
+            hash_prefix = part
+            break
+    
+    logger.info(f"🔑 使用hash前缀关联文件: {hash_prefix}")
+    
+    # 为住宿文件创建统一的订单ID
+    hotel_order_id = f"hotel_{hash_prefix}" if hash_prefix else "hotel_accommodation"
+    
+    # 确保订单存在
+    if hotel_order_id not in orders:
+        orders[hotel_order_id] = {'xml': None, 'amount': 0, 'pdfs': {'invoice': None, 'itinerary': None, 'hotel_bill': None}}
+        logger.info(f"创建住宿订单: {hotel_order_id}")
+    
+    # 将所有PDF文件按类型分类并添加到订单中，同时提取金额
+    for pdf_path in pdf_files:
+        logger.info(f"正在处理PDF文件: {pdf_path}")
+        pdf_type = identify_pdf_type(pdf_path)
+        logger.info(f"PDF文件类型: {pdf_type}")
+        
+        if pdf_type != 'unknown':
+            orders[hotel_order_id]['pdfs'][pdf_type] = pdf_path
+            logger.info(f"为住宿订单 {hotel_order_id} 添加 {pdf_type} 类型的PDF: {pdf_path}")
+            
+            # 如果是酒店发票，尝试从PDF中提取金额
+            if pdf_type == 'invoice' and orders[hotel_order_id]['amount'] == 0:
+                pdf_amount = extract_amount_from_pdf(pdf_path)
+                if pdf_amount > 0:
+                    orders[hotel_order_id]['amount'] = pdf_amount
+                    logger.info(f"🏨 从酒店发票PDF中提取到金额: {pdf_amount}")
+    
+    # 检查所有订单的金额状态（针对酒店文件）
+    amount_warnings = []
+    for order_id, order_data in orders.items():
+        if order_data['xml'] is None and order_data['amount'] == 0:
+            # 酒店文件没有XML，也没有从PDF提取到金额
+            amount_warnings.append({
+                'order_id': order_id,
+                'reason': '酒店发票金额提取失败',
+                'impact': '无法获取金额信息，请检查发票文件',
+                'type': 'hotel'
+            })
+            logger.warning(f"⚠️ 酒店订单 {order_id} 无法提取金额信息")
+        elif order_data['xml'] is None and order_data['amount'] > 0:
+            # 酒店文件没有XML，但成功从PDF提取到金额
+            logger.info(f"✅ 酒店订单 {order_id} 从PDF成功提取金额: {order_data['amount']}")
+        elif order_data['xml'] is not None and order_data['amount'] == 0:
+            # 有XML但金额为0（这种情况在酒店文件中较少见）
+            amount_warnings.append({
+                'order_id': order_id,
+                'reason': 'XML中未找到金额信息',
+                'impact': '金额统计为0，可能不准确',
+                'type': 'hotel'
+            })
+            logger.warning(f"⚠️ 酒店订单 {order_id} XML中未找到金额信息")
+    
+    logger.info(f"🏨 住宿文件匹配完成，共找到 {len(orders)} 个订单，金额警告: {len(amount_warnings)} 个")
+    return orders, amount_warnings
+
+
 
 
 def create_smart_combined_pdf(itinerary_path: str, invoice_path: str, output_path: str, page_count: int = 1) -> bool:
@@ -523,8 +717,8 @@ def create_smart_combined_single_page(itinerary_path: str, invoice_path: str, ou
         
         # 从文件名中匹配发票/行程单中包含的行程数量
         # 实例文件名：【阳光出行-32.13元-3个行程】高德打车电子发票，匹配其中的3个行程
-        itinerary_name = os.path.basename(itinerary_path)
-        invoice_name = os.path.basename(invoice_path)
+        itinerary_name = Path(itinerary_path).name
+        invoice_name = Path(invoice_path).name
         itinerary_match = re.search(r'-(\d+)个行程', itinerary_name)
         invoice_match = re.search(r'-(\d+)个行程', invoice_name)
         itinerary_count = int(itinerary_match.group(1)) if itinerary_match else 1
@@ -596,8 +790,8 @@ def create_smart_combined_single_page(itinerary_path: str, invoice_path: str, ou
             combined.save(output_path, "PDF", resolution=300.0)
             
             # 验证输出文件
-            if os.path.exists(output_path):
-                file_size = os.path.getsize(output_path)
+            if Path(output_path).exists():
+                file_size = Path(output_path).stat().st_size
                 logger.info(f"📊 单页拼接文件大小: {file_size} bytes")
                 
                 # 验证文件质量
@@ -645,9 +839,9 @@ def create_smart_combined_multi_page(itinerary_path: str, invoice_path: str, out
         # 创建临时文件
         import tempfile
         temp_dir = tempfile.gettempdir()
-        temp_invoice_first = os.path.join(temp_dir, f"temp_invoice_first_{uuid.uuid4().hex[:8]}.pdf")
-        temp_itinerary_first = os.path.join(temp_dir, f"temp_itinerary_first_{uuid.uuid4().hex[:8]}.pdf")
-        temp_remaining_pages = os.path.join(temp_dir, f"temp_remaining_{uuid.uuid4().hex[:8]}.pdf")
+        temp_invoice_first = Path(temp_dir) / f"temp_invoice_first_{uuid.uuid4().hex[:8]}.pdf"
+        temp_itinerary_first = Path(temp_dir) / f"temp_itinerary_first_{uuid.uuid4().hex[:8]}.pdf"
+        temp_remaining_pages = Path(temp_dir) / f"temp_remaining_{uuid.uuid4().hex[:8]}.pdf"
         
         try:
             # 1. 提取发票第一页
@@ -665,7 +859,7 @@ def create_smart_combined_multi_page(itinerary_path: str, invoice_path: str, out
             
             # 4. 拼接第一页：发票+行程单第一页内容
             logger.info("🔗 拼接第一页：发票在上 + 行程单第一页内容")
-            first_page_combined = os.path.join(temp_dir, f"first_page_combined_{uuid.uuid4().hex[:8]}.pdf")
+            first_page_combined = Path(temp_dir) / f"first_page_combined_{uuid.uuid4().hex[:8]}.pdf"
             
             subprocess.run([
                 'pdftk', temp_invoice_first, temp_itinerary_first, 
@@ -687,8 +881,8 @@ def create_smart_combined_multi_page(itinerary_path: str, invoice_path: str, out
                 shutil.copy2(first_page_combined, output_path)
             
             # 验证输出文件
-            if os.path.exists(output_path):
-                file_size = os.path.getsize(output_path)
+            if Path(output_path).exists():
+                file_size = Path(output_path).stat().st_size
                 logger.info(f"📊 多页拼接文件大小: {file_size} bytes")
                 
                 # 验证文件质量
@@ -729,9 +923,9 @@ def create_smart_combined_multi_page(itinerary_path: str, invoice_path: str, out
             # 清理临时文件
             temp_files = [temp_invoice_first, temp_itinerary_first, temp_remaining_pages, first_page_combined]
             for temp_file in temp_files:
-                if os.path.exists(temp_file):
+                if Path(temp_file).exists():
                     try:
-                        os.remove(temp_file)
+                        Path(temp_file).unlink()
                     except Exception as e:
                         logger.warning(f"清理临时文件失败: {temp_file}, 错误: {e}")
         
@@ -740,124 +934,135 @@ def create_smart_combined_multi_page(itinerary_path: str, invoice_path: str, out
         return False
 
 
-def create_smart_combined_first_page(itinerary_path: str, invoice_path: str, output_path: str) -> bool:
-    """
-    创建智能拼接第一页（发票在上 + 行程单第一页内容）
-    
-    这是多页行程单的第一页，应该包含：
-    1. 发票内容（上半部分）
-    2. 行程单第一页内容（下半部分）
-    
-    后续的行程单页面（第2页、第3页...）将单独打印
-    """
+
+
+def create_hotel_combined_pdf(invoice_path: str, hotel_bill_path: str, output_path: str) -> bool:
+    """创建住宿发票+结账单的拼接页面（结账单上部50%），使用图像拼接方式确保1页输出"""
     logger = current_app.logger
     try:
-        logger.info(f"🚀 开始创建智能拼接第一页（发票在上 + 行程单第一页内容）")
+        logger.info(f"🏨 开始创建住宿拼接页面：发票 + 结账单上部50%")
+        logger.info(f"   发票文件: {Path(invoice_path).name}")
+        logger.info(f"   结账单文件: {Path(hotel_bill_path).name}")
         
-        # 检查是否有必要的工具
-        import subprocess
-        import shutil
-        if not shutil.which('pdftk'):
-            logger.warning("未找到pdftk工具，无法合并PDF")
+        # 导入必要的库
+        try:
+            from pdf2image import convert_from_path
+            from PIL import Image
+        except ImportError as e:
+            logger.error(f"❌ 缺少必要的库: {e}")
+            logger.info("请安装: pip install pdf2image Pillow")
             return False
         
-        # 创建临时文件
-        import tempfile
-        temp_dir = tempfile.gettempdir()
-        temp_itinerary_first = os.path.join(temp_dir, f"temp_itinerary_first_{uuid.uuid4().hex[:8]}.pdf")
-        temp_invoice_first = os.path.join(temp_dir, f"temp_invoice_first_{uuid.uuid4().hex[:8]}.pdf")
+        # A4尺寸（像素，300 DPI）
+        A4_WIDTH, A4_HEIGHT = 2480, 3508
+        # 定义页边距（像素）
+        MARGIN = 100
+        # 考虑页边距后的实际可用宽度和高度
+        USABLE_WIDTH = A4_WIDTH - 2 * MARGIN
+        USABLE_HEIGHT = A4_HEIGHT - 2 * MARGIN
         
         try:
-            # 提取行程单第一页
-            logger.info("📄 提取行程单第一页")
-            subprocess.run(['pdftk', itinerary_path, 'cat', '1', 'output', temp_itinerary_first], check=True)
+            # 1. 转换结账单为图片
+            logger.info("📄 转换结账单为图片")
+            bill_images = convert_from_path(hotel_bill_path, dpi=300)
+            bill_image = bill_images[0]
+            w, h = bill_image.size
             
-            # 提取发票第一页
-            logger.info("🧾 提取发票第一页")
-            subprocess.run(['pdftk', invoice_path, 'cat', '1', 'output', temp_invoice_first], check=True)
+            # 2. 提取结账单上部50%（修复：确保是上部而不是下部）
+            logger.info("✂️ 提取结账单上部50%")
+            # 上部50%：从顶部(0)到中间(h//2)
+            top_half = bill_image.crop((0, 0, w, h // 2))
+            logger.info(f"✂️ 结账单裁剪区域: 顶部0px, 底部{h//2}px")
             
-            # 智能拼接：发票在上，行程单第一页内容在下
-            # 使用pdftk的cat功能进行垂直拼接（已验证有效的方法）
-            logger.info("🔗 开始智能拼接：发票在上 + 行程单第一页内容")
+            # 3. 调整结账单尺寸（占下半部分，约60%高度）
+            ratio = USABLE_WIDTH / top_half.width
+            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.6))
+            top_half = top_half.resize(new_size, Image.Resampling.LANCZOS)
             
-            try:
-                logger.info("🔄 使用pdftk cat功能进行垂直拼接")
+            # 4. 转换发票为图片
+            logger.info("🧾 转换发票为图片")
+            invoice_images = convert_from_path(invoice_path, dpi=300)
+            invoice_image = invoice_images[0]
+            
+            # 5. 调整发票尺寸（占上半部分，约40%高度）
+            ratio = 0.9 * USABLE_WIDTH / invoice_image.width
+            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.4))
+            invoice_image = invoice_image.resize(new_size, Image.Resampling.LANCZOS)
+            
+            # 6. 创建新的空白图片
+            combined = Image.new("RGB", (A4_WIDTH, A4_HEIGHT), (255, 255, 255))
+            
+            # 7. 粘贴发票到上半部分（考虑页边距）
+            combined.paste(invoice_image, (MARGIN, MARGIN))
+            
+            # 8. 粘贴结账单上部到下半部分（考虑页边距）
+            combined.paste(top_half, (MARGIN, MARGIN + invoice_image.height))
+            
+            # 9. 最后再缩放到A4纸
+            combined = combined.resize((A4_WIDTH, A4_HEIGHT), Image.Resampling.LANCZOS)
+            
+            # 10. 保存为PDF
+            logger.info("💾 保存拼接后的图片为PDF")
+            combined.save(output_path, "PDF", resolution=300.0)
+            
+            # 验证输出文件
+            if Path(output_path).exists():
+                file_size = Path(output_path).stat().st_size
+                logger.info(f"📊 住宿拼接文件大小: {file_size} bytes")
                 
-                # 直接使用pdftk cat拼接，无需复杂的尺寸检查
-                # 测试显示：即使页面尺寸不同，pdftk cat也能正确处理
-                subprocess.run([
-                    'pdftk', temp_invoice_first, temp_itinerary_first, 
-                    'cat', 'output', output_path
-                ], check=True)
-                
-                logger.info("✅ 使用pdftk cat功能成功拼接")
-                
-                # 验证拼接结果
-                if os.path.exists(output_path):
-                    file_size = os.path.getsize(output_path)
-                    logger.info(f"📊 拼接文件大小: {file_size} bytes")
-                    
-                    # 验证文件质量
-                    if file_size < 1000:
-                        logger.warning("⚠️ 拼接文件过小，可能拼接失败")
-                        return False
-                    
-                    # 验证PDF有效性
-                    result = subprocess.run(['pdftk', output_path, 'dump_data'], 
-                                          capture_output=True, text=True, timeout=10)
-                    if result.returncode == 0:
-                        page_count = 0
-                        for line in result.stdout.split('\n'):
-                            if line.startswith('NumberOfPages:'):
-                                page_count = int(line.split(':')[1].strip())
-                                break
-                        
-                        if page_count >= 2:  # 拼接后应该有2页（发票+行程单第1页）
-                            logger.info(f"✅ 拼接验证成功：{page_count}页")
-                            logger.info(f"   文件路径: {output_path}")
-                            logger.info(f"   文件大小: {file_size} bytes")
-                            return True
-                        else:
-                            logger.warning(f"⚠️ 拼接页数异常：{page_count}页")
-                            return False
-                        
-                    else:
-                        logger.warning("⚠️ 无法验证PDF有效性")
-                        return False
-                        
-                else:
-                    logger.error("❌ 输出文件创建失败")
+                # 验证文件质量
+                if file_size < 1000:
+                    logger.error("❌ 拼接文件过小，可能拼接失败")
                     return False
-                    
-            except subprocess.CalledProcessError as e:
-                logger.error(f"❌ pdftk cat功能失败: {e}")
+                
+                logger.info("✅ 住宿拼接成功（发票+结账单上部50%拼接到一页）")
+                logger.info(f"   文件路径: {output_path}")
+                logger.info(f"   文件大小: {file_size} bytes")
+                return True
+            else:
+                logger.error("❌ 住宿拼接输出文件未生成")
                 return False
                 
-        finally:
-            # 清理临时文件
-            try:
-                if os.path.exists(temp_itinerary_first):
-                    os.remove(temp_itinerary_first)
-                if os.path.exists(temp_invoice_first):
-                    os.remove(temp_invoice_first)
-            except Exception as e:
-                logger.warning(f"清理临时文件时出错: {e}")
+        except Exception as e:
+            logger.error(f"❌ 图片拼接过程中出错: {str(e)}")
+            raise
         
     except Exception as e:
-        logger.error(f"❌ 创建智能拼接第一页失败: {e}")
+        logger.error(f"❌ 创建住宿拼接页面失败: {e}")
         return False
 
-def process_pdf_files(extract_dir):
+
+def process_pdf_files(extract_dir, zip_filename=None):
     """处理解压后的PDF和XML文件"""
     logger = current_app.logger
     logger.info(f"开始处理解压后的文件: {extract_dir}")
+    
+    # 根据ZIP文件名判断处理类型
+    zip_type = identify_zip_type_from_filename(zip_filename) if zip_filename else 'unknown'
+    logger.info(f"ZIP文件类型: {zip_type}")
     
     # 获取所有文件路径
     file_paths = get_file_paths(extract_dir)
     grouped_files = group_files_by_type(file_paths)
     
-    # 按订单匹配文件
-    orders, xml_missing_warnings = match_files_by_order(grouped_files['pdf'], grouped_files['xml'])
+    # 根据ZIP类型选择不同的处理策略
+    if zip_type == 'hotel':
+        # 住宿记录：使用hash前缀关联文件
+        orders, xml_missing_warnings = match_hotel_files_by_hash(grouped_files['pdf'], grouped_files['xml'], extract_dir)
+    else:
+        # 打车行程单：使用原有的订单匹配逻辑
+        orders, xml_missing_warnings = match_files_by_order(grouped_files['pdf'], grouped_files['xml'])
+        # 特殊处理：如果发现华住酒店文件，尝试智能匹配
+        orders = smart_match_hotel_files(orders, extract_dir)
+        
+        # 如果ZIP类型是unknown但包含华住酒店文件，也尝试酒店匹配
+        if zip_type == 'unknown' and any('dzfp_' in Path(pdf).name for pdf in grouped_files['pdf']):
+            logger.info("🔍 检测到华住酒店发票，尝试酒店文件匹配")
+            hotel_orders, hotel_warnings = match_hotel_files_by_hash(grouped_files['pdf'], grouped_files['xml'], extract_dir)
+            if hotel_orders:
+                logger.info(f"✅ 成功匹配到 {len(hotel_orders)} 个酒店订单")
+                orders.update(hotel_orders)
+                xml_missing_warnings.extend(hotel_warnings)
     
     results = []
     
@@ -867,6 +1072,7 @@ def process_pdf_files(extract_dir):
         # 检查是否有足够的文件进行处理
         itinerary_path = order_data['pdfs']['itinerary']
         invoice_path = order_data['pdfs']['invoice']
+        hotel_bill_path = order_data['pdfs'].get('hotel_bill')
         
         if not itinerary_path and not invoice_path:
             logger.warning(f"订单 {order_id} 没有PDF文件，跳过处理")
@@ -877,50 +1083,121 @@ def process_pdf_files(extract_dir):
         
         # 生成输出文件名 (使用序号和随机字符串，避免使用可能包含中文的order_id)
         output_filename = f"order_{order_count}_{uuid.uuid4().hex[:8]}.pdf"
-        output_path = os.path.join(current_app.config['OUTPUT_FOLDER'], output_filename)
+        output_path = Path(current_app.config['OUTPUT_FOLDER']) / output_filename
         
         logger.info(f"处理订单 {order_id} (序号 {order_count})，输出文件: {output_filename}")
         
-        # 智能拼接PDF（根据行程单页数决定拼接方式）
+        # 智能拼接PDF（根据文件类型决定拼接方式）
         try:
-            # 获取行程单页数
-            page_count = 1  # 默认1页
-            try:
-                from PyPDF2 import PdfReader
-                with open(itinerary_path, 'rb') as f:
-                    reader = PdfReader(f)
-                    page_count = len(reader.pages)
-                    logger.info(f"行程单页数: {page_count}")
-            except Exception as e:
-                logger.warning(f"无法获取行程单页数，使用默认值1: {e}")
-            
-            # 使用智能拼接函数
-            if create_smart_combined_pdf(itinerary_path, invoice_path, output_path, page_count):
-                logger.info(f"智能拼接成功，输出文件: {output_path}")
+            # 判断是住宿记录还是打车行程单
+            if invoice_path and hotel_bill_path:
+                # 住宿记录：发票+结账单
+                logger.info(f"🏨 检测到住宿记录，处理发票+结账单拼接")
+                if create_hotel_combined_pdf(invoice_path, hotel_bill_path, output_path):
+                    logger.info(f"住宿拼接成功，输出文件: {output_path}")
+                    
+                    # 添加处理结果
+                    results.append({
+                        'order_id': order_id,
+                        'amount': order_data['amount'],
+                        'output_file': output_filename,
+                        'has_itinerary': False,
+                        'has_invoice': True,
+                        'has_hotel_bill': True,
+                        'page_count': 1,
+                        'combined_type': 'hotel_accommodation'
+                    })
+                    logger.info(f"订单 {order_id} 住宿记录处理成功")
+                else:
+                    logger.error(f"住宿拼接失败，订单 {order_id}")
+            elif itinerary_path and invoice_path:
+                # 打车行程单：行程单+发票
+                logger.info(f"🚗 检测到打车行程单，处理行程单+发票拼接")
                 
-                # 添加处理结果
-                results.append({
-                    'order_id': order_id,
-                    'amount': order_data['amount'],
-                    'output_file': output_filename,
-                    'has_itinerary': itinerary_path is not None,
-                    'has_invoice': invoice_path is not None,
-                    'page_count': page_count,
-                    'combined_type': 'single_page' if page_count == 1 else 'multi_page'
-                })
-                logger.info(f"订单 {order_id} 处理成功")
+                # 获取行程单页数
+                page_count = 1  # 默认1页
+                try:
+                    from PyPDF2 import PdfReader
+                    with open(itinerary_path, 'rb') as f:
+                        reader = PdfReader(f)
+                        page_count = len(reader.pages)
+                        logger.info(f"行程单页数: {page_count}")
+                except Exception as e:
+                    logger.warning(f"无法获取行程单页数，使用默认值1: {e}")
+                
+                # 使用智能拼接函数
+                if create_smart_combined_pdf(itinerary_path, invoice_path, output_path, page_count):
+                    logger.info(f"智能拼接成功，输出文件: {output_path}")
+                    
+                    # 添加处理结果
+                    results.append({
+                        'order_id': order_id,
+                        'amount': order_data['amount'],
+                        'output_file': output_filename,
+                        'has_itinerary': True,
+                        'has_invoice': True,
+                        'has_hotel_bill': False,
+                        'page_count': page_count,
+                        'combined_type': 'single_page' if page_count == 1 else 'multi_page'
+                    })
+                    logger.info(f"订单 {order_id} 处理成功")
+                else:
+                    logger.error(f"智能拼接失败，订单 {order_id}")
             else:
-                logger.error(f"智能拼接失败，订单 {order_id}")
+                logger.warning(f"订单 {order_id} 文件组合不完整，跳过处理")
                 
         except Exception as e:
             logger.error(f"处理订单 {order_id} 时出错: {str(e)}")
     
     logger.info(f"所有订单处理完成，成功处理 {len(results)} 个订单")
     
-    # 如果有XML缺失警告，记录详细信息
-    if xml_missing_warnings:
-        logger.warning(f"⚠️ 发现 {len(xml_missing_warnings)} 个XML相关问题，金额统计可能不准确:")
-        for warning in xml_missing_warnings:
-            logger.warning(f"   - 订单 {warning['order_id']}: {warning['reason']} -> {warning['impact']}")
+    # 分类统计金额和警告
+    taxi_amount = 0
+    hotel_amount = 0
+    taxi_warnings = []
+    hotel_warnings = []
     
-    return results, xml_missing_warnings 
+    # 统计各类订单的金额
+    for order_id, order_data in orders.items():
+        amount = order_data.get('amount', 0)
+        if order_id.startswith('hotel_'):
+            hotel_amount += amount
+        else:
+            taxi_amount += amount
+    
+    # 分类警告信息
+    for warning in xml_missing_warnings:
+        if warning.get('type') == 'hotel':
+            hotel_warnings.append(warning)
+        else:
+            taxi_warnings.append(warning)
+    
+    # 记录分类统计结果
+    logger.info(f"📊 金额统计结果:")
+    logger.info(f"   🚗 网约车总金额: {taxi_amount:.2f}元 ({len([o for o in orders.values() if not o.get('order_id', '').startswith('hotel_')])}个订单)")
+    logger.info(f"   🏨 酒店总金额: {hotel_amount:.2f}元 ({len([o for o in orders.values() if o.get('order_id', '').startswith('hotel_')])}个订单)")
+    logger.info(f"   💰 总金额: {taxi_amount + hotel_amount:.2f}元")
+    
+    # 记录分类警告
+    if taxi_warnings:
+        logger.warning(f"⚠️ 网约车相关问题 ({len(taxi_warnings)}个):")
+        for warning in taxi_warnings:
+            logger.warning(f"   🚗 订单 {warning['order_id']}: {warning['reason']} -> {warning['impact']}")
+    
+    if hotel_warnings:
+        logger.warning(f"⚠️ 酒店相关问题 ({len(hotel_warnings)}个):")
+        for warning in hotel_warnings:
+            logger.warning(f"   🏨 订单 {warning['order_id']}: {warning['reason']} -> {warning['impact']}")
+    
+    # 创建分类统计信息
+    classification_info = {
+        'taxi_amount': taxi_amount,
+        'hotel_amount': hotel_amount,
+        'total_amount': taxi_amount + hotel_amount,
+        'taxi_orders': len([o for o in orders.values() if not o.get('order_id', '').startswith('hotel_')]),
+        'hotel_orders': len([o for o in orders.values() if o.get('order_id', '').startswith('hotel_')]),
+        'taxi_warnings': taxi_warnings,
+        'hotel_warnings': hotel_warnings
+    }
+    
+    return results, xml_missing_warnings, classification_info 

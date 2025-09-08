@@ -1,0 +1,16 @@
+{
+  "7554537acfb2ac093df71ff5fd7176fd05dbcd2f9a03237b6f981d6d5fb933bf": {
+    "filename": "zip",
+    "upload_time": "2025-09-03 16:16:16",
+    "session_id": "b3d16766-6c00-45ba-ad57-a9ded38f96d9",
+    "results": [
+      {
+        "order_id": "及时用车-53.21元-2个行程",
+        "amount": 53.21,
+        "output_file": "order_1_bc559107.pdf",
+        "has_itinerary": true,
+        "has_invoice": true
+      }
+    ]
+  }
+}

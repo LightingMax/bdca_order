@@ -1,0 +1,142 @@
+{
+  "f2d2b6fc272c3eda192ce602cc8d269db6059801cfea82a012067778aa904fb7": {
+    "filename": "25114000000003442854.zip",
+    "original_filename": "【华住酒店集团】桔子北京石景山八角游乐园酒店发票已开具，感谢您的支持！（发票号码：25114000000003442854）.zip",
+    "upload_time": "2025-09-08 20:30:17",
+    "session_id": "e521476a-a8b7-4bd9-a138-b99fbeb251dc",
+    "results": [
+      {
+        "order_id": "hotel_25114000000003442854",
+        "amount": 438.15,
+        "output_file": "order_1_ad58c979.pdf",
+        "has_itinerary": false,
+        "has_invoice": true,
+        "has_hotel_bill": true,
+        "page_count": 1,
+        "combined_type": "hotel_accommodation"
+      }
+    ]
+  },
+  "c49b2f00775506d9d1dcc33627a4159d73c7c571edc65c3d9308d9a016592ccc": {
+    "filename": "12.zip",
+    "original_filename": "高德打车电子发票 (12).zip",
+    "upload_time": "2025-09-08 20:30:28",
+    "session_id": "0122ed66-bf00-4339-84d9-60035ec6239f",
+    "results": [
+      {
+        "order_id": "曹操出行-14.50元-1个行程",
+        "amount": 14.5,
+        "output_file": "order_1_d8930719.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "曹操出行-18.45元-1个行程",
+        "amount": 18.45,
+        "output_file": "order_2_c05b9d7c.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "有序出行-148.12元-1个行程",
+        "amount": 148.12,
+        "output_file": "order_3_b4ce3d40.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "93f94ebb804d23e5b925a241a9dcd2638c4d986a9002acd2fb15800b152c9811": {
+    "filename": "6.zip",
+    "original_filename": "高德打车电子发票 (6).zip",
+    "upload_time": "2025-09-08 20:30:32",
+    "session_id": "0122ed66-bf00-4339-84d9-60035ec6239f",
+    "results": [
+      {
+        "order_id": "曹操出行-83.92元-2个行程",
+        "amount": 83.92,
+        "output_file": "order_1_7d9e74e7.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "首汽约车-101.61元-1个行程",
+        "amount": 101.61,
+        "output_file": "order_2_4ddcfa4e.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "曹操出行-89.66元-1个行程",
+        "amount": 89.66,
+        "output_file": "order_3_d6dfb83b.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "火箭出行-724.37元-19个行程",
+        "amount": 724.37,
+        "output_file": "order_4_193649a7.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 2,
+        "combined_type": "multi_page"
+      }
+    ]
+  },
+  "8f2353840f55259eea92c5806fc2adf3394fcce8dc8afcd8aa1725f7d666b85d": {
+    "filename": "9.zip",
+    "original_filename": "高德打车电子发票 (9).zip",
+    "upload_time": "2025-09-08 20:30:51",
+    "session_id": "a3216470-9f43-466a-8111-9787a3fa2422",
+    "results": [
+      {
+        "order_id": "小牛快跑-21.88元-1个行程",
+        "amount": 21.88,
+        "output_file": "order_1_dc3aee80.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "7e614197421a8fe14240518067602a103b308e98152c8e8ef7fb065231beb716": {
+    "filename": "7.zip",
+    "original_filename": "高德打车电子发票 (7).zip",
+    "upload_time": "2025-09-08 20:31:51",
+    "session_id": "1b1b6fec-0b4e-4b80-91fc-f7c1f229d102",
+    "results": [
+      {
+        "order_id": "旅程约车-72.78元-1个行程",
+        "amount": 72.78,
+        "output_file": "order_1_013b60d6.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  }
+}

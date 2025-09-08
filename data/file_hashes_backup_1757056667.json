@@ -1,0 +1,268 @@
+{
+  "412a0ccb1f30ecd6d815b7c11a03bc3ee6593ba0c54db8b35b96eb01e37401c1": {
+    "filename": "zip",
+    "upload_time": "2025-09-03 22:04:49",
+    "session_id": "6263f422-c27d-4010-b2be-5c1dcc444542",
+    "results": [
+      {
+        "order_id": "火箭出行-1079.92元-28个行程",
+        "amount": 0,
+        "output_file": "order_1_b920da25.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "7554537acfb2ac093df71ff5fd7176fd05dbcd2f9a03237b6f981d6d5fb933bf": {
+    "filename": "zip",
+    "upload_time": "2025-09-03 22:20:11",
+    "session_id": "2956da4c-5bf8-4ecf-9ca6-283cb16c323e",
+    "results": [
+      {
+        "order_id": "及时用车-53.21元-2个行程",
+        "amount": 53.21,
+        "output_file": "order_1_5287ec36.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ],
+    "print_status": "printed",
+    "last_print_time": "2025-09-03 22:26:07"
+  },
+  "79e2bd10e1bdcf8e0a1ba5b2d99f8a72ccba5a8f5501ef1f32c4aafa371fb1b1": {
+    "filename": "v2.zip",
+    "upload_time": "2025-09-03 22:31:03",
+    "session_id": "e9e1f902-9164-49f5-a06f-a8b2c1756d29",
+    "results": [
+      {
+        "order_id": "火箭出行-1079.92元-28个行程",
+        "amount": 0,
+        "output_file": "order_1_fc6e5791.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 2,
+        "combined_type": "multi_page"
+      }
+    ]
+  },
+  "cf6769c157fd21e3f86392282d261a2e3c860ea7196623df14a3a0f8e25044e7": {
+    "filename": "14.zip",
+    "upload_time": "2025-09-05 14:56:14",
+    "session_id": "b5ffb490-037e-4973-818b-dad79c11a47d",
+    "results": [
+      {
+        "order_id": "í╛╗≡╝²│÷╨╨-263.89",
+        "amount": 263.89,
+        "output_file": "order_1_f38ed2a1.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "96fb8342b5ab18b19eb2e891c21aac3033f68e9d9f0e6133176c1149b1cddae7": {
+    "filename": "13.zip",
+    "upload_time": "2025-09-05 14:56:14",
+    "session_id": "b5ffb490-037e-4973-818b-dad79c11a47d",
+    "results": [
+      {
+        "order_id": "í╛AA│÷╨╨-18.82",
+        "amount": 18.82,
+        "output_file": "order_1_427e307b.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "c49b2f00775506d9d1dcc33627a4159d73c7c571edc65c3d9308d9a016592ccc": {
+    "filename": "12.zip",
+    "upload_time": "2025-09-05 14:56:16",
+    "session_id": "b5ffb490-037e-4973-818b-dad79c11a47d",
+    "results": [
+      {
+        "order_id": "í╛╙╨╨≥│÷╨╨-148.12",
+        "amount": 148.12,
+        "output_file": "order_1_77c42750.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "í╛▓▄▓┘│÷╨╨-14.50",
+        "amount": 14.5,
+        "output_file": "order_2_8ea73aff.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "í╛▓▄▓┘│÷╨╨-18.45",
+        "amount": 18.45,
+        "output_file": "order_3_e0a3b8ec.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "c806316e7a5acb48983db7ee1d2f69d8a57b52a895c9de0c8bd016e54570ed47": {
+    "filename": "11.zip",
+    "upload_time": "2025-09-05 14:56:17",
+    "session_id": "b5ffb490-037e-4973-818b-dad79c11a47d",
+    "results": [
+      {
+        "order_id": "í╛╠φ├¿│÷╨╨-28.55",
+        "amount": 0,
+        "output_file": "order_1_574f93f1.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "5393e15a940c7f07e5f637f72cf935bd183c58921ecaaa3b7288b89ba4048734": {
+    "filename": "10.zip",
+    "upload_time": "2025-09-05 14:56:19",
+    "session_id": "b5ffb490-037e-4973-818b-dad79c11a47d",
+    "results": [
+      {
+        "order_id": "í╛╠┌╖╔│÷╨╨-42.64",
+        "amount": 42.64,
+        "output_file": "order_1_084046f9.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "í╛╨╟╗╒│÷╨╨-185.04",
+        "amount": 185.04,
+        "output_file": "order_2_65e24378.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "í╛AA│÷╨╨-23.95",
+        "amount": 23.95,
+        "output_file": "order_3_b52664c8.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "8f2353840f55259eea92c5806fc2adf3394fcce8dc8afcd8aa1725f7d666b85d": {
+    "filename": "9.zip",
+    "upload_time": "2025-09-05 14:56:19",
+    "session_id": "b5ffb490-037e-4973-818b-dad79c11a47d",
+    "results": [
+      {
+        "order_id": "í╛╨í┼ú┐∞┼▄-21.88",
+        "amount": 21.88,
+        "output_file": "order_1_d4a9179e.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "2a3b2ba56ded937f618aa90cfa2dfdab2a24f2b7950dcce2455337564a912efa": {
+    "filename": "8.zip",
+    "upload_time": "2025-09-05 14:56:21",
+    "session_id": "b5ffb490-037e-4973-818b-dad79c11a47d",
+    "results": [
+      {
+        "order_id": "í╛╞∞├ε│÷╨╨-21.01",
+        "amount": 21.01,
+        "output_file": "order_1_21a8037d.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "í╛╖╔α╓┤≥│╡-80.72",
+        "amount": 80.72,
+        "output_file": "order_2_f424abbe.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "7e614197421a8fe14240518067602a103b308e98152c8e8ef7fb065231beb716": {
+    "filename": "7.zip",
+    "upload_time": "2025-09-05 14:56:21",
+    "session_id": "b5ffb490-037e-4973-818b-dad79c11a47d",
+    "results": [
+      {
+        "order_id": "í╛┬├│╠╘╝│╡-72.78",
+        "amount": 72.78,
+        "output_file": "order_1_8e7a0918.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "93f94ebb804d23e5b925a241a9dcd2638c4d986a9002acd2fb15800b152c9811": {
+    "filename": "6.zip",
+    "upload_time": "2025-09-05 14:56:25",
+    "session_id": "b5ffb490-037e-4973-818b-dad79c11a47d",
+    "results": [
+      {
+        "order_id": "í╛▓▄▓┘│÷╨╨-83.92",
+        "amount": 83.92,
+        "output_file": "order_1_17992ea4.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "í╛╗≡╝²│÷╨╨-724.37",
+        "amount": 724.37,
+        "output_file": "order_2_a9bff316.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 2,
+        "combined_type": "multi_page"
+      },
+      {
+        "order_id": "í╛▓▄▓┘│÷╨╨-89.66",
+        "amount": 89.66,
+        "output_file": "order_3_b9442ea7.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "í╛╩╫╞√╘╝│╡-101.61",
+        "amount": 101.61,
+        "output_file": "order_4_aeeceb05.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  }
+}

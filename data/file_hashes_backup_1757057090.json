@@ -1,0 +1,46 @@
+{
+  "93f94ebb804d23e5b925a241a9dcd2638c4d986a9002acd2fb15800b152c9811": {
+    "filename": "6.zip",
+    "original_filename": "高德打车电子发票 (6).zip",
+    "upload_time": "2025-09-05 15:18:00",
+    "session_id": "173a527f-70cc-41cb-9c44-9afd4cfd04a1",
+    "results": [
+      {
+        "order_id": "í╛▓▄▓┘│÷╨╨-83.92",
+        "amount": 83.92,
+        "output_file": "order_1_3d605afb.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "í╛╗≡╝²│÷╨╨-724.37",
+        "amount": 724.37,
+        "output_file": "order_2_4c39ea3c.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 2,
+        "combined_type": "multi_page"
+      },
+      {
+        "order_id": "í╛▓▄▓┘│÷╨╨-89.66",
+        "amount": 89.66,
+        "output_file": "order_3_a8f5f01e.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "í╛╩╫╞√╘╝│╡-101.61",
+        "amount": 101.61,
+        "output_file": "order_4_a4c2dbd8.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  }
+}

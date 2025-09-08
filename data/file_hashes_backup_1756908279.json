@@ -1,0 +1,50 @@
+{
+  "7554537acfb2ac093df71ff5fd7176fd05dbcd2f9a03237b6f981d6d5fb933bf": {
+    "filename": "zip",
+    "upload_time": "2025-09-03 21:40:47",
+    "session_id": "36f3d870-8f4e-4e04-b937-9c04d063d80b",
+    "results": [
+      {
+        "order_id": "及时用车-53.21元-2个行程",
+        "amount": 53.21,
+        "output_file": "order_1_968ee899.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "412a0ccb1f30ecd6d815b7c11a03bc3ee6593ba0c54db8b35b96eb01e37401c1": {
+    "filename": "zip",
+    "upload_time": "2025-09-03 21:41:25",
+    "session_id": "88293b50-65c2-4153-af98-9d2d50a79a3e",
+    "results": [
+      {
+        "order_id": "火箭出行-1079.92元-28个行程",
+        "amount": 0,
+        "output_file": "order_1_584b0698.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "79e2bd10e1bdcf8e0a1ba5b2d99f8a72ccba5a8f5501ef1f32c4aafa371fb1b1": {
+    "filename": "v2.zip",
+    "upload_time": "2025-09-03 21:48:12",
+    "session_id": "5ab7102c-3b6f-4268-aacc-f9c4790861fc",
+    "results": [
+      {
+        "order_id": "火箭出行-1079.92元-28个行程",
+        "amount": 0,
+        "output_file": "order_1_5a272142.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 2,
+        "combined_type": "multi_page"
+      }
+    ]
+  }
+}

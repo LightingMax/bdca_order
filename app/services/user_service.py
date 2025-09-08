@@ -282,4 +282,74 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"❌ 获取统计信息时出错: {e}")
         import traceback
-        traceback.print_exc() 
+        traceback.print_exc()
+
+def load_classification_stats():
+    """加载分类统计数据"""
+    logger = current_app.logger
+    try:
+        classification_stats_file = current_app.config.get('CLASSIFICATION_STATS_FILE', 'data/classification_stats.json')
+        logger.debug(f"尝试加载分类统计数据文件: {classification_stats_file}")
+        
+        if os.path.exists(classification_stats_file):
+            with open(classification_stats_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                logger.info(f"成功加载分类统计数据: {data}")
+                return data
+        else:
+            logger.warning("分类统计数据文件不存在，返回默认值")
+            return {
+                'taxi_amount': 0.0,
+                'hotel_amount': 0.0,
+                'total_amount': 0.0,
+                'taxi_orders': 0,
+                'hotel_orders': 0,
+                'last_updated': None
+            }
+    except Exception as e:
+        logger.error(f"加载分类统计数据出错: {str(e)}")
+        return {
+            'taxi_amount': 0.0,
+            'hotel_amount': 0.0,
+            'total_amount': 0.0,
+            'taxi_orders': 0,
+            'hotel_orders': 0,
+            'last_updated': None
+        }
+
+def save_classification_stats(taxi_amount, hotel_amount, taxi_orders, hotel_orders):
+    """保存分类统计数据"""
+    logger = current_app.logger
+    try:
+        classification_stats_file = current_app.config.get('CLASSIFICATION_STATS_FILE', 'data/classification_stats.json')
+        
+        # 加载现有数据
+        existing_data = load_classification_stats()
+        
+        # 累加金额和订单数
+        new_data = {
+            'taxi_amount': existing_data['taxi_amount'] + taxi_amount,
+            'hotel_amount': existing_data['hotel_amount'] + hotel_amount,
+            'total_amount': existing_data['taxi_amount'] + existing_data['hotel_amount'] + taxi_amount + hotel_amount,
+            'taxi_orders': existing_data['taxi_orders'] + taxi_orders,
+            'hotel_orders': existing_data['hotel_orders'] + hotel_orders,
+            'last_updated': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        # 确保目录存在
+        os.makedirs(os.path.dirname(classification_stats_file), exist_ok=True)
+        
+        # 保存数据
+        with open(classification_stats_file, 'w', encoding='utf-8') as f:
+            json.dump(new_data, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"分类统计数据保存成功: {new_data}")
+        return new_data
+        
+    except Exception as e:
+        logger.error(f"保存分类统计数据出错: {str(e)}")
+        return None
+
+def get_classification_stats():
+    """获取分类统计数据"""
+    return load_classification_stats() 

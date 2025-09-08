@@ -1,0 +1,86 @@
+{
+  "ea91d6799dadb3f7b92f195d59962349cfd4446cf01045e7cd418a6fa283e54e": {
+    "filename": "6_2.zip",
+    "upload_time": "2025-09-02 19:51:40",
+    "session_id": "041734f2-b9b9-4c0f-bedb-5f2d6c5a3d7b",
+    "results": [
+      {
+        "order_id": "旅程约车-29.59元-1个行程",
+        "amount": 29.59,
+        "output_file": "order_1_93c6bfe0.pdf",
+        "has_itinerary": true,
+        "has_invoice": true
+      },
+      {
+        "order_id": "曹操出行-94.42元-2个行程",
+        "amount": 94.42,
+        "output_file": "order_2_da7aa5ef.pdf",
+        "has_itinerary": true,
+        "has_invoice": true
+      },
+      {
+        "order_id": "T3出行-77.06元-1个行程",
+        "amount": 77.06,
+        "output_file": "order_3_75429ad1.pdf",
+        "has_itinerary": true,
+        "has_invoice": true
+      }
+    ]
+  },
+  "7554537acfb2ac093df71ff5fd7176fd05dbcd2f9a03237b6f981d6d5fb933bf": {
+    "filename": "zip",
+    "upload_time": "2025-09-03 13:50:56",
+    "session_id": "2eb12dc2-cf8e-4446-9fe2-0516236315a0",
+    "results": [
+      {
+        "order_id": "及时用车-53.21元-2个行程",
+        "amount": 53.21,
+        "output_file": "order_1_7998a8ee.pdf",
+        "has_itinerary": true,
+        "has_invoice": true
+      }
+    ]
+  },
+  "336c8752ab20e1997155fb94aa8cbe757a7e02163a907dd90c92fe60de4c2c92": {
+    "filename": "zip",
+    "upload_time": "2025-09-03 12:00:17",
+    "session_id": "840e039c-6585-412c-b652-ba655560e69a",
+    "results": [
+      {
+        "order_id": "及时用车-53.21元-2个行程",
+        "amount": 53.21,
+        "output_file": "order_1_ba89c3e2.pdf",
+        "has_itinerary": true,
+        "has_invoice": true
+      }
+    ]
+  },
+  "79e2bd10e1bdcf8e0a1ba5b2d99f8a72ccba5a8f5501ef1f32c4aafa371fb1b1": {
+    "filename": "v2.zip",
+    "upload_time": "2025-09-03 13:49:08",
+    "session_id": "e9625f64-336d-43fc-a46c-6f8fff3a2773",
+    "results": [
+      {
+        "order_id": "火箭出行-1079.92元-28个行程",
+        "amount": 0,
+        "output_file": "order_1_405a24b3.pdf",
+        "has_itinerary": true,
+        "has_invoice": true
+      }
+    ]
+  },
+  "7b1e84358d97c08d66149670d5319e053794a66b8495bdc0009a699f1e78bf9a": {
+    "filename": "xml.zip",
+    "upload_time": "2025-09-03 13:53:03",
+    "session_id": "90292774-2c5c-4b1f-b21c-cfe195343c3e",
+    "results": [
+      {
+        "order_id": "及时用车-53.21元-2个行程",
+        "amount": 0,
+        "output_file": "order_1_e6fb1d63.pdf",
+        "has_itinerary": true,
+        "has_invoice": true
+      }
+    ]
+  }
+}

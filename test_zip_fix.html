@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZIP文件处理修复验证</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .info {
+            border-color: #17a2b8;
+            background-color: #d1ecf1;
+        }
+        .success {
+            border-color: #28a745;
+            background-color: #d4edda;
+        }
+        .warning {
+            border-color: #ffc107;
+            background-color: #fff3cd;
+        }
+        .error {
+            border-color: #dc3545;
+            background-color: #f8d7da;
+        }
+        .upload-area {
+            border: 2px dashed #007bff;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            background-color: #f8f9fa;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .upload-area:hover {
+            background-color: #e9ecef;
+            border-color: #0056b3;
+        }
+        .upload-area.dragover {
+            background-color: #e3f2fd;
+            border-color: #2196f3;
+        }
+        .log {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-family: monospace;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .file-item {
+            background: white;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border-left: 3px solid #007bff;
+        }
+        .file-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .file-meta {
+            font-size: 0.9em;
+            color: #666;
+        }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            font-size: 0.8em;
+            border-radius: 12px;
+            margin-left: 5px;
+        }
+        .badge-secondary {
+            background-color: #6c757d;
+            color: white;
+        }
+        .badge-info {
+            background-color: #17a2b8;
+            color: white;
+        }
+        .badge-success {
+            background-color: #28a745;
+            color: white;
+        }
+        .badge-warning {
+            background-color: #ffc107;
+            color: black;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ZIP文件处理修复验证</h1>
+        
+        <div class="test-section info">
+            <h3>修复内容</h3>
+            <p><strong>问题：</strong>上传ZIP文件后，后端没有正确识别为ZIP文件，导致无法自动解压。</p>
+            <p><strong>原因：</strong><code>secure_filename</code>函数可能移除了文件扩展名，导致ZIP检测失败。</p>
+            <p><strong>修复：</strong>使用原始文件名进行ZIP检测，同时保留安全文件名用于保存。</p>
+        </div>
+        
+        <div class="test-section">
+            <h3>测试ZIP文件上传</h3>
+            <div class="upload-area" id="uploadArea">
+                <h3>拖拽ZIP文件到此处或点击上传</h3>
+                <p class="text-muted">上传ZIP文件测试自动解压功能</p>
+                <input type="file" id="fileInput" accept=".zip" style="display: none;">
+            </div>
+        </div>
+        
+        <div class="test-section">
+            <h3>上传结果</h3>
+            <div id="resultArea" style="display: none;">
+                <div id="resultContent">
+                    <h4>处理结果</h4>
+                    <div id="resultList"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="test-section">
+            <h3>测试日志</h3>
+            <div id="testLog" class="log"></div>
+        </div>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const resultArea = document.getElementById('resultArea');
+        const resultList = document.getElementById('resultList');
+        
+        function log(message) {
+            const logElement = document.getElementById('testLog');
+            const timestamp = new Date().toLocaleTimeString();
+            logElement.innerHTML += `[${timestamp}] ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+        
+        // 文件上传区域事件
+        uploadArea.addEventListener('click', () => fileInput.click());
+        
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+        });
+        
+        ['dragenter', 'dragover'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, () => {
+                uploadArea.classList.add('dragover');
+            });
+        });
+        
+        ['dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, () => {
+                uploadArea.classList.remove('dragover');
+            });
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            const files = e.dataTransfer.files;
+            handleFiles(files);
+        });
+        
+        fileInput.addEventListener('change', (e) => {
+            const files = e.target.files;
+            handleFiles(files);
+        });
+        
+        function handleFiles(files) {
+            if (files.length === 0) return;
+            
+            const file = files[0];
+            log(`📁 接收到文件: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
+            
+            if (!file.name.toLowerCase().endsWith('.zip')) {
+                log('⚠️ 请上传ZIP文件进行测试');
+                return;
+            }
+            
+            log('🔄 开始上传ZIP文件...');
+            uploadZipFile(file);
+        }
+        
+        function uploadZipFile(file) {
+            const formData = new FormData();
+            formData.append('files', file);
+            formData.append('is_raw_print', 'true');
+            
+            const xhr = new XMLHttpRequest();
+            
+            xhr.addEventListener('load', function() {
+                if (xhr.status === 200) {
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        log('✅ 上传成功，响应解析完成');
+                        log(`📊 响应内容: ${JSON.stringify(response, null, 2)}`);
+                        
+                        if (response.success) {
+                            if (response.extracted_files && response.extracted_files.length > 0) {
+                                log(`🎯 ZIP文件解压成功！解压出 ${response.extracted_files.length} 个文件`);
+                                showExtractedFiles(response.extracted_files);
+                            } else if (response.files && response.files.length > 0) {
+                                log(`📁 没有解压后的文件，返回普通文件列表，共 ${response.files.length} 个文件`);
+                                showExtractedFiles(response.files);
+                            } else {
+                                log('⚠️ 响应中没有文件信息');
+                            }
+                        } else {
+                            log(`❌ 上传失败: ${response.message || '未知错误'}`);
+                        }
+                    } catch (e) {
+                        log(`❌ 解析响应失败: ${str(e)}`);
+                    }
+                } else {
+                    log(`❌ 上传失败，状态码: ${xhr.status}`);
+                    log(`📄 响应内容: ${xhr.responseText}`);
+                }
+            });
+            
+            xhr.addEventListener('error', function() {
+                log('❌ 上传过程中发生错误');
+            });
+            
+            xhr.open('POST', '/api/upload-raw');
+            xhr.send(formData);
+        }
+        
+        function showExtractedFiles(files) {
+            resultArea.style.display = 'block';
+            resultList.innerHTML = '';
+            
+            log(`📋 显示文件列表，共 ${files.length} 个文件`);
+            
+            files.forEach((file, index) => {
+                const fileDiv = document.createElement('div');
+                fileDiv.className = 'file-item';
+                
+                // 根据文件类型显示不同的图标和颜色
+                let fileIcon = '📄';
+                let badgeClass = 'badge-secondary';
+                
+                if (file.type === 'pdf') {
+                    fileIcon = '📕';
+                    badgeClass = 'badge-danger';
+                } else if (file.type === 'image') {
+                    fileIcon = '🖼️';
+                    badgeClass = 'badge-success';
+                } else if (file.type === 'document') {
+                    fileIcon = '📝';
+                    badgeClass = 'badge-primary';
+                } else if (file.type === 'spreadsheet') {
+                    fileIcon = '📊';
+                    badgeClass = 'badge-warning';
+                } else if (file.type === 'archive') {
+                    fileIcon = '📦';
+                    badgeClass = 'badge-info';
+                }
+                
+                fileDiv.innerHTML = `
+                    <div class="file-name">${fileIcon} 文件 ${index + 1}: ${file.name || file.filename}</div>
+                    <div class="file-meta">
+                        类型: <span class="badge ${badgeClass}">${file.type || file.file_type || 'unknown'}</span>
+                        大小: <span class="badge badge-secondary">${formatFileSize(file.size || file.file_size || 0)}</span>
+                        扩展名: <span class="badge badge-info">${file.extension || '无'}</span>
+                        可打印: <span class="badge ${file.is_printable ? 'badge-success' : 'badge-warning'}">${file.is_printable ? '是' : '否'}</span>
+                    </div>
+                `;
+                
+                resultList.appendChild(fileDiv);
+            });
+            
+            log('✅ 文件列表显示完成');
+        }
+        
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        
+        // 页面加载完成
+        log('ZIP文件处理修复验证页面加载完成');
+        log('修复内容：使用原始文件名进行ZIP检测，避免secure_filename移除扩展名的问题');
+        log('现在上传ZIP文件应该能正确识别并自动解压');
+    </script>
+</body>
+</html>

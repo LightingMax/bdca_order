@@ -2041,9 +2041,32 @@
                     const newFilesCount = newResults.length;
                     const newAmount = response.total_amount || newResults.reduce((sum, result) => sum + (result.amount || 0), 0);
                     
-                    // 计算累计统计 - 确保正确累加
+                    // 计算累计统计 - 使用分类统计信息
                     const totalFiles = processedFiles.length;
-                    const totalAmount = processedFiles.reduce((sum, result) => sum + (result.amount || 0), 0);
+                    const totalAmount = response.total_amount || processedFiles.reduce((sum, result) => sum + (result.amount || 0), 0);
+                    
+                    // 获取分类统计信息
+                    const classificationInfo = response.classification_info || {};
+                    const currentTaxiAmount = classificationInfo.taxi_amount || 0;
+                    const currentHotelAmount = classificationInfo.hotel_amount || 0;
+                    const currentTotalAmount = classificationInfo.total_amount || 0;
+                    
+                    // 维护会话级别的累计变量（前端维护）
+                    if (typeof window.sessionTaxiAmount === 'undefined') {
+                        window.sessionTaxiAmount = 0;
+                        window.sessionHotelAmount = 0;
+                        window.sessionTotalAmount = 0;
+                    }
+                    
+                    // 累加本次新增的金额
+                    window.sessionTaxiAmount += currentTaxiAmount;
+                    window.sessionHotelAmount += currentHotelAmount;
+                    window.sessionTotalAmount += currentTotalAmount;
+                    
+                    // 使用累计金额
+                    const taxiAmount = window.sessionTaxiAmount;
+                    const hotelAmount = window.sessionHotelAmount;
+                    const totalClassificationAmount = window.sessionTotalAmount;
                     
                     console.log('📊 统计信息 - 本次:', newFilesCount, '累计:', totalFiles, '总金额:', totalAmount);
                     console.log('📊 详细统计 - 新结果:', newResults, '累计结果:', processedFiles);
@@ -2104,9 +2127,32 @@
                     }
                 }
                     
+                    // 获取本次处理和累计处理的数据
+                    const currentSession = response.current_session || {};
+                    const currentSessionTaxi = currentSession.taxi_amount || 0;
+                    const currentSessionHotel = currentSession.hotel_amount || 0;
+                    const currentSessionTotal = currentSession.total_amount || 0;
+                    const currentSessionOrders = currentSession.orders || 0;
+                    
                     // 添加重用文件信息和新处理订单信息
-                    let summaryText = `本次处理 <strong>${newFilesCount}</strong> 个订单，金额: <strong>¥${newAmount.toFixed(2)}</strong>`;
-                    summaryText += `<br><small>累计处理 <strong>${totalFiles}</strong> 个订单，总金额: <strong>¥${totalAmount.toFixed(2)}</strong></small>`;
+                    let summaryText = `本次处理 <strong>${currentSessionOrders}</strong> 个订单，金额: <strong>¥${currentSessionTotal.toFixed(2)}</strong>`;
+                    summaryText += `<br><small>累计处理 <strong>${totalFiles}</strong> 个订单，总金额: <strong>¥${totalClassificationAmount.toFixed(2)}</strong></small>`;
+                    
+                    // 添加分类统计信息 - 根据金额情况动态显示（显示累计数据）
+                    if (taxiAmount > 0 || hotelAmount > 0) {
+                        summaryText += `<br><small class="text-info">`;
+                        if (taxiAmount > 0 && hotelAmount > 0) {
+                            // 两个都有，同时显示
+                            summaryText += `🚗 网约车: ¥${taxiAmount.toFixed(2)} | 🏨 酒店: ¥${hotelAmount.toFixed(2)}`;
+                        } else if (taxiAmount > 0) {
+                            // 只有网约车
+                            summaryText += `🚗 网约车: ¥${taxiAmount.toFixed(2)}`;
+                        } else if (hotelAmount > 0) {
+                            // 只有酒店
+                            summaryText += `🏨 酒店: ¥${hotelAmount.toFixed(2)}`;
+                        }
+                        summaryText += `</small>`;
+                    }
                     
                     if (response.reused_files > 0 && response.new_results_count >= 0) {
                         summaryText += `<br><small>其中 ${response.reused_files} 个文件已上传过，重用了之前的处理结果</small>`;
@@ -2296,7 +2342,7 @@
                                     <strong>订单 ${result.order_id}</strong> ${statusIcon}<br>
                                     <small class="text-muted">金额: ¥${result.amount.toFixed(2)}</small><br>
                                     <small class="text-muted">
-                                        行程单: ${result.has_itinerary ? '有' : '无'} | 
+                                        ${result.has_hotel_bill ? '结账单' : '行程单'}: ${result.has_hotel_bill ? (result.has_hotel_bill ? '有' : '无') : (result.has_itinerary ? '有' : '无')} | 
                                         发票: ${result.has_invoice ? '有' : '无'}
                                     </small>
                                 </div>

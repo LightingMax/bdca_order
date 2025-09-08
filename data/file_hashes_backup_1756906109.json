@@ -1,0 +1,30 @@
+{
+  "7554537acfb2ac093df71ff5fd7176fd05dbcd2f9a03237b6f981d6d5fb933bf": {
+    "filename": "zip",
+    "upload_time": "2025-09-03 17:12:35",
+    "session_id": "890822ac-b71c-403d-984e-98443fac02ef",
+    "results": [
+      {
+        "order_id": "及时用车-53.21元-2个行程",
+        "amount": 53.21,
+        "output_file": "order_1_07fc0903.pdf",
+        "has_itinerary": true,
+        "has_invoice": true
+      }
+    ]
+  },
+  "336c8752ab20e1997155fb94aa8cbe757a7e02163a907dd90c92fe60de4c2c92": {
+    "filename": "zip",
+    "upload_time": "2025-09-03 17:58:42",
+    "session_id": "c9ee88b6-9806-424c-ac98-4fc05ee25111",
+    "results": [
+      {
+        "order_id": "及时用车-53.21元-2个行程",
+        "amount": 53.21,
+        "output_file": "order_1_e1ee3a51.pdf",
+        "has_itinerary": true,
+        "has_invoice": true
+      }
+    ]
+  }
+}

@@ -18,6 +18,8 @@ import subprocess # Added for subprocess
 import re
 import threading
 import time
+import PyPDF2
+from PyPDF2 import PdfReader, PdfWriter
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -74,7 +76,7 @@ def get_pdf_page_count(file_path: str) -> int:
 
 
 def identify_pdf_type(filename: str) -> str:
-    """识别PDF文件类型（行程单或发票）"""
+    """识别PDF文件类型（行程单、发票或结账单）"""
     filename_lower = filename.lower()
     
     # 优先检查更具体的标识
@@ -82,12 +84,16 @@ def identify_pdf_type(filename: str) -> str:
         return 'itinerary'
     elif '发票' in filename_lower:
         return 'invoice'
+    elif '结账单' in filename_lower or '账单' in filename_lower:
+        return 'hotel_bill'
     
     # 然后检查其他关键词
     if any(keyword in filename_lower for keyword in ['invoice', 'receipt', 'bill']):
         return 'invoice'
     elif any(keyword in filename_lower for keyword in ['itinerary', 'trip', '订单']):
         return 'itinerary'
+    elif any(keyword in filename_lower for keyword in ['hotel', '酒店', '住宿', 'accommodation']):
+        return 'hotel_bill'
     
     # 最后检查通用关键词（但优先级较低）
     if '行程' in filename_lower and '发票' not in filename_lower:
@@ -98,193 +104,39 @@ def identify_pdf_type(filename: str) -> str:
     return 'unknown'
 
 
-def create_combined_first_page(itinerary_path: str, invoice_path: str, output_path: str) -> bool:
-    """创建第一页合并版本（行程单+发票）"""
-    try:
-        # 检查是否有必要的工具
-        if not shutil.which('pdftk'):
-            logger.warning("未找到pdftk工具，无法合并PDF")
-            return False
-        
-        # 使用pdftk合并第一页
-        # 提取行程单第一页
-        temp_itinerary_first = os.path.join(TEMP_DIR, f"temp_itinerary_first_{uuid.uuid4().hex[:8]}.pdf")
-        subprocess.run(['pdftk', itinerary_path, 'cat', '1', 'output', temp_itinerary_first], check=True)
-        
-        # 提取发票第一页
-        temp_invoice_first = os.path.join(TEMP_DIR, f"temp_invoice_first_{uuid.uuid4().hex[:8]}.pdf")
-        subprocess.run(['pdftk', invoice_path, 'cat', '1', 'output', temp_invoice_first], check=True)
-        
-        # 合并两页
-        subprocess.run(['pdftk', temp_itinerary_first, temp_invoice_first, 'cat', 'output', output_path], check=True)
-        
-        # 清理临时文件
-        os.remove(temp_itinerary_first)
-        os.remove(temp_invoice_first)
-        
-        logger.info(f"成功创建合并第一页: {output_path}")
-        return True
-        
-    except Exception as e:
-        logger.error(f"创建合并第一页失败: {e}")
-        return False
+def identify_zip_type(zip_filename: str) -> str:
+    """识别ZIP文件类型（打车行程单或住宿记录）"""
+    filename_lower = zip_filename.lower()
+    
+    # 检查住宿相关关键词
+    hotel_keywords = [
+        '华住', '酒店', 'hotel', '住宿', 'accommodation', 
+        '桔子', '汉庭', '全季', '如家', '7天', '锦江',
+        '结账单', '账单', 'bill'
+    ]
+    
+    # 检查打车相关关键词
+    taxi_keywords = [
+        '打车', '出行', '行程', 'trip', 'itinerary',
+        '高德', '滴滴', '曹操', '首汽', '阳光', 't3',
+        '火箭', '及时', '约车'
+    ]
+    
+    # 优先检查住宿关键词
+    if any(keyword in filename_lower for keyword in hotel_keywords):
+        return 'hotel'
+    
+    # 然后检查打车关键词
+    if any(keyword in filename_lower for keyword in taxi_keywords):
+        return 'taxi'
+    
+    return 'unknown'
 
 
-def create_smart_combined_first_page(itinerary_path: str, invoice_path: str, output_path: str) -> bool:
-    """创建智能拼接第一页（发票在上 + 行程单第一页内容）"""
-    try:
-        # 检查是否有必要的工具
-        if not shutil.which('pdftk'):
-            logger.warning("未找到pdftk工具，无法合并PDF")
-            return False
-        
-        # 创建临时文件
-        temp_itinerary_first = os.path.join(TEMP_DIR, f"temp_itinerary_first_{uuid.uuid4().hex[:8]}.pdf")
-        temp_invoice_first = os.path.join(TEMP_DIR, f"temp_invoice_first_{uuid.uuid4().hex[:8]}.pdf")
-        
-        try:
-            # 提取行程单第一页
-            logger.info("📄 提取行程单第一页")
-            subprocess.run(['pdftk', itinerary_path, 'cat', '1', 'output', temp_itinerary_first], check=True)
-            
-            # 提取发票第一页
-            logger.info("🧾 提取发票第一页")
-            subprocess.run(['pdftk', invoice_path, 'cat', '1', 'output', temp_invoice_first], check=True)
-            
-            # 智能拼接：发票在上，行程单第一页内容在下
-            # 基于测试验证的最佳拼接方法
-            logger.info("🔗 开始智能拼接：发票在上 + 行程单第一页内容")
-            
-            # 方法1：使用pdftk的cat功能进行垂直拼接（推荐，已验证有效）
-            # 测试证明：pdftk cat可以避免黑色区域，生成清晰的拼接结果
-            try:
-                logger.info("🔄 使用pdftk cat功能进行垂直拼接（推荐方法）")
-                
-                # 直接使用pdftk cat拼接，无需复杂的尺寸检查
-                # 测试显示：即使页面尺寸不同，pdftk cat也能正确处理
-                subprocess.run([
-                    'pdftk', temp_invoice_first, temp_itinerary_first, 
-                    'cat', 'output', output_path
-                ], check=True)
-                
-                logger.info("✅ 使用pdftk cat功能成功拼接")
-                
-                # 验证拼接结果
-                if os.path.exists(output_path):
-                    file_size = os.path.getsize(output_path)
-                    logger.info(f"📊 拼接文件大小: {file_size} bytes")
-                    
-                    # 验证文件质量
-                    if file_size < 1000:
-                        logger.warning("⚠️ 拼接文件过小，可能拼接失败")
-                        raise subprocess.CalledProcessError(1, "pdftk", "File too small")
-                    
-                    # 验证PDF有效性
-                    result = subprocess.run(['pdftk', output_path, 'dump_data'], 
-                                          capture_output=True, text=True, timeout=10)
-                    if result.returncode == 0:
-                        page_count = 0
-                        for line in result.stdout.split('\n'):
-                            if line.startswith('NumberOfPages:'):
-                                page_count = int(line.split(':')[1].strip())
-                                break
-                        
-                        if page_count >= 2:  # 拼接后应该有2页（发票+行程单第1页）
-                            logger.info(f"✅ 拼接验证成功：{page_count}页")
-                        else:
-                            logger.warning(f"⚠️ 拼接页数异常：{page_count}页")
-                        
-                    else:
-                        logger.warning("⚠️ 无法验证PDF有效性")
-                        
-            except subprocess.CalledProcessError as e:
-                logger.warning(f"⚠️ pdftk cat功能失败: {e}")
-                
-                # 方法2：尝试使用stamp功能（备选方案）
-                try:
-                    logger.info("🔄 尝试使用pdftk stamp功能（备选方案）")
-                    subprocess.run([
-                        'pdftk', temp_invoice_first, 
-                        'stamp', temp_itinerary_first, 
-                        'output', output_path
-                    ], check=True)
-                    logger.info("✅ 使用pdftk stamp功能成功拼接")
-                    
-                    # 验证stamp拼接结果
-                    if os.path.exists(output_path):
-                        file_size = os.path.getsize(output_path)
-                        logger.info(f"📊 stamp拼接文件大小: {file_size} bytes")
-                        
-                        # stamp拼接后应该是1页
-                        result = subprocess.run(['pdftk', output_path, 'dump_data'], 
-                                              capture_output=True, text=True, timeout=10)
-                        if result.returncode == 0:
-                            for line in result.stdout.split('\n'):
-                                if line.startswith('NumberOfPages:'):
-                                    page_count = int(line.split(':')[1].strip())
-                                    logger.info(f"✅ stamp拼接验证成功：{page_count}页")
-                                    break
-                    
-                except subprocess.CalledProcessError:
-                    logger.error("❌ pdftk stamp功能也失败了")
-                    raise
-            
-            # 验证输出文件质量和完整性
-            if os.path.exists(output_path):
-                file_size = os.path.getsize(output_path)
-                logger.info(f"📊 拼接文件大小: {file_size} bytes")
-                
-                # 检查文件大小是否合理
-                if file_size < 1000:
-                    logger.error("❌ 拼接文件过小，拼接可能失败")
-                    return False
-                
-                # 检查文件是否为有效的PDF
-                try:
-                    result = subprocess.run(['pdftk', output_path, 'dump_data'], 
-                                          capture_output=True, text=True, timeout=10)
-                    if result.returncode == 0:
-                        # 解析页数
-                        page_count = 0
-                        for line in result.stdout.split('\n'):
-                            if line.startswith('NumberOfPages:'):
-                                page_count = int(line.split(':')[1].strip())
-                                break
-                        
-                        if page_count >= 1:
-                            logger.info(f"✅ 智能拼接第一页创建成功: {output_path}")
-                            logger.info(f"   文件大小: {file_size} bytes, 页数: {page_count}")
-                            return True
-                        else:
-                            logger.error("❌ 拼接文件页数异常")
-                            return False
-                    else:
-                        logger.error("❌ 拼接文件不是有效的PDF")
-                        return False
-                        
-                except Exception as e:
-                    logger.error(f"❌ 验证PDF文件失败: {e}")
-                    return False
-            else:
-                logger.error("❌ 输出文件创建失败")
-                return False
-                
-        finally:
-            # 清理临时文件
-            try:
-                if os.path.exists(temp_itinerary_first):
-                    os.remove(temp_itinerary_first)
-                if os.path.exists(temp_invoice_first):
-                    os.remove(temp_invoice_first)
-            except Exception as e:
-                logger.warning(f"清理临时文件时出错: {e}")
-        
-    except Exception as e:
-        logger.error(f"❌ 创建智能拼接第一页失败: {e}")
-        return False
 
 
-# 单页智能拼接函数已移至 pdf_service.py
+
+
 
 
 def find_corresponding_invoice(itinerary_path: str) -> Optional[str]:
@@ -394,6 +246,142 @@ def find_corresponding_invoice(itinerary_path: str) -> Optional[str]:
         return None
 
 
+def find_corresponding_hotel_bill(invoice_path: str) -> Optional[str]:
+    """查找对应的酒店结账单文件"""
+    try:
+        # 获取发票文件所在目录
+        invoice_dir = os.path.dirname(invoice_path)
+        invoice_filename = os.path.basename(invoice_path)
+        
+        logger.info(f"🔍 查找发票 {invoice_filename} 对应的结账单文件")
+        
+        # 在同一个目录下查找结账单文件
+        for filename in os.listdir(invoice_dir):
+            if filename.lower().endswith('.pdf'):
+                file_path = os.path.join(invoice_dir, filename)
+                pdf_type = identify_pdf_type(filename)
+                
+                if pdf_type == 'hotel_bill':
+                    logger.info(f"✅ 找到对应结账单: {filename}")
+                    return file_path
+        
+        # 如果同目录下没找到，尝试在上级目录搜索
+        parent_dir = os.path.dirname(invoice_dir)
+        if os.path.exists(parent_dir):
+            logger.info(f"🔍 在上级目录搜索结账单: {parent_dir}")
+            for root, dirs, files in os.walk(parent_dir):
+                for filename in files:
+                    if filename.lower().endswith('.pdf'):
+                        file_path = os.path.join(root, filename)
+                        pdf_type = identify_pdf_type(filename)
+                        
+                        if pdf_type == 'hotel_bill':
+                            logger.info(f"✅ 在上级目录找到结账单: {filename}")
+                            return file_path
+        
+        logger.warning(f"❌ 未找到发票 {invoice_filename} 对应的结账单文件")
+        return None
+        
+    except Exception as e:
+        logger.error(f"❌ 查找对应结账单失败: {e}")
+        return None
+
+
+def create_hotel_combined_page(invoice_path: str, hotel_bill_path: str, output_path: str) -> bool:
+    """创建住宿发票+结账单的拼接页面（结账单上部50%），使用图像拼接方式确保1页输出"""
+    try:
+        logger.info(f"🏨 开始创建住宿拼接页面：发票 + 结账单上部50%")
+        logger.info(f"   发票文件: {os.path.basename(invoice_path)}")
+        logger.info(f"   结账单文件: {os.path.basename(hotel_bill_path)}")
+        
+        # 导入必要的库
+        try:
+            from pdf2image import convert_from_path
+            from PIL import Image
+        except ImportError as e:
+            logger.error(f"❌ 缺少必要的库: {e}")
+            logger.info("请安装: pip install pdf2image Pillow")
+            return False
+        
+        # A4尺寸（像素，300 DPI）
+        A4_WIDTH, A4_HEIGHT = 2480, 3508
+        # 定义页边距（像素）
+        MARGIN = 100
+        # 考虑页边距后的实际可用宽度和高度
+        USABLE_WIDTH = A4_WIDTH - 2 * MARGIN
+        USABLE_HEIGHT = A4_HEIGHT - 2 * MARGIN
+        
+        try:
+            # 1. 转换结账单为图片
+            logger.info("📄 转换结账单为图片")
+            bill_images = convert_from_path(hotel_bill_path, dpi=300)
+            bill_image = bill_images[0]
+            w, h = bill_image.size
+            
+            # 2. 提取结账单上部50%（修复：确保是上部而不是下部）
+            logger.info("✂️ 提取结账单上部50%")
+            # 上部50%：从顶部(0)到中间(h//2)
+            top_half = bill_image.crop((0, 0, w, h // 2))
+            logger.info(f"✂️ 结账单裁剪区域: 顶部0px, 底部{h//2}px")
+            
+            # 3. 调整结账单尺寸（占下半部分，约60%高度）
+            ratio = USABLE_WIDTH / top_half.width
+            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.6))
+            top_half = top_half.resize(new_size, Image.Resampling.LANCZOS)
+            
+            # 4. 转换发票为图片
+            logger.info("🧾 转换发票为图片")
+            invoice_images = convert_from_path(invoice_path, dpi=300)
+            invoice_image = invoice_images[0]
+            
+            # 5. 调整发票尺寸（占上半部分，约40%高度）
+            ratio = 0.9 * USABLE_WIDTH / invoice_image.width
+            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.4))
+            invoice_image = invoice_image.resize(new_size, Image.Resampling.LANCZOS)
+            
+            # 6. 创建新的空白图片
+            combined = Image.new("RGB", (A4_WIDTH, A4_HEIGHT), (255, 255, 255))
+            
+            # 7. 粘贴发票到上半部分（考虑页边距）
+            combined.paste(invoice_image, (MARGIN, MARGIN))
+            
+            # 8. 粘贴结账单上部到下半部分（考虑页边距）
+            combined.paste(top_half, (MARGIN, MARGIN + invoice_image.height))
+            
+            # 9. 最后再缩放到A4纸
+            combined = combined.resize((A4_WIDTH, A4_HEIGHT), Image.Resampling.LANCZOS)
+            
+            # 10. 保存为PDF
+            logger.info("💾 保存拼接后的图片为PDF")
+            combined.save(output_path, "PDF", resolution=300.0)
+            
+            # 验证输出文件
+            if os.path.exists(output_path):
+                file_size = os.path.getsize(output_path)
+                logger.info(f"📊 住宿拼接文件大小: {file_size} bytes")
+                
+                # 验证文件质量
+                if file_size < 1000:
+                    logger.error("❌ 拼接文件过小，可能拼接失败")
+                    return False
+                
+                logger.info("✅ 住宿拼接成功（发票+结账单上部50%拼接到一页）")
+                logger.info(f"   文件路径: {output_path}")
+                logger.info(f"   文件大小: {file_size} bytes")
+                return True
+            else:
+                logger.error("❌ 住宿拼接输出文件未生成")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ 图片拼接过程中出错: {str(e)}")
+            raise
+        
+    except Exception as e:
+        logger.error(f"❌ 创建住宿拼接页面失败: {e}")
+        return False
+
+
 def smart_print_pdf(printer_name: str, file_path: str, print_options: dict) -> bool:
     """智能PDF打印 - 简化版本，主要调用pdf_service.py的函数进行文件处理"""
     # 使用锁防止并发打印冲突，确保打印任务依次执行
@@ -478,6 +466,36 @@ def smart_print_pdf(printer_name: str, file_path: str, print_options: dict) -> b
                         logger.info("回退到直接打印")
                 else:
                     logger.info("ℹ️ 未找到对应发票，直接打印行程单")
+            
+            # 如果是住宿发票，检查是否需要与结账单拼接
+            elif pdf_type == 'invoice':
+                logger.info(f"检测到发票，页数: {page_count}")
+                hotel_bill_path = find_corresponding_hotel_bill(file_path)
+                
+                if hotel_bill_path and os.path.exists(hotel_bill_path):
+                    logger.info(f"找到对应结账单: {os.path.basename(hotel_bill_path)}")
+                    
+                    # 创建住宿拼接页面
+                    combined_page = os.path.join(TEMP_DIR, f"hotel_combined_{uuid.uuid4().hex[:8]}.pdf")
+                    if create_hotel_combined_page(file_path, hotel_bill_path, combined_page):
+                        logger.info("✅ 成功创建住宿拼接页面")
+                        
+                        # 打印住宿拼接页面
+                        success = print_with_cups(printer_name, combined_page, print_options)
+                        
+                        # 清理临时文件
+                        os.remove(combined_page)
+                        
+                        if success:
+                            logger.info("✅ 住宿发票+结账单智能打印完成")
+                            return True
+                        else:
+                            logger.error("❌ 住宿拼接页面打印失败")
+                            return False
+                    else:
+                        logger.warning("⚠️ 创建住宿拼接页面失败，回退到直接打印")
+                else:
+                    logger.info("ℹ️ 未找到对应结账单，直接打印发票")
             
             # 默认情况：直接打印
             logger.info("🖨️ 使用默认打印方式")

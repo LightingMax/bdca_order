@@ -2,7 +2,7 @@ import os
 import uuid
 import datetime
 import requests
-from flask import Blueprint, render_template, request, jsonify, current_app, send_from_directory
+from flask import Blueprint, render_template, request, jsonify, current_app, session, send_from_directory
 from werkzeug.utils import secure_filename
 
 from app.services.file_service import (
@@ -106,8 +106,9 @@ def upload_file():
                     try:
                         extract_zip(zip_path, file_extract_dir)
                         
-                        # 重新分析PDF文件，获取最新的XML缺失警告
-                        _, current_xml_warnings = process_pdf_files(file_extract_dir)
+                        # 重新分析PDF文件，获取最新的XML缺失警告和分类统计（使用原始文件名）
+                        original_filename = existing_file.get('original_filename', filename)
+                        _, current_xml_warnings, current_classification_info = process_pdf_files(file_extract_dir, original_filename)
                         
                         reused_files.append({
                             'filename': filename,
@@ -117,7 +118,8 @@ def upload_file():
                             'result_count': len(existing_file['results']),
                             'print_status': existing_file.get('print_status', 'unknown'),  # 添加打印状态
                             'last_print_time': existing_file.get('last_print_time', '未打印'),
-                            'xml_missing_warnings': current_xml_warnings  # 使用最新的XML缺失警告
+                            'xml_missing_warnings': current_xml_warnings,  # 使用最新的XML缺失警告
+                            'classification_info': current_classification_info  # 使用最新的分类统计信息
                         })
                         
                         logger.info(f"文件 {filename} 重新分析完成，当前XML缺失警告数: {len(current_xml_warnings)}")
@@ -125,7 +127,7 @@ def upload_file():
                         
                     except Exception as e:
                         logger.error(f"重新分析文件 {filename} 时出错: {str(e)}")
-                        # 如果重新分析失败，使用之前的警告
+                        # 如果重新分析失败，使用之前的数据
                         reused_files.append({
                             'filename': filename,
                             'original_filename': existing_file.get('original_filename', filename),  # 使用保存的原始文件名
@@ -134,7 +136,16 @@ def upload_file():
                             'result_count': len(existing_file['results']),
                             'print_status': existing_file.get('print_status', 'unknown'),
                             'last_print_time': existing_file.get('last_print_time', '未打印'),
-                            'xml_missing_warnings': existing_file.get('xml_missing_warnings', [])
+                            'xml_missing_warnings': existing_file.get('xml_missing_warnings', []),
+                            'classification_info': existing_file.get('classification_info', {
+                                'taxi_amount': 0,
+                                'hotel_amount': 0,
+                                'total_amount': 0,
+                                'taxi_orders': 0,
+                                'hotel_orders': 0,
+                                'taxi_warnings': [],
+                                'hotel_warnings': []
+                            })
                         })
                         continue
                 else:
@@ -148,8 +159,8 @@ def upload_file():
             try:
                 extract_zip(zip_path, file_extract_dir)
                 
-                # 处理PDF文件
-                results, xml_missing_warnings = process_pdf_files(file_extract_dir)
+                # 处理PDF文件（使用原始文件名进行类型识别）
+                results, xml_missing_warnings, classification_info = process_pdf_files(file_extract_dir, original_filename)
                 
                 # 过滤结果，找出新的订单
                 file_new_results = []
@@ -179,7 +190,8 @@ def upload_file():
                     'hash': file_hash,
                     'result_count': len(results),
                     'new_result_count': len(file_new_results),
-                    'xml_missing_warnings': xml_missing_warnings  # 保存XML缺失警告
+                    'xml_missing_warnings': xml_missing_warnings,  # 保存XML缺失警告
+                    'classification_info': classification_info  # 保存分类统计信息
                 })
                 
                 logger.info(f"文件 {filename} 处理完成，订单总数: {len(results)}，新订单数: {len(file_new_results)}")
@@ -206,26 +218,64 @@ def upload_file():
         else:
             logger.info("没有新处理的订单，不更新用户统计数据")
         
-        # 计算总金额（所有订单）
-        total_amount = sum(result.get('amount', 0) for result in all_results)
+        # 收集所有XML缺失警告
+        all_xml_warnings = []
+        all_files = processed_files + reused_files
+        for file_result in all_files:
+            if 'xml_missing_warnings' in file_result:
+                all_xml_warnings.extend(file_result['xml_missing_warnings'])
+        
+        # 计算本次新增的分类统计（只计算新处理的文件）
+        current_taxi_amount = 0
+        current_hotel_amount = 0
+        current_taxi_orders = 0
+        current_hotel_orders = 0
+        current_taxi_warnings = []
+        current_hotel_warnings = []
+        
+        for file_result in processed_files:
+            if 'classification_info' in file_result:
+                info = file_result['classification_info']
+                current_taxi_amount += info.get('taxi_amount', 0)
+                current_hotel_amount += info.get('hotel_amount', 0)
+                current_taxi_orders += info.get('taxi_orders', 0)
+                current_hotel_orders += info.get('hotel_orders', 0)
+                current_taxi_warnings.extend(info.get('taxi_warnings', []))
+                current_hotel_warnings.extend(info.get('hotel_warnings', []))
+        
+        # 构建分类统计信息（只返回本次处理的数据，累计由前端维护）
+        all_classification_info = {
+            'taxi_amount': current_taxi_amount,
+            'hotel_amount': current_hotel_amount,
+            'total_amount': current_taxi_amount + current_hotel_amount,
+            'taxi_orders': current_taxi_orders,
+            'hotel_orders': current_hotel_orders,
+            'taxi_warnings': current_taxi_warnings,
+            'hotel_warnings': current_hotel_warnings
+        }
+        
+        total_amount = all_classification_info['total_amount']
         
         # 🎉 彩蛋：更新全局统计数据（包括新处理和重用的订单）
         total_itineraries = len(all_results)  # 所有订单数量
         save_global_stats(total_itineraries, total_amount)
         logger.info(f"🎉 全局统计已更新！累计行程单数: {total_itineraries}")
         
-        # 收集所有XML缺失警告（包括新处理和重用的文件）
-        all_xml_warnings = []
-        for file_result in processed_files:
-            if 'xml_missing_warnings' in file_result:
-                all_xml_warnings.extend(file_result['xml_missing_warnings'])
-        
-        for file_result in reused_files:
-            if 'xml_missing_warnings' in file_result:
-                all_xml_warnings.extend(file_result['xml_missing_warnings'])
-        
         # 返回处理结果
         logger.info(f"文件处理完成，成功处理 {len(all_results)} 个订单，其中新处理 {len(new_results)} 个")
+        logger.info(f"📊 分类统计: 网约车 {all_classification_info['taxi_amount']:.2f}元, 酒店 {all_classification_info['hotel_amount']:.2f}元")
+        
+        # 计算本次处理的金额（只计算新处理的文件）
+        current_session_taxi_amount = 0
+        current_session_hotel_amount = 0
+        for file_result in processed_files:
+            if 'classification_info' in file_result:
+                info = file_result['classification_info']
+                current_session_taxi_amount += info.get('taxi_amount', 0)
+                current_session_hotel_amount += info.get('hotel_amount', 0)
+        
+        current_session_total = current_session_taxi_amount + current_session_hotel_amount
+        
         return jsonify({
             'success': True,
             'message': f'成功处理 {len(all_results)} 个订单',
@@ -235,9 +285,17 @@ def upload_file():
             'new_results_count': len(new_results),
             'total_amount': total_amount,
             'xml_missing_warnings': all_xml_warnings,  # 添加XML缺失警告
+            'classification_info': all_classification_info,  # 添加分类统计信息
             'file_details': {
                 'processed': processed_files,
                 'reused': reused_files
+            },
+            # 本次处理统计
+            'current_session': {
+                'taxi_amount': current_session_taxi_amount,
+                'hotel_amount': current_session_hotel_amount,
+                'total_amount': current_session_total,
+                'orders': len(new_results)
             }
         })
         

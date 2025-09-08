@@ -1,0 +1,40 @@
+{
+  "7554537acfb2ac093df71ff5fd7176fd05dbcd2f9a03237b6f981d6d5fb933bf": {
+    "filename": "zip",
+    "upload_time": "2025-09-03 21:31:23",
+    "session_id": "e7b42937-9ac0-4889-a10d-8930c7cc3e75",
+    "results": [
+      {
+        "order_id": "及时用车-53.21元-2个行程",
+        "amount": 53.21,
+        "output_file": "order_1_7624b129.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "412a0ccb1f30ecd6d815b7c11a03bc3ee6593ba0c54db8b35b96eb01e37401c1": {
+    "filename": "zip",
+    "upload_time": "2025-09-03 21:33:14",
+    "session_id": "9145fafd-c6e9-4144-9ced-d73153f7731e",
+    "results": [
+      {
+        "order_id": "火箭出行-1079.92元-28个行程",
+        "amount": 0,
+        "output_file": "order_1_0c8f95b5.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "79e2bd10e1bdcf8e0a1ba5b2d99f8a72ccba5a8f5501ef1f32c4aafa371fb1b1": {
+    "filename": "v2.zip",
+    "upload_time": "2025-09-03 21:34:34",
+    "session_id": "e719f88e-de43-4a1e-a071-02d5bd99f568",
+    "results": []
+  }
+}

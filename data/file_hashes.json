@@ -2,223 +2,64 @@
   "93f94ebb804d23e5b925a241a9dcd2638c4d986a9002acd2fb15800b152c9811": {
     "filename": "6.zip",
     "original_filename": "高德打车电子发票 (6).zip",
-    "upload_time": "2025-09-05 15:24:58",
-    "session_id": "eea32c47-e711-4f0c-96c1-d6312a3b76ed",
+    "upload_time": "2025-09-08 20:35:56",
+    "session_id": "37794597-6429-466e-84bc-6270d98aa96f",
     "results": [
       {
         "order_id": "曹操出行-83.92元-2个行程",
         "amount": 83.92,
-        "output_file": "order_1_ee7e8f37.pdf",
+        "output_file": "order_1_ac83a215.pdf",
         "has_itinerary": true,
         "has_invoice": true,
+        "has_hotel_bill": false,
         "page_count": 1,
         "combined_type": "single_page"
       },
       {
         "order_id": "首汽约车-101.61元-1个行程",
         "amount": 101.61,
-        "output_file": "order_2_f73b2360.pdf",
+        "output_file": "order_2_7c249303.pdf",
         "has_itinerary": true,
         "has_invoice": true,
+        "has_hotel_bill": false,
         "page_count": 1,
         "combined_type": "single_page"
       },
       {
         "order_id": "曹操出行-89.66元-1个行程",
         "amount": 89.66,
-        "output_file": "order_3_09a19fe8.pdf",
+        "output_file": "order_3_eecb7eb8.pdf",
         "has_itinerary": true,
         "has_invoice": true,
+        "has_hotel_bill": false,
         "page_count": 1,
         "combined_type": "single_page"
       },
       {
         "order_id": "火箭出行-724.37元-19个行程",
         "amount": 724.37,
-        "output_file": "order_4_d78ba09d.pdf",
+        "output_file": "order_4_54356496.pdf",
         "has_itinerary": true,
         "has_invoice": true,
+        "has_hotel_bill": false,
         "page_count": 2,
         "combined_type": "multi_page"
-      }
-    ]
-  },
-  "7554537acfb2ac093df71ff5fd7176fd05dbcd2f9a03237b6f981d6d5fb933bf": {
-    "filename": "zip",
-    "original_filename": "测试.zip",
-    "upload_time": "2025-09-05 15:25:34",
-    "session_id": "b9cfcd45-1d59-4975-9054-ebf94524e810",
-    "results": [
-      {
-        "order_id": "及时用车-53.21元-2个行程",
-        "amount": 53.21,
-        "output_file": "order_1_9c80b4cd.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "page_count": 1,
-        "combined_type": "single_page"
-      }
-    ]
-  },
-  "cf6769c157fd21e3f86392282d261a2e3c860ea7196623df14a3a0f8e25044e7": {
-    "filename": "14.zip",
-    "original_filename": "高德打车电子发票 (14).zip",
-    "upload_time": "2025-09-05 15:26:47",
-    "session_id": "75cf01af-21ea-4d41-b480-03677c066fdd",
-    "results": [
-      {
-        "order_id": "火箭出行-263.89元-6个行程",
-        "amount": 263.89,
-        "output_file": "order_1_1649df34.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "page_count": 1,
-        "combined_type": "single_page"
-      }
-    ]
-  },
-  "96fb8342b5ab18b19eb2e891c21aac3033f68e9d9f0e6133176c1149b1cddae7": {
-    "filename": "13.zip",
-    "original_filename": "高德打车电子发票 (13).zip",
-    "upload_time": "2025-09-05 15:26:47",
-    "session_id": "75cf01af-21ea-4d41-b480-03677c066fdd",
-    "results": [
-      {
-        "order_id": "AA出行-18.82元-1个行程",
-        "amount": 18.82,
-        "output_file": "order_1_35095ced.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "page_count": 1,
-        "combined_type": "single_page"
-      }
-    ]
-  },
-  "c49b2f00775506d9d1dcc33627a4159d73c7c571edc65c3d9308d9a016592ccc": {
-    "filename": "12.zip",
-    "original_filename": "高德打车电子发票 (12).zip",
-    "upload_time": "2025-09-05 15:26:49",
-    "session_id": "75cf01af-21ea-4d41-b480-03677c066fdd",
-    "results": [
-      {
-        "order_id": "曹操出行-14.50元-1个行程",
-        "amount": 14.5,
-        "output_file": "order_1_f3059a2c.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "page_count": 1,
-        "combined_type": "single_page"
-      },
-      {
-        "order_id": "曹操出行-18.45元-1个行程",
-        "amount": 18.45,
-        "output_file": "order_2_32339251.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "page_count": 1,
-        "combined_type": "single_page"
-      },
-      {
-        "order_id": "有序出行-148.12元-1个行程",
-        "amount": 148.12,
-        "output_file": "order_3_aea0efbb.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "page_count": 1,
-        "combined_type": "single_page"
-      }
-    ]
-  },
-  "c806316e7a5acb48983db7ee1d2f69d8a57b52a895c9de0c8bd016e54570ed47": {
-    "filename": "11.zip",
-    "original_filename": "高德打车电子发票 (11).zip",
-    "upload_time": "2025-09-05 15:26:49",
-    "session_id": "75cf01af-21ea-4d41-b480-03677c066fdd",
-    "results": [
-      {
-        "order_id": "添猫出行-28.55元-1个行程",
-        "amount": 0,
-        "output_file": "order_1_e3fb3562.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "page_count": 1,
-        "combined_type": "single_page"
-      }
-    ]
-  },
-  "5393e15a940c7f07e5f637f72cf935bd183c58921ecaaa3b7288b89ba4048734": {
-    "filename": "10.zip",
-    "original_filename": "高德打车电子发票 (10).zip",
-    "upload_time": "2025-09-05 15:26:51",
-    "session_id": "75cf01af-21ea-4d41-b480-03677c066fdd",
-    "results": [
-      {
-        "order_id": "星徽出行-185.04元-7个行程",
-        "amount": 185.04,
-        "output_file": "order_1_3213862d.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "page_count": 1,
-        "combined_type": "single_page"
-      },
-      {
-        "order_id": "腾飞出行-42.64元-1个行程",
-        "amount": 42.64,
-        "output_file": "order_2_6d5c4569.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "page_count": 1,
-        "combined_type": "single_page"
-      },
-      {
-        "order_id": "AA出行-23.95元-1个行程",
-        "amount": 23.95,
-        "output_file": "order_3_0048160b.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "page_count": 1,
-        "combined_type": "single_page"
       }
     ]
   },
   "8f2353840f55259eea92c5806fc2adf3394fcce8dc8afcd8aa1725f7d666b85d": {
     "filename": "9.zip",
     "original_filename": "高德打车电子发票 (9).zip",
-    "upload_time": "2025-09-05 15:26:52",
-    "session_id": "75cf01af-21ea-4d41-b480-03677c066fdd",
+    "upload_time": "2025-09-08 20:35:57",
+    "session_id": "37794597-6429-466e-84bc-6270d98aa96f",
     "results": [
       {
         "order_id": "小牛快跑-21.88元-1个行程",
         "amount": 21.88,
-        "output_file": "order_1_d230fa61.pdf",
+        "output_file": "order_1_6618aaaf.pdf",
         "has_itinerary": true,
         "has_invoice": true,
-        "page_count": 1,
-        "combined_type": "single_page"
-      }
-    ]
-  },
-  "2a3b2ba56ded937f618aa90cfa2dfdab2a24f2b7950dcce2455337564a912efa": {
-    "filename": "8.zip",
-    "original_filename": "高德打车电子发票 (8).zip",
-    "upload_time": "2025-09-05 15:26:53",
-    "session_id": "75cf01af-21ea-4d41-b480-03677c066fdd",
-    "results": [
-      {
-        "order_id": "旗妙出行-21.01元-1个行程",
-        "amount": 21.01,
-        "output_file": "order_1_8847592f.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "page_count": 1,
-        "combined_type": "single_page"
-      },
-      {
-        "order_id": "飞嘀打车-80.72元-1个行程",
-        "amount": 80.72,
-        "output_file": "order_2_ff218920.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
+        "has_hotel_bill": false,
         "page_count": 1,
         "combined_type": "single_page"
       }
@@ -227,17 +68,72 @@
   "7e614197421a8fe14240518067602a103b308e98152c8e8ef7fb065231beb716": {
     "filename": "7.zip",
     "original_filename": "高德打车电子发票 (7).zip",
-    "upload_time": "2025-09-05 15:26:54",
-    "session_id": "75cf01af-21ea-4d41-b480-03677c066fdd",
+    "upload_time": "2025-09-08 20:35:57",
+    "session_id": "37794597-6429-466e-84bc-6270d98aa96f",
     "results": [
       {
         "order_id": "旅程约车-72.78元-1个行程",
         "amount": 72.78,
-        "output_file": "order_1_60f374cc.pdf",
+        "output_file": "order_1_a4d4082f.pdf",
         "has_itinerary": true,
         "has_invoice": true,
+        "has_hotel_bill": false,
         "page_count": 1,
         "combined_type": "single_page"
+      }
+    ]
+  },
+  "e145a04d4c7f1f90d37106ebfa857d06148bc49e29e94f20adc9f4693cf82eb7": {
+    "filename": "25114000000003462819.zip",
+    "original_filename": "【华住酒店集团】桔子北京石景山八角游乐园酒店发票已开具，感谢您的支持！（发票号码：25114000000003462819）.zip",
+    "upload_time": "2025-09-08 20:36:06",
+    "session_id": "87262417-550e-4adf-98f7-53d5980aa555",
+    "results": [
+      {
+        "order_id": "hotel_25114000000003462819",
+        "amount": 1224.97,
+        "output_file": "order_1_65427e67.pdf",
+        "has_itinerary": false,
+        "has_invoice": true,
+        "has_hotel_bill": true,
+        "page_count": 1,
+        "combined_type": "hotel_accommodation"
+      }
+    ]
+  },
+  "5a3f273e179cdea246e5c77f4eef1bc956c1d9db333d21803f74455501c62ecf": {
+    "filename": "25114000000003472725.zip",
+    "original_filename": "【华住酒店集团】桔子北京石景山八角游乐园酒店发票已开具，感谢您的支持！（发票号码：25114000000003472725）.zip",
+    "upload_time": "2025-09-08 20:36:22",
+    "session_id": "d664e6ae-00e2-4ce4-b5e3-a0b137c1d251",
+    "results": [
+      {
+        "order_id": "hotel_25114000000003472725",
+        "amount": 1409.87,
+        "output_file": "order_1_6a06909d.pdf",
+        "has_itinerary": false,
+        "has_invoice": true,
+        "has_hotel_bill": true,
+        "page_count": 1,
+        "combined_type": "hotel_accommodation"
+      }
+    ]
+  },
+  "a7f913ca08e18908a668ed6161710e44a89dec136e1a42acff4bb57277158678": {
+    "filename": "25114000000003482806.zip",
+    "original_filename": "【华住酒店集团】桔子北京石景山八角游乐园酒店发票已开具，感谢您的支持！（发票号码：25114000000003482806）.zip",
+    "upload_time": "2025-09-08 20:40:30",
+    "session_id": "c4492b39-8a7c-4469-a23c-8947c88daaec",
+    "results": [
+      {
+        "order_id": "hotel_25114000000003482806",
+        "amount": 1676.36,
+        "output_file": "order_1_8d9a2e48.pdf",
+        "has_itinerary": false,
+        "has_invoice": true,
+        "has_hotel_bill": true,
+        "page_count": 1,
+        "combined_type": "hotel_accommodation"
       }
     ]
   }

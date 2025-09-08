@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>原始打印显示修复验证</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .success {
+            border-color: #28a745;
+            background-color: #d4edda;
+        }
+        .info {
+            border-color: #17a2b8;
+            background-color: #d1ecf1;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .result-area {
+            border: 1px solid #dee2e6;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+        }
+        .result-area.hidden {
+            display: none;
+        }
+        .file-item {
+            background: white;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border-left: 3px solid #007bff;
+        }
+        .log {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-family: monospace;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>原始打印显示修复验证</h1>
+        
+        <div class="test-section info">
+            <h3>问题描述</h3>
+            <p>原始打印功能上传文件后只显示"文件上传成功，准备打印"提示，但打印选项区域（包含打印全部、预览等按钮）没有显示。</p>
+            <p><strong>修复内容：</strong>在<code>showPrintOptions</code>函数中添加了显示<code>rawResultArea</code>的逻辑。</p>
+        </div>
+        
+        <div class="test-section">
+            <h3>模拟测试</h3>
+            <button onclick="testShowPrintOptions()">测试显示打印选项</button>
+            <button onclick="testResetArea()">测试重置区域</button>
+            <button onclick="clearLog()">清空日志</button>
+        </div>
+        
+        <div class="test-section">
+            <h3>打印结果区域</h3>
+            <div id="rawResultArea" class="result-area hidden">
+                <div id="rawResultContent" class="hidden">
+                    <h3>打印结果</h3>
+                    <div id="rawResultList" class="mt-3">
+                        <!-- 这里会显示文件列表 -->
+                    </div>
+                    <div class="mt-3">
+                        <button id="rawPrintAllBtn" class="btn btn-primary me-2">打印全部</button>
+                        <button id="rawClearResultsBtn" class="btn btn-outline-secondary">清空结果</button>
+                    </div>
+                </div>
+                
+                <div id="rawNoResultContent">
+                    <p class="text-center text-muted">暂无打印结果</p>
+                    <p class="text-center text-muted">请先选择文件进行打印</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="test-section">
+            <h3>测试日志</h3>
+            <div id="testLog" class="log"></div>
+        </div>
+    </div>
+
+    <script>
+        function log(message) {
+            const logElement = document.getElementById('testLog');
+            const timestamp = new Date().toLocaleTimeString();
+            logElement.innerHTML += `[${timestamp}] ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+        
+        function clearLog() {
+            document.getElementById('testLog').innerHTML = '';
+        }
+        
+        // 模拟showPrintOptions函数
+        function testShowPrintOptions() {
+            log('🧪 开始测试显示打印选项...');
+            
+            // 模拟文件数据
+            const mockFiles = [
+                { name: 'test.pdf', size: 1024 * 512, type: 'pdf' },
+                { name: 'image.jpg', size: 1024 * 256, type: 'image' }
+            ];
+            
+            log(`📁 模拟文件数量: ${mockFiles.length}`);
+            
+            // 首先显示整个结果区域
+            const rawResultArea = document.getElementById('rawResultArea');
+            if (rawResultArea) {
+                rawResultArea.style.display = 'block';
+                rawResultArea.classList.remove('hidden');
+                log('✅ 显示原始打印结果区域');
+            } else {
+                log('❌ 找不到rawResultArea元素');
+                return;
+            }
+            
+            // 隐藏无结果内容，显示有结果内容
+            const rawResultContent = document.getElementById('rawResultContent');
+            const rawNoResultContent = document.getElementById('rawNoResultContent');
+            
+            if (rawResultContent) {
+                rawResultContent.style.display = 'block';
+                rawResultContent.classList.remove('hidden');
+                log('✅ 显示原始打印结果内容');
+            } else {
+                log('❌ 找不到rawResultContent元素');
+            }
+            
+            if (rawNoResultContent) {
+                rawNoResultContent.style.display = 'none';
+                log('✅ 隐藏原始打印无结果内容');
+            } else {
+                log('❌ 找不到rawNoResultContent元素');
+            }
+            
+            // 清空之前的结果
+            const rawResultList = document.getElementById('rawResultList');
+            if (rawResultList) {
+                rawResultList.innerHTML = '';
+                
+                // 为每个文件创建打印选项
+                mockFiles.forEach((file, index) => {
+                    const resultDiv = document.createElement('div');
+                    resultDiv.className = 'file-item';
+                    resultDiv.innerHTML = `
+                        <h5>文件 ${index + 1}: ${file.name}</h5>
+                        <p>状态: 已准备打印 | 大小: ${(file.size / 1024).toFixed(1)} KB | 类型: ${file.type}</p>
+                        <div>
+                            <button class="btn btn-sm btn-outline-primary">👁️ 预览</button>
+                            <button class="btn btn-sm btn-primary">🖨️ 立即打印</button>
+                        </div>
+                    `;
+                    rawResultList.appendChild(resultDiv);
+                });
+                
+                log(`✅ 创建了 ${mockFiles.length} 个文件项`);
+            } else {
+                log('❌ 找不到rawResultList元素');
+            }
+            
+            log('🎉 测试完成！打印选项区域应该已经显示');
+        }
+        
+        function testResetArea() {
+            log('🔄 开始测试重置区域...');
+            
+            const rawResultArea = document.getElementById('rawResultArea');
+            const rawResultContent = document.getElementById('rawResultContent');
+            const rawNoResultContent = document.getElementById('rawNoResultContent');
+            
+            if (rawResultArea) {
+                // 保持结果区域显示，但重置内容
+                rawResultArea.style.display = 'block';
+                log('✅ 保持原始打印结果区域显示');
+                
+                // 隐藏有结果的内容，显示无结果的内容
+                if (rawResultContent) {
+                    rawResultContent.style.display = 'none';
+                    rawResultContent.classList.add('hidden');
+                    log('✅ 隐藏原始打印结果内容');
+                }
+                
+                if (rawNoResultContent) {
+                    rawNoResultContent.style.display = 'block';
+                    log('✅ 显示原始打印无结果内容');
+                }
+                
+                // 清空文件列表
+                const rawResultList = document.getElementById('rawResultList');
+                if (rawResultList) {
+                    rawResultList.innerHTML = '';
+                    log('✅ 清空文件列表');
+                }
+                
+                log('🎉 重置完成！区域应该显示"暂无打印结果"');
+            } else {
+                log('❌ 找不到rawResultArea元素');
+            }
+        }
+        
+        // 页面加载完成
+        log('原始打印显示修复验证页面加载完成');
+        log('修复内容：在showPrintOptions函数中添加了显示rawResultArea的逻辑');
+        log('现在上传文件后应该能正确显示打印选项区域');
+    </script>
+</body>
+</html>
