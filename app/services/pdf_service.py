@@ -254,6 +254,7 @@ def generate_smart_order_id(filename):
     2. 修复'订单-'开头的格式。
     3. 对于已符合标准格式但无特殊符号的文件，去除扩展名后返回。
     """
+    logger = current_app.logger
     try:
         # 移除文件扩展名，方便处理
         name_only = os.path.splitext(filename)[0]

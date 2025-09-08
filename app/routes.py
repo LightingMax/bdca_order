@@ -74,11 +74,14 @@ def upload_file():
                 logger.warning(f"不支持的文件类型: {file.filename}")
                 continue
                 
+            # 保存原始文件名用于显示
+            original_filename = file.filename
             # 保存文件
             filename = secure_filename(file.filename)
             zip_path = os.path.join(temp_folder, filename)
             file.save(zip_path)
             logger.info(f"文件已保存到: {zip_path}")
+            logger.info(f"原始文件名: {original_filename}, 安全文件名: {filename}")
             
             # 计算文件哈希
             file_hash = calculate_file_hash(zip_path)
@@ -108,6 +111,7 @@ def upload_file():
                         
                         reused_files.append({
                             'filename': filename,
+                            'original_filename': existing_file.get('original_filename', filename),  # 使用保存的原始文件名
                             'hash': file_hash,
                             'original_upload_time': existing_file.get('upload_time', '未知'),
                             'result_count': len(existing_file['results']),
@@ -124,6 +128,7 @@ def upload_file():
                         # 如果重新分析失败，使用之前的警告
                         reused_files.append({
                             'filename': filename,
+                            'original_filename': existing_file.get('original_filename', filename),  # 使用保存的原始文件名
                             'hash': file_hash,
                             'original_upload_time': existing_file.get('upload_time', '未知'),
                             'result_count': len(existing_file['results']),
@@ -161,6 +166,7 @@ def upload_file():
                 # 保存文件哈希和处理结果
                 file_info = {
                     'filename': filename,
+                    'original_filename': original_filename,  # 保存原始文件名
                     'upload_time': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     'session_id': session_id,
                     'results': results
@@ -169,6 +175,7 @@ def upload_file():
                 
                 processed_files.append({
                     'filename': filename,
+                    'original_filename': original_filename,  # 添加原始文件名用于前端显示
                     'hash': file_hash,
                     'result_count': len(results),
                     'new_result_count': len(file_new_results),

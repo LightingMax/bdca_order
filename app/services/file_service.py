@@ -39,7 +39,8 @@ def extract_zip(zip_path, extract_dir):
     extract_path.mkdir(parents=True, exist_ok=True)
     
     try:
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        # 使用GBK编码读取ZIP文件，因为测试发现ZIP文件中的文件名是GBK编码的
+        with zipfile.ZipFile(zip_path, 'r', metadata_encoding='gbk') as zip_ref:
             # 获取所有文件名列表
             name_list = zip_ref.namelist()
             logger.info(f"ZIP文件中包含 {len(name_list)} 个文件")
@@ -74,46 +75,9 @@ def extract_zip(zip_path, extract_dir):
                     continue
                 
                 try:
-                    # 安全地处理文件名，避免编码问题
-                    decoded_name = None
-                    
-                    # 方法1: 尝试直接使用原始名称
-                    try:
-                        decoded_name = file_name
-                        # 测试路径是否可以正常构建
-                        test_path = extract_path / decoded_name
-                        # 如果到这里没有异常，说明原始名称可以使用
-                        logger.debug("使用原始文件名")
-                    except Exception:
-                        decoded_name = None
-                    
-                    # 方法2: 如果原始名称有问题，尝试不同编码
-                    if decoded_name is None:
-                        encodings = ['utf-8', 'gbk', 'gb2312', 'cp437']
-                        for encoding in encodings:
-                            try:
-                                decoded_name = file_name.encode('cp437').decode(encoding)
-                                logger.debug(f"使用 {encoding} 解码文件名")
-                                break
-                            except UnicodeDecodeError:
-                                continue
-                    
-                    # 方法3: 如果所有方法都失败，生成安全的文件名
-                    if decoded_name is None:
-                        # 生成安全的文件名
-                        safe_chars = []
-                        for c in file_name:
-                            if c.isalnum() or c in '._-()':
-                                safe_chars.append(c)
-                            else:
-                                safe_chars.append('_')
-                        
-                        safe_name = ''.join(safe_chars)
-                        if not safe_name:
-                            safe_name = f"file_{extracted_count}"
-                        
-                        decoded_name = safe_name
-                        logger.warning("无法解码文件名，使用安全名称")
+                    # 使用GBK编码后，文件名应该已经是正确的中文了
+                    decoded_name = file_name
+                    logger.debug(f"使用GBK编码读取的文件名: {decoded_name}")
                     
                     # 提取文件
                     data = zip_ref.read(file_name)
