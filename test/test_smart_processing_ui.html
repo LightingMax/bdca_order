@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能处理功能测试</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css">
+    <style>
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 5px;
+            padding: 25px;
+            text-align: center;
+            margin: 20px 0;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .upload-area:hover {
+            border-color: #007bff;
+            background-color: #f8f9fa;
+        }
+        .upload-area.highlight {
+            border-color: #28a745;
+            background-color: #e8f4ea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center mb-4">智能处理功能测试</h1>
+        
+        <div class="alert alert-info">
+            <h5>测试说明：</h5>
+            <p>1. 智能处理区域现在是默认激活的</p>
+            <p>2. 可以拖拽ZIP文件到上传区域</p>
+            <p>3. 也可以点击上传区域选择文件</p>
+            <p>4. 检查浏览器控制台查看事件绑定日志</p>
+        </div>
+        
+        <!-- 智能处理分区 -->
+        <div id="smart-processing" class="function-content active">
+            <div class="upload-area" id="uploadArea">
+                <h3>拖拽ZIP文件到此处或点击上传</h3>
+                <p class="text-muted">支持的文件格式: .zip (可同时上传多个文件)</p>
+                <input type="file" id="fileInput" accept=".zip" multiple style="display: none;">
+            </div>
+            
+            <div id="fileList" class="mb-3" style="display: none;">
+                <h4>选择的文件</h4>
+                <ul class="list-group" id="selectedFiles"></ul>
+            </div>
+        </div>
+        
+        <div class="mt-4">
+            <h5>测试结果：</h5>
+            <div id="testResults" class="alert alert-secondary">
+                等待文件上传测试...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 页面加载完成，开始测试智能处理功能');
+            
+            // 获取元素
+            const uploadArea = document.getElementById('uploadArea');
+            const fileInput = document.getElementById('fileInput');
+            const testResults = document.getElementById('testResults');
+            
+            // 检查元素是否存在
+            if (!uploadArea || !fileInput) {
+                console.error('❌ 智能处理区域元素未找到');
+                testResults.innerHTML = '<div class="alert alert-danger">❌ 智能处理区域元素未找到</div>';
+                return;
+            }
+            
+            console.log('✅ 智能处理区域元素找到');
+            
+            // 点击上传区域触发文件选择
+            uploadArea.addEventListener('click', function() {
+                console.log('🖱️ 点击上传区域');
+                if (fileInput) {
+                    fileInput.click();
+                }
+            });
+            
+            // 文件拖拽事件
+            function preventDefaults(e) {
+                console.log('🛡️ 阻止默认行为:', e.type);
+                e.preventDefault();
+                e.stopPropagation();
+                return false;
+            }
+            
+            function highlightArea() {
+                console.log('✨ 高亮上传区域');
+                uploadArea.classList.add('highlight');
+            }
+            
+            function unhighlightArea() {
+                console.log('🔸 取消高亮上传区域');
+                uploadArea.classList.remove('highlight');
+            }
+            
+            function handleDrop(e) {
+                console.log('📁 处理拖放文件');
+                e.preventDefault();
+                unhighlightArea();
+                const files = e.dataTransfer.files;
+                handleFiles(files);
+            }
+            
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            ['dragenter', 'dragover'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, highlightArea, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, unhighlightArea, false);
+            });
+            
+            uploadArea.addEventListener('drop', handleDrop, false);
+            
+            // 处理选择的文件
+            fileInput.addEventListener('change', function() {
+                console.log('📂 文件选择器变化');
+                if (fileInput.files.length > 0) {
+                    handleFiles(fileInput.files);
+                }
+            });
+            
+            function handleFiles(files) {
+                console.log('📋 处理文件:', files.length, '个文件');
+                
+                let resultHtml = '<div class="alert alert-success">✅ 文件上传测试成功！</div>';
+                resultHtml += '<h6>上传的文件：</h6><ul>';
+                
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    console.log(`文件 ${i + 1}:`, file.name, file.type, file.size);
+                    resultHtml += `<li><strong>${file.name}</strong> (${file.type}, ${file.size} bytes)</li>`;
+                }
+                
+                resultHtml += '</ul>';
+                resultHtml += '<div class="alert alert-info">💡 在实际应用中，这些文件会被发送到服务器进行智能处理</div>';
+                
+                testResults.innerHTML = resultHtml;
+            }
+            
+            console.log('✅ 智能处理事件绑定完成');
+            testResults.innerHTML = '<div class="alert alert-success">✅ 智能处理功能初始化成功！可以开始测试文件上传。</div>';
+        });
+    </script>
+</body>
+</html>

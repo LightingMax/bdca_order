@@ -641,22 +641,22 @@
         
         <!-- 三块功能选择区域 -->
         <div class="function-blocks-container">
-            <div class="function-block active" data-function="raw-print">
+            <div class="function-block" data-function="raw-print">
                 <div class="block-icon">
                     <i class="bi bi-printer-fill"></i>
                 </div>
                 <h3>原始打印</h3>
                 <p>拖拽任何文件直接打印</p>
-                <div class="block-status">当前功能</div>
+                <div class="block-status">点击切换</div>
             </div>
             
-            <div class="function-block" data-function="smart-processing">
+            <div class="function-block active" data-function="smart-processing">
                 <div class="block-icon">
                     <i class="bi bi-gear-fill"></i>
                 </div>
                 <h3>智能处理</h3>
                 <p>ZIP文件智能识别处理</p>
-                <div class="block-status">点击切换</div>
+                <div class="block-status">当前功能</div>
             </div>
             
             <div class="function-block" data-function="custom-merge">
@@ -670,7 +670,7 @@
         </div>
         
         <!-- 原始打印分区 -->
-        <div id="raw-print" class="function-content active">
+        <div id="raw-print" class="function-content">
             <div class="upload-area" id="rawUploadArea">
                 <h3>拖拽任何文件到此处进行原始打印</h3>
                 <p class="text-muted">支持的文件格式: .pdf, .jpg, .png, .doc, .docx, .zip 等 (ZIP文件将自动解压)</p>
@@ -727,7 +727,7 @@
         </div>
         
         <!-- 智能处理分区 -->
-        <div id="smart-processing" class="function-content" style="display: none;">
+        <div id="smart-processing" class="function-content active">
             <div class="upload-area" id="uploadArea">
                 <h3>拖拽ZIP文件到此处或点击上传</h3>
                 <p class="text-muted">支持的文件格式: .zip (可同时上传多个文件)</p>
@@ -1548,50 +1548,39 @@
                     return;
                 }
                 
-                // 移除旧的事件监听器（如果存在）
-                const newUploadArea = uploadArea.cloneNode(true);
-                if (uploadArea.parentNode) {
-                    uploadArea.parentNode.replaceChild(newUploadArea, uploadArea);
-                    
-                    // 重新获取元素引用
-                    const newFileInput = document.getElementById('fileInput');
-                    
-                    // 点击上传区域触发文件选择
-                    newUploadArea.addEventListener('click', function() {
-                        if (newFileInput) {
-                            newFileInput.click();
+                // 点击上传区域触发文件选择
+                uploadArea.addEventListener('click', function() {
+                    if (fileInput) {
+                        fileInput.click();
+                    }
+                });
+                
+                // 文件拖拽事件
+                ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                    uploadArea.addEventListener(eventName, preventDefaults, false);
+                });
+                
+                ['dragenter', 'dragover'].forEach(eventName => {
+                    uploadArea.addEventListener(eventName, highlightSmartArea, false);
+                });
+                
+                ['dragleave', 'drop'].forEach(eventName => {
+                    uploadArea.addEventListener(eventName, unhighlightSmartArea, false);
+                });
+                
+                // 处理拖放的文件
+                uploadArea.addEventListener('drop', handleSmartDrop, false);
+                
+                // 处理选择的文件
+                if (fileInput) {
+                    fileInput.addEventListener('change', function() {
+                        if (fileInput.files.length > 0) {
+                            handleSmartFiles(fileInput.files);
                         }
                     });
-                    
-                    // 文件拖拽事件
-                    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-                        newUploadArea.addEventListener(eventName, preventDefaults, false);
-                    });
-                    
-                    ['dragenter', 'dragover'].forEach(eventName => {
-                        newUploadArea.addEventListener(eventName, highlightSmartArea, false);
-                    });
-                    
-                    ['dragleave', 'drop'].forEach(eventName => {
-                        newUploadArea.addEventListener(eventName, unhighlightSmartArea, false);
-                    });
-                    
-                    // 处理拖放的文件
-                    newUploadArea.addEventListener('drop', handleSmartDrop, false);
-                    
-                    // 处理选择的文件
-                    if (newFileInput) {
-                        newFileInput.addEventListener('change', function() {
-                            if (newFileInput.files.length > 0) {
-                                handleSmartFiles(newFileInput.files);
-                            }
-                        });
-                    }
-                    
-                    console.log('✅ 智能处理事件绑定完成');
-                } else {
-                    console.error('❌ uploadArea 的父节点未找到');
                 }
+                
+                console.log('✅ 智能处理事件绑定完成');
             }
             
             // ==================== 区域清理函数 ====================
@@ -1677,8 +1666,8 @@
                 console.log('✅ 原始打印区域重置完成');
             }
             
-            // 初始绑定智能处理事件 - 延迟到用户第一次切换到智能处理区域时
-            // bindSmartProcessingEvents(); // 注释掉，避免在页面加载时操作隐藏元素
+            // 初始绑定智能处理事件 - 智能处理现在是默认激活的
+            bindSmartProcessingEvents();
             
             // ==================== 智能处理区域专用函数 ====================
             function preventDefaults(e) {

@@ -257,6 +257,18 @@ def extract_order_id(file_path):
             r'trip(\d+)',                           # trip001
         ]
         
+        # 方法1.5: 腾讯出行特殊格式处理
+        # 支持格式：99.45元-2025年08月12日14时16分腾讯出行电子发票-.pdf
+        # 支持格式：99.45元-2025年08月12日14时16分腾讯出行行程单-.pdf
+        tencent_pattern = r'(\d+\.\d+)元-(\d{4}年\d{2}月\d{2}日\d{2}时\d{2}分)腾讯出行'
+        tencent_match = re.search(tencent_pattern, filename)
+        if tencent_match:
+            amount, datetime_str = tencent_match.groups()
+            # 生成统一的订单ID，不区分发票和行程单
+            order_id = f"腾讯出行-{amount}元-{datetime_str}"
+            logger.info(f"从腾讯出行文件名提取到订单ID: {order_id}")
+            return order_id
+        
         # 但是，如果文件名包含"订单-"这种格式，我们优先尝试生成更好的格式
         if '订单-' in filename:
             logger.info(f"检测到'订单-'格式，尝试生成更好的订单ID")
@@ -472,13 +484,34 @@ def match_files_by_order(pdf_files, xml_files):
     xml_missing_warnings = []
     for order_id, order_data in orders.items():
         if order_data['xml'] is None:
-            xml_missing_warnings.append({
-                'order_id': order_id,
-                'reason': 'XML文件缺失',
-                'impact': '金额统计可能不准确',
-                'type': 'taxi'
-            })
-            logger.warning(f"⚠️ 网约车订单 {order_id} 缺少XML文件，金额统计可能不准确")
+            # XML文件缺失时，尝试从PDF文件名中提取金额
+            logger.info(f"🔍 网约车订单 {order_id} 缺少XML文件，尝试从PDF文件名提取金额")
+            
+            # 尝试从发票PDF文件名提取金额
+            if order_data['pdfs'].get('invoice'):
+                invoice_amount = extract_amount_from_pdf(order_data['pdfs']['invoice'])
+                if invoice_amount > 0:
+                    order_data['amount'] = invoice_amount
+                    logger.info(f"✅ 从发票文件名成功提取金额: {invoice_amount}元")
+                else:
+                    # 如果发票文件名提取失败，尝试从行程单文件名提取
+                    if order_data['pdfs'].get('itinerary'):
+                        itinerary_amount = extract_amount_from_pdf(order_data['pdfs']['itinerary'])
+                        if itinerary_amount > 0:
+                            order_data['amount'] = itinerary_amount
+                            logger.info(f"✅ 从行程单文件名成功提取金额: {itinerary_amount}元")
+            
+            # 如果仍然没有提取到金额，记录警告
+            if order_data['amount'] == 0:
+                xml_missing_warnings.append({
+                    'order_id': order_id,
+                    'reason': 'XML文件缺失且无法从PDF文件名提取金额',
+                    'impact': '金额统计为0，可能不准确',
+                    'type': 'taxi'
+                })
+                logger.warning(f"⚠️ 网约车订单 {order_id} 缺少XML文件且无法从PDF文件名提取金额")
+            else:
+                logger.info(f"✅ 网约车订单 {order_id} 从PDF文件名成功提取金额: {order_data['amount']}元")
         elif order_data['amount'] == 0:
             xml_missing_warnings.append({
                 'order_id': order_id,

@@ -94,11 +94,8 @@ def upload_file():
             if file_hash in session_processed_hashes:
                 # 从全局存储中获取文件信息
                 existing_file = check_file_exists(file_hash)
-                if existing_file:
+                if existing_file and 'results' in existing_file:
                     logger.info(f"文件 {filename} 在当前会话中已上传过，重用之前的处理结果")
-                
-                # 如果文件已上传过，使用之前的处理结果
-                if 'results' in existing_file:
                     # 将已有结果添加到总结果中
                     all_results.extend(existing_file['results'])
                     
@@ -154,7 +151,7 @@ def upload_file():
                         })
                         continue
                 else:
-                    logger.warning(f"文件 {filename} 在全局存储中不存在，将重新处理")
+                    logger.warning(f"文件 {filename} 在全局存储中不存在或处理结果无效，将重新处理")
             else:
                 logger.info(f"文件 {filename} 在当前会话中首次上传，将进行处理")
             

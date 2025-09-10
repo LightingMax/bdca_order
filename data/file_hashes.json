@@ -310,5 +310,58 @@
         "combined_type": "hotel_accommodation"
       }
     ]
+  },
+  "0ee716cce849cbe62c0c1c956ffa6d2beeab1ab7003f36255e3ccb46e9847f07": {
+    "filename": "1.zip",
+    "original_filename": "腾讯出行服务电子发票及行程报销单 (1).zip",
+    "upload_time": "2025-09-10 14:45:48",
+    "session_id": "3f828cc5-083a-4e1f-a304-496cd40a7b7f",
+    "results": [
+      {
+        "order_id": "腾讯出行-99.45元-2025年08月12日14时16分",
+        "amount": 99.45,
+        "output_file": "order_1_4a951020.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "a21fdc42be29ebfd225910fc1a36da5c3a953145aadde621afa01b00ba5d824c": {
+    "filename": "1.zip",
+    "original_filename": "滴滴出行电子发票 (1).zip",
+    "upload_time": "2025-09-10 14:46:51",
+    "session_id": "73e8a0ef-fb81-4c49-b6c6-6781bf06a4cb",
+    "results": []
+  },
+  "adb076d162b4ce4f8c780827964de8b87dac46d42917ebef84f1c8e87d772422": {
+    "filename": "15.zip",
+    "original_filename": "高德打车电子发票 (15).zip",
+    "upload_time": "2025-09-10 14:47:00",
+    "session_id": "09bb8426-f880-493e-b261-882e185681dd",
+    "results": [
+      {
+        "order_id": "聚的出租车-67.41元-1个行程",
+        "amount": 67.41,
+        "output_file": "order_1_869877ef.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      },
+      {
+        "order_id": "曹操出行-42.08元-1个行程",
+        "amount": 42.08,
+        "output_file": "order_2_7f9b5fef.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
   }
 }
