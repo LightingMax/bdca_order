@@ -834,4 +834,89 @@ def get_output_file(filename):
     """获取生成的PDF文件"""
     logger = current_app.logger
     logger.debug(f"请求获取输出文件: {filename}")
-    return send_from_directory(current_app.config['OUTPUT_FOLDER'], filename) 
+    return send_from_directory(current_app.config['OUTPUT_FOLDER'], filename)
+
+
+@main_bp.route('/api/download-collection', methods=['POST'])
+def download_collection():
+    """创建并下载PDF合集"""
+    logger = current_app.logger
+    logger.info("收到下载合集请求")
+    
+    try:
+        # 获取请求数据
+        data = request.get_json()
+        processed_files = data.get('processed_files', [])
+        collection_name = data.get('collection_name', '报销单据合集')
+        
+        if not processed_files:
+            return jsonify({'success': False, 'message': '没有可下载的文件'}), 400
+        
+        logger.info(f"开始创建合集，文件数量: {len(processed_files)}")
+        
+        # 调用PDF服务创建合集
+        from app.services.pdf_service import create_download_collection
+        result = create_download_collection(processed_files, collection_name)
+        
+        if result['success']:
+            # 生成下载令牌
+            import uuid
+            token = str(uuid.uuid4())
+            
+            # 存储文件路径到令牌
+            if not hasattr(current_app, 'file_tokens'):
+                current_app.file_tokens = {}
+            current_app.file_tokens[token] = result['file_path']
+            
+            logger.info(f"✅ 合集创建成功: {result['filename']}")
+            return jsonify({
+                'success': True,
+                'filename': result['filename'],
+                'download_url': f'/api/download-file/{token}',
+                'file_count': result['file_count']
+            })
+        else:
+            logger.error(f"❌ 合集创建失败: {result['message']}")
+            return jsonify({
+                'success': False,
+                'message': result['message']
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"创建下载合集时出错: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'message': f'创建合集时出错: {str(e)}'}), 500
+
+
+@main_bp.route('/api/download-file/<token>')
+def download_file(token):
+    """通过令牌下载文件"""
+    logger = current_app.logger
+    logger.info(f"收到文件下载请求，令牌: {token}")
+    
+    try:
+        # 从令牌中获取文件路径
+        if not hasattr(current_app, 'file_tokens') or token not in current_app.file_tokens:
+            logger.warning(f"无效的下载令牌: {token}")
+            return jsonify({'error': '无效的下载令牌'}), 404
+        
+        file_path = current_app.file_tokens[token]
+        
+        if not os.path.exists(file_path):
+            logger.warning(f"文件不存在: {file_path}")
+            return jsonify({'error': '文件不存在'}), 404
+        
+        # 获取文件名
+        filename = os.path.basename(file_path)
+        
+        # 返回文件下载
+        logger.info(f"开始下载文件: {filename}")
+        return send_from_directory(
+            os.path.dirname(file_path), 
+            filename, 
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        logger.error(f"下载文件时出错: {str(e)}", exc_info=True)
+        return jsonify({'error': f'下载文件时出错: {str(e)}'}), 500 

@@ -535,6 +535,36 @@
       ],
       "total_amount": 23799.699999999997,
       "total_prints": 90
+    },
+    "192.168.20.74": {
+      "print_history": [
+        {
+          "timestamp": "2025-09-17 14:07:28",
+          "file_count": 1,
+          "total_amount": 58.37,
+          "order_ids": [
+            "优e出行-58.37元-1个行程"
+          ]
+        },
+        {
+          "timestamp": "2025-09-17 17:24:46",
+          "file_count": 1,
+          "total_amount": 489.0,
+          "order_ids": [
+            "hotel_25114000000002437876"
+          ]
+        },
+        {
+          "timestamp": "2025-09-17 17:25:29",
+          "file_count": 1,
+          "total_amount": 17.71,
+          "order_ids": [
+            "小牛快跑-17.71元-1个行程"
+          ]
+        }
+      ],
+      "total_amount": 565.08,
+      "total_prints": 3
     }
   }
 }

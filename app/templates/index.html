@@ -767,6 +767,7 @@
                 <div id="resultList" class="mt-3"></div>
                 <div class="mt-3">
                     <button id="printAllBtn" class="btn btn-primary me-2">打印全部</button>
+                    <button id="downloadCollectionBtn" class="btn btn-success me-2">下载合集</button>
                     <button id="clearResultsBtn" class="btn btn-outline-secondary">清空结果</button>
                 </div>
             </div>
@@ -2565,6 +2566,65 @@
                                     }
                                 }
                             });
+                        });
+                    }
+                }
+            });
+            
+            // 使用事件委托绑定下载合集按钮
+            document.addEventListener('click', function(e) {
+                if (e.target && e.target.id === 'downloadCollectionBtn') {
+                    console.log('📥 下载合集按钮被点击');
+                    
+                    if (processedFiles.length === 0) {
+                        showNotification('没有可下载的文件', 'warning');
+                        return;
+                    }
+                    
+                    if (confirm(`确定要下载合集吗？将包含 ${processedFiles.length} 个文件`)) {
+                        // 添加加载动画
+                        const originalText = e.target.innerHTML;
+                        e.target.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 生成中...';
+                        e.target.disabled = true;
+                        
+                        // 调用后端API创建合集
+                        fetch('/api/download-collection', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                processed_files: processedFiles,
+                                collection_name: '报销单据合集'
+                            })
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                console.log('✅ 合集创建成功:', data);
+                                
+                                // 创建下载链接并自动下载
+                                const downloadLink = document.createElement('a');
+                                downloadLink.href = data.download_url;
+                                downloadLink.download = data.filename;
+                                document.body.appendChild(downloadLink);
+                                downloadLink.click();
+                                document.body.removeChild(downloadLink);
+                                
+                                showNotification(`合集下载开始: ${data.filename}`, 'success');
+                            } else {
+                                console.error('❌ 合集创建失败:', data.message);
+                                showNotification(`合集创建失败: ${data.message}`, 'error');
+                            }
+                        })
+                        .catch(error => {
+                            console.error('❌ 下载合集请求失败:', error);
+                            showNotification('下载合集请求失败', 'error');
+                        })
+                        .finally(() => {
+                            // 恢复按钮状态
+                            e.target.innerHTML = originalText;
+                            e.target.disabled = false;
                         });
                     }
                 }

@@ -1,6 +1,7 @@
 import re
 import uuid
 import xml.etree.ElementTree as ET
+import os
 from pathlib import Path
 from PyPDF2 import PdfReader, PdfWriter
 from flask import current_app
@@ -1233,4 +1234,167 @@ def process_pdf_files(extract_dir, zip_filename=None):
         'hotel_warnings': hotel_warnings
     }
     
-    return results, xml_missing_warnings, classification_info 
+    return results, xml_missing_warnings, classification_info
+
+
+def merge_processed_pdfs(processed_files, output_path):
+    """
+    拼接多个已处理的PDF文件
+    
+    Args:
+        processed_files: 已处理的文件列表，每个文件包含output_file等信息
+        output_path: 输出文件路径
+    
+    Returns:
+        bool: 拼接是否成功
+    """
+    logger = current_app.logger
+    logger.info(f"开始拼接 {len(processed_files)} 个PDF文件")
+    
+    try:
+        # 检查是否有必要的工具
+        import subprocess
+        import shutil
+        if not shutil.which('pdftk'):
+            logger.warning("未找到pdftk工具，无法合并PDF")
+            return False
+        
+        # 按类型分类文件：酒店文件优先，然后是网约车文件
+        hotel_files = []
+        taxi_files = []
+        
+        for file_info in processed_files:
+            output_file = file_info.get('output_file')
+            if not output_file:
+                continue
+                
+            # 构建完整文件路径
+            from app import Config
+            full_path = os.path.join(Config.OUTPUT_FOLDER, output_file)
+            
+            if not os.path.exists(full_path):
+                logger.warning(f"文件不存在，跳过: {full_path}")
+                continue
+            
+            # 根据文件类型分类
+            if file_info.get('combined_type') == 'hotel_accommodation':
+                hotel_files.append(full_path)
+                logger.info(f"🏨 添加酒店文件: {output_file}")
+            else:
+                taxi_files.append(full_path)
+                logger.info(f"🚗 添加网约车文件: {output_file}")
+        
+        # 合并文件列表：酒店文件在前，网约车文件在后
+        all_files = hotel_files + taxi_files
+        
+        if not all_files:
+            logger.warning("没有找到可拼接的文件")
+            return False
+        
+        logger.info(f"📋 拼接顺序: {len(hotel_files)} 个酒店文件 + {len(taxi_files)} 个网约车文件")
+        
+        # 使用pdftk进行拼接
+        import tempfile
+        temp_dir = tempfile.gettempdir()
+        temp_combined = Path(temp_dir) / f"temp_combined_{uuid.uuid4().hex[:8]}.pdf"
+        
+        try:
+            # 构建pdftk命令
+            cmd = ['pdftk'] + all_files + ['cat', 'output', temp_combined]
+            
+            logger.info(f"🔄 执行拼接命令: {' '.join(cmd[:3])}... (共{len(all_files)}个文件)")
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            
+            if os.path.exists(temp_combined):
+                # 验证拼接结果
+                file_size = os.path.getsize(temp_combined)
+                logger.info(f"📊 临时拼接文件大小: {file_size} bytes")
+                
+                if file_size < 1000:
+                    logger.error("❌ 拼接文件过小，可能拼接失败")
+                    return False
+                
+                # 移动到最终输出路径
+                import shutil
+                shutil.move(temp_combined, output_path)
+                
+                # 验证最终文件
+                if os.path.exists(output_path):
+                    final_size = os.path.getsize(output_path)
+                    logger.info(f"✅ PDF拼接成功!")
+                    logger.info(f"   输出文件: {output_path}")
+                    logger.info(f"   文件大小: {final_size} bytes")
+                    logger.info(f"   拼接文件数: {len(all_files)}")
+                    logger.info(f"   拼接顺序: 酒店文件({len(hotel_files)}) + 网约车文件({len(taxi_files)})")
+                    return True
+                else:
+                    logger.error("❌ 最终输出文件未生成")
+                    return False
+            else:
+                logger.error("❌ 临时拼接文件未生成")
+                return False
+                
+        except subprocess.CalledProcessError as e:
+            logger.error(f"❌ pdftk拼接失败: {e}")
+            logger.error(f"   错误输出: {e.stderr}")
+            return False
+        finally:
+            # 清理临时文件
+            if os.path.exists(temp_combined):
+                try:
+                    os.remove(temp_combined)
+                except Exception as e:
+                    logger.warning(f"清理临时文件失败: {e}")
+        
+    except Exception as e:
+        logger.error(f"❌ PDF拼接过程出错: {e}")
+        return False
+
+
+def create_download_collection(processed_files, collection_name="报销单据合集"):
+    """
+    创建下载合集
+    
+    Args:
+        processed_files: 已处理的文件列表
+        collection_name: 合集名称
+    
+    Returns:
+        dict: 包含成功状态和文件路径的字典
+    """
+    logger = current_app.logger
+    logger.info(f"开始创建下载合集: {collection_name}")
+    
+    try:
+        # 生成输出文件名
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_filename = f"{collection_name}_{timestamp}.pdf"
+        
+        from app import Config
+        output_path = os.path.join(Config.OUTPUT_FOLDER, output_filename)
+        
+        # 调用拼接功能
+        success = merge_processed_pdfs(processed_files, output_path)
+        
+        if success:
+            logger.info(f"✅ 下载合集创建成功: {output_filename}")
+            return {
+                'success': True,
+                'filename': output_filename,
+                'file_path': output_path,
+                'file_count': len(processed_files)
+            }
+        else:
+            logger.error("❌ 下载合集创建失败")
+            return {
+                'success': False,
+                'message': 'PDF拼接失败'
+            }
+            
+    except Exception as e:
+        logger.error(f"❌ 创建下载合集出错: {e}")
+        return {
+            'success': False,
+            'message': f'创建合集时出错: {str(e)}'
+        } 

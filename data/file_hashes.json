@@ -314,13 +314,13 @@
   "0ee716cce849cbe62c0c1c956ffa6d2beeab1ab7003f36255e3ccb46e9847f07": {
     "filename": "1.zip",
     "original_filename": "腾讯出行服务电子发票及行程报销单 (1).zip",
-    "upload_time": "2025-09-10 14:45:48",
-    "session_id": "3f828cc5-083a-4e1f-a304-496cd40a7b7f",
+    "upload_time": "2025-09-17 17:19:38",
+    "session_id": "29cead33-3978-4965-bcb8-ece0ae278bc6",
     "results": [
       {
         "order_id": "腾讯出行-99.45元-2025年08月12日14时16分",
         "amount": 99.45,
-        "output_file": "order_1_4a951020.pdf",
+        "output_file": "order_1_adaed67d.pdf",
         "has_itinerary": true,
         "has_invoice": true,
         "has_hotel_bill": false,
@@ -356,6 +356,78 @@
         "order_id": "曹操出行-42.08元-1个行程",
         "amount": 42.08,
         "output_file": "order_2_7f9b5fef.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "c2544209bf4a0089fb970d1926ca6906d1dde2c9aab8ca452e498cc369863c17": {
+    "filename": "zip",
+    "original_filename": "高德打车电子发票.zip",
+    "upload_time": "2025-09-17 14:07:28",
+    "session_id": "fea992fe-75dc-4662-abe3-f41ffb64a2fa",
+    "results": [
+      {
+        "order_id": "优e出行-58.37元-1个行程",
+        "amount": 58.37,
+        "output_file": "order_1_e763df44.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "2b74169778faf2d488fec03979316b51be004382ee3b20833765e5875ba7c5ff": {
+    "filename": "-test.zip",
+    "original_filename": "高德打车电子发票-test.zip",
+    "upload_time": "2025-09-17 14:08:14",
+    "session_id": "677bc1e2-7fd1-4424-9b25-647f24bfc011",
+    "results": [
+      {
+        "order_id": "优e出行-58.37元-1个行程",
+        "amount": 58.37,
+        "output_file": "order_1_f19e5c0c.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page"
+      }
+    ]
+  },
+  "323cd8ad8f4438deb646496a6c6d7bba91622b4d68a18a95d288971126214982": {
+    "filename": "25114000000002437876.zip",
+    "original_filename": "【华住酒店集团】桔子北京石景山大悦城首钢园酒店发票已开具，感谢您的支持！（发票号码：25114000000002437876）.zip",
+    "upload_time": "2025-09-17 17:24:46",
+    "session_id": "3d0b139b-7b28-4a91-bb22-62c11522e471",
+    "results": [
+      {
+        "order_id": "hotel_25114000000002437876",
+        "amount": 489.0,
+        "output_file": "order_1_68f4eb3d.pdf",
+        "has_itinerary": false,
+        "has_invoice": true,
+        "has_hotel_bill": true,
+        "page_count": 1,
+        "combined_type": "hotel_accommodation"
+      }
+    ]
+  },
+  "d1170e8f8945edc8093389001c7f2f4d4f6e0c5d9b5fd5b9081bac5041bd0e53": {
+    "filename": "4.zip",
+    "original_filename": "高德打车电子发票 (4).zip",
+    "upload_time": "2025-09-17 17:25:29",
+    "session_id": "b6b57acc-9e74-4a39-805b-360aef831294",
+    "results": [
+      {
+        "order_id": "小牛快跑-17.71元-1个行程",
+        "amount": 17.71,
+        "output_file": "order_1_b362e4ff.pdf",
         "has_itinerary": true,
         "has_invoice": true,
         "has_hotel_bill": false,
