@@ -768,6 +768,7 @@
                 <div class="mt-3">
                     <button id="printAllBtn" class="btn btn-primary me-2">打印全部</button>
                     <button id="downloadCollectionBtn" class="btn btn-success me-2">下载合集</button>
+                    <button id="viewTripsBtn" class="btn btn-info me-2" style="display: none;">查看行程</button>
                     <button id="clearResultsBtn" class="btn btn-outline-secondary">清空结果</button>
                 </div>
             </div>
@@ -2015,6 +2016,8 @@
                     if (typeof processedFiles === 'undefined') {
                         console.log('🆕 processedFiles 未定义，初始化为空数组');
                         processedFiles = [];
+                        // 清除缓存的行程记录
+                        cachedTripRecords = null;
                     }
                     
                     console.log('📥 添加新结果前，processedFiles 长度:', processedFiles.length);
@@ -2369,6 +2372,29 @@
                 } else {
                     resultList.innerHTML = '<div class="alert alert-danger">处理文件时出错</div>';
                 }
+                
+                // 检查是否有行程单，显示/隐藏"查看行程"按钮
+                updateViewTripsButton();
+            }
+            
+            // 更新"查看行程"按钮的显示状态
+            function updateViewTripsButton() {
+                const viewTripsBtn = document.getElementById('viewTripsBtn');
+                if (!viewTripsBtn) {
+                    console.warn('找不到"查看行程"按钮');
+                    return;
+                }
+                
+                // 检查是否有包含行程单的文件
+                const hasItinerary = processedFiles && processedFiles.some(file => file.has_itinerary === true);
+                
+                if (hasItinerary) {
+                    viewTripsBtn.style.display = 'inline-block';
+                    console.log('✅ 显示"查看行程"按钮');
+                } else {
+                    viewTripsBtn.style.display = 'none';
+                    console.log('❌ 隐藏"查看行程"按钮');
+                }
             }
             
             // 打印单个文件
@@ -2483,13 +2509,18 @@
                         
                         // 重置处理文件数组
                         processedFiles = [];
-                        console.log('✅ 处理文件数组已重置');
+                        // 清除缓存的行程记录
+                        cachedTripRecords = null;
+                        console.log('✅ 处理文件数组已重置，缓存已清除');
                         
                         // 重置重用文件数组
                         if (typeof window.allReusedFiles !== 'undefined') {
                             window.allReusedFiles = [];
                             console.log('✅ 重用文件数组已重置');
                         }
+                        
+                        // 更新"查看行程"按钮状态
+                        updateViewTripsButton();
                         
                         // 显示通知
                         showNotification('已清空所有处理结果', 'info');
@@ -2629,6 +2660,145 @@
                     }
                 }
             });
+            
+            // 缓存行程记录
+            let cachedTripRecords = null;
+            
+            // 使用事件委托绑定查看行程按钮
+            document.addEventListener('click', function(e) {
+                if (e.target && e.target.id === 'viewTripsBtn') {
+                    console.log('👁️ 查看行程按钮被点击');
+                    
+                    if (processedFiles.length === 0) {
+                        showNotification('没有可查看的文件', 'warning');
+                        return;
+                    }
+                    
+                    // 检查是否有包含行程单的文件
+                    const hasItinerary = processedFiles.some(file => file.has_itinerary === true);
+                    if (!hasItinerary) {
+                        showNotification('没有包含行程单的文件', 'warning');
+                        return;
+                    }
+                    
+                    // 检查是否有缓存的行程记录
+                    if (cachedTripRecords) {
+                        console.log('✅ 使用缓存的行程记录');
+                        showTripRecords(cachedTripRecords);
+                        showNotification('显示缓存的行程记录', 'info');
+                        return;
+                    }
+                    
+                    // 添加加载动画
+                    const originalText = e.target.innerHTML;
+                    e.target.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 生成中...';
+                    e.target.disabled = true;
+                    
+                    // 调用后端API生成行程记录
+                    fetch('/api/view-trips', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            processed_files: processedFiles
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            console.log('✅ 行程记录生成成功:', data);
+                            
+                            // 缓存行程记录
+                            cachedTripRecords = data.trip_records;
+                            
+                            // 显示行程记录
+                            showTripRecords(data.trip_records);
+                            showNotification('行程记录生成成功', 'success');
+                        } else {
+                            console.error('❌ 行程记录生成失败:', data.message);
+                            showNotification(`行程记录生成失败: ${data.message}`, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('❌ 查看行程请求失败:', error);
+                        showNotification('查看行程请求失败', 'error');
+                    })
+                    .finally(() => {
+                        // 恢复按钮状态
+                        e.target.innerHTML = originalText;
+                        e.target.disabled = false;
+                    });
+                }
+            });
+            
+            // 显示行程记录
+            function showTripRecords(tripRecords) {
+                // 创建模态框
+                const modal = document.createElement('div');
+                modal.className = 'modal fade';
+                modal.id = 'tripRecordsModal';
+                modal.tabIndex = -1;
+                modal.innerHTML = `
+                    <div class="modal-dialog modal-lg">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">行程记录</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <pre style="white-space: pre-wrap; font-family: monospace; background-color: #f8f9fa; padding: 15px; border-radius: 5px; max-height: 500px; overflow-y: auto;">${tripRecords}</pre>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                                <button type="button" class="btn btn-primary" onclick="copyTripRecords()">复制</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // 添加到页面
+                document.body.appendChild(modal);
+                
+                // 显示模态框
+                const bsModal = new bootstrap.Modal(modal);
+                bsModal.show();
+                
+                // 模态框关闭后移除元素
+                modal.addEventListener('hidden.bs.modal', function() {
+                    document.body.removeChild(modal);
+                });
+            }
+            
+            // 复制行程记录到剪贴板
+            function copyTripRecords() {
+                // 优先使用缓存的行程记录
+                if (cachedTripRecords) {
+                    navigator.clipboard.writeText(cachedTripRecords).then(() => {
+                        showNotification('行程记录已复制到剪贴板', 'success');
+                    }).catch(err => {
+                        console.error('复制失败:', err);
+                        showNotification('复制失败', 'error');
+                    });
+                    return;
+                }
+                
+                // 回退到从模态框复制
+                const modal = document.getElementById('tripRecordsModal');
+                if (modal) {
+                    const preElement = modal.querySelector('pre');
+                    if (preElement) {
+                        navigator.clipboard.writeText(preElement.textContent).then(() => {
+                            showNotification('行程记录已复制到剪贴板', 'success');
+                        }).catch(err => {
+                            console.error('复制失败:', err);
+                            showNotification('复制失败', 'error');
+                        });
+                    }
+                } else {
+                    showNotification('没有可复制的内容', 'warning');
+                }
+            }
             
             // 添加预览按钮事件处理
             document.addEventListener('click', function(e) {

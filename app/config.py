@@ -45,4 +45,10 @@ class Config:
         'default_printer': '/default-printer',
         'print': '/print',
         'health': '/health'
-    } 
+    }
+    
+    # 通义千问API配置
+    QWEN_API_BASE_URL = os.environ.get('QWEN_API_BASE_URL') or 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    QWEN_API_KEY = os.environ.get('QWEN_API_KEY') or 'sk-4b678a7de6d34b878356518397592170'
+    QWEN_MODEL = os.environ.get('QWEN_MODEL') or 'qwen2.5-32b-instruct'
+    QWEN_API_TIMEOUT = int(os.environ.get('QWEN_API_TIMEOUT', 180)) 

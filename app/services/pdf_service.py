@@ -2,10 +2,97 @@ import re
 import uuid
 import xml.etree.ElementTree as ET
 import os
+import requests
+import json
 from pathlib import Path
 from PyPDF2 import PdfReader, PdfWriter
 from flask import current_app
 from app.services.file_service import get_file_paths, group_files_by_type
+
+def call_qwen_api_for_trips(table_data_list):
+    """调用通义千问API规整行程数据"""
+    logger = current_app.logger
+    
+    # 从配置文件获取通义千问API配置
+    url = f"{current_app.config['QWEN_API_BASE_URL']}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {current_app.config['QWEN_API_KEY']}",
+        "Content-Type": "application/json"
+    }
+    
+    # 构建提示词
+    prompt = f"""
+请帮我整理以下行程记录：将它们按照上车时间升序排列并重新编号，然后以JSON格式返回结果。每个行程记录应包含序号、服务商、车型、上车时间、城市、起点、终点和金额等所有字段。请确保返回标准的JSON数组格式，无需添加任何额外解释。
+
+原始表格数据：
+{table_data_list}
+
+请返回JSON数组格式，每个对象包含以下字段：
+- sequence: 序号（字符串）
+- service_provider: 服务商（字符串）
+- car_type: 车型（字符串）
+- pickup_time: 上车时间（字符串）
+- city: 城市（字符串）
+- start_point: 起点（字符串）
+- end_point: 终点（字符串）
+- amount: 金额（字符串）
+"""
+    
+    data = {
+        "model": current_app.config['QWEN_MODEL'],
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.1
+    }
+    
+    try:
+        import time
+        start_time = time.time()
+        
+        logger.info("调用通义千问API规整行程数据...")
+        logger.info(f"API请求URL: {url}")
+        logger.info(f"API超时设置: {current_app.config['QWEN_API_TIMEOUT']} 秒")
+        logger.info(f"请求数据大小: {len(str(table_data_list))} 字符")
+        logger.info(f"请求开始时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time))}")
+        
+        response = requests.post(url, headers=headers, json=data, timeout=current_app.config['QWEN_API_TIMEOUT'])
+        
+        end_time = time.time()
+        duration = end_time - start_time
+        logger.info(f"API请求完成，耗时: {duration:.2f} 秒")
+        response.raise_for_status()
+        result = response.json()
+        content = result['choices'][0]['message']['content']
+        
+        logger.info(f"通义千问API原始返回内容长度: {len(content)} 字符")
+        logger.info(f"通义千问API原始返回内容: {content[:500]}...")  # 只显示前500字符
+        
+        # 提取JSON部分
+        import re
+        json_match = re.search(r'\[.*\]', content, re.DOTALL)
+        if json_match:
+            json_str = json_match.group()
+            logger.info(f"提取到的JSON字符串长度: {len(json_str)} 字符")
+            logger.info(f"提取到的JSON字符串: {json_str}")
+            
+            parsed_data = json.loads(json_str)
+            logger.info(f"通义千问API成功规整了 {len(parsed_data)} 个行程")
+            
+            # 详细输出每个行程的信息
+            for i, trip in enumerate(parsed_data):
+                logger.info(f"行程{i+1}: 序号={trip.get('sequence')}, 服务商={trip.get('service_provider')}, 时间={trip.get('pickup_time')}, 起点={trip.get('start_point')}, 终点={trip.get('end_point')}, 金额={trip.get('amount')}")
+            
+            return parsed_data
+        else:
+            logger.error("通义千问API返回结果中未找到JSON数据")
+            logger.error(f"完整返回内容: {content}")
+            return []
+            
+    except Exception as e:
+        logger.error(f"调用通义千问API失败: {e}")
+        logger.error(f"请求数据: {data}")
+        return []
 
 def extract_amount_from_xml(xml_path):
     """从XML文件中提取订单金额"""
@@ -1145,8 +1232,8 @@ def process_pdf_files(extract_dir, zip_filename=None):
                 else:
                     logger.error(f"住宿拼接失败，订单 {order_id}")
             elif itinerary_path and invoice_path:
-                # 打车行程单：行程单+发票
-                logger.info(f"🚗 检测到打车行程单，处理行程单+发票拼接")
+                # 单个行程单：行程单+发票（保持原有逻辑）
+                logger.info(f"🚗 检测到单个行程单，处理行程单+发票拼接")
                 
                 # 获取行程单页数
                 page_count = 1  # 默认1页
@@ -1159,12 +1246,24 @@ def process_pdf_files(extract_dir, zip_filename=None):
                 except Exception as e:
                     logger.warning(f"无法获取行程单页数，使用默认值1: {e}")
                 
+                # 在处理拼接之前，先提取原始表格数据并缓存
+                raw_table_data = None
+                try:
+                    logger.info(f"🚗 开始提取原始表格数据: {itinerary_path}")
+                    raw_table_data = extract_trip_info_from_itinerary(itinerary_path)
+                    if raw_table_data:
+                        logger.info(f"✅ 成功提取到原始表格数据，行数: {len(raw_table_data)}")
+                    else:
+                        logger.warning(f"⚠️ 未能提取到原始表格数据")
+                except Exception as e:
+                    logger.error(f"❌ 提取原始表格数据失败: {e}")
+                
                 # 使用智能拼接函数
                 if create_smart_combined_pdf(itinerary_path, invoice_path, output_path, page_count):
                     logger.info(f"智能拼接成功，输出文件: {output_path}")
                     
-                    # 添加处理结果
-                    results.append({
+                    # 添加处理结果，包含提取的原始表格数据
+                    result = {
                         'order_id': order_id,
                         'amount': order_data['amount'],
                         'output_file': output_filename,
@@ -1172,9 +1271,12 @@ def process_pdf_files(extract_dir, zip_filename=None):
                         'has_invoice': True,
                         'has_hotel_bill': False,
                         'page_count': page_count,
-                        'combined_type': 'single_page' if page_count == 1 else 'multi_page'
-                    })
-                    logger.info(f"订单 {order_id} 处理成功")
+                        'combined_type': 'single_page' if page_count == 1 else 'multi_page',
+                        'raw_table_data': raw_table_data,  # 缓存原始表格数据
+                        'itinerary_file': itinerary_path  # 保存原始行程单文件路径
+                    }
+                    results.append(result)
+                    logger.info(f"订单 {order_id} 处理成功，包含原始表格数据行数: {len(raw_table_data) if raw_table_data else 0}")
                 else:
                     logger.error(f"智能拼接失败，订单 {order_id}")
             else:
@@ -1397,4 +1499,938 @@ def create_download_collection(processed_files, collection_name="报销单据合
         return {
             'success': False,
             'message': f'创建合集时出错: {str(e)}'
-        } 
+        }
+
+
+def extract_trip_info_from_itinerary(pdf_path):
+    """
+    从行程单PDF中提取行程信息（使用pdfplumber + 暂存原始数据）
+    
+    Args:
+        pdf_path: 行程单PDF文件路径
+    
+    Returns:
+        list: 原始表格数据列表，用于后续AI处理
+    """
+    logger = current_app.logger
+    logger.info(f"开始从行程单提取原始表格数据: {pdf_path}")
+    
+    try:
+        import pdfplumber
+        
+        # 使用pdfplumber lines策略提取表格
+        logger.info("使用pdfplumber lines策略提取PDF表格")
+        with pdfplumber.open(pdf_path) as pdf:
+            page = pdf.pages[0]  # 获取第一页
+            tables = page.extract_tables(table_settings={
+                "vertical_strategy": "lines", 
+                "horizontal_strategy": "lines"
+            })
+            
+            if not tables:
+                logger.warning("未找到表格数据")
+                return []
+            
+            logger.info(f"找到 {len(tables)} 个表格")
+            
+            # 返回原始表格数据，不进行解析
+            table_data = tables[0]
+            logger.info(f"提取到原始表格数据，行数: {len(table_data)}")
+            logger.info(f"原始表格数据内容: {table_data}")
+            
+            # 暂存原始数据，返回给调用方
+            return table_data
+        
+    except Exception as e:
+        logger.error(f"从行程单提取原始数据失败: {e}")
+        return []
+
+
+def parse_trip_row_data_with_context(df, row_index, row_data):
+    """
+    解析DataFrame中一行的行程数据，并尝试从相邻行获取起点信息
+    
+    Args:
+        df: DataFrame对象
+        row_index: 当前行索引
+        row_data: 当前行数据
+    
+    Returns:
+        dict: 行程信息字典
+    """
+    import re
+    logger = current_app.logger
+    
+    # 先解析当前行的数据
+    trip = parse_trip_row_data(row_data)
+    if not trip:
+        return None
+    
+    # 如果起点是"未知起点"，尝试从相邻行获取起点信息
+    if trip.get('start_point') == '未知起点':
+        logger.info("尝试从相邻行获取起点信息...")
+        
+        # 收集所有可能的起点信息
+        start_point_parts = []
+        
+        # 检查前一行（可能包含起点的第一部分）
+        if row_index - 1 >= 0:
+            prev_row = list(df.iloc[row_index - 1])
+            prev_row_clean = [str(cell).strip() for cell in prev_row if str(cell).strip() and str(cell).strip() != 'nan']
+            
+            # 如果前一行有数据且不包含序号，可能是起点信息
+            if prev_row_clean and not any(re.match(r'^\d+', str(cell)) for cell in prev_row_clean):
+                for cell in prev_row_clean:
+                    if cell and not any(keyword in cell for keyword in ['说明：', '页码：', '序号', '服务商', '车型', '上车时间', '城市', '起点', '终点', '金额']):
+                        start_point_parts.append(cell)
+        
+        # 检查下一行（可能包含起点的第二部分）
+        if row_index + 1 < len(df):
+            next_row = list(df.iloc[row_index + 1])
+            next_row_clean = [str(cell).strip() for cell in next_row if str(cell).strip() and str(cell).strip() != 'nan']
+            
+            # 如果下一行有数据且不包含序号，可能是起点信息
+            if next_row_clean and not any(re.match(r'^\d+', str(cell)) for cell in next_row_clean):
+                for cell in next_row_clean:
+                    if cell and not any(keyword in cell for keyword in ['说明：', '页码：', '序号', '服务商', '车型', '上车时间', '城市', '起点', '终点', '金额']):
+                        start_point_parts.append(cell)
+        
+        # 组合起点信息
+        if start_point_parts:
+            trip['start_point'] = ' '.join(start_point_parts)
+            logger.info(f"组合起点信息: {trip['start_point']}")
+    
+    return trip
+
+
+def parse_trip_row_data(row_data):
+    """
+    解析DataFrame中一行的行程数据
+    
+    Args:
+        row_data: 行数据列表
+    
+    Returns:
+        dict: 行程信息字典
+    """
+    logger = current_app.logger
+    
+    # 过滤掉空值和nan
+    clean_cells = []
+    for cell in row_data:
+        cell_str = str(cell).strip()
+        if cell_str and cell_str != 'nan':
+            clean_cells.append(cell_str)
+    
+    if len(clean_cells) < 3:
+        logger.warning(f"行数据不足: {clean_cells}")
+        return None
+    
+    # 根据raw_data重新分析数据结构：
+    # 第0个数据：序号\n服务商 (如 "2\n旅程易到")
+    # 第1个数据：车型 时间 (如 "旅程易到经济型 2024-06-20 18:59")
+    # 第2个数据：城市\n起点 (如 "北京市\n航天智能院")
+    # 第3个数据：终点 (如 "汉庭优佳北京石景山首钢园酒店")
+    # 第4个数据：金额 (如 "16.12元")
+    
+    trip = {}
+    
+    # 解析第0个数据：序号和服务商
+    if len(clean_cells) > 0:
+        first_cell = clean_cells[0]
+        if '\n' in first_cell:
+            parts = first_cell.split('\n')
+            trip['sequence'] = parts[0].strip()
+            trip['service_provider'] = parts[1].strip() if len(parts) > 1 else '未知'
+        else:
+            trip['sequence'] = first_cell
+            trip['service_provider'] = '未知'
+    
+    # 解析第1个数据：车型和时间
+    if len(clean_cells) > 1:
+        second_cell = clean_cells[1]
+        # 找到第一个空格的位置，前面是车型，后面是时间
+        space_index = second_cell.find(' ')
+        if space_index > 0:
+            trip['car_type'] = second_cell[:space_index].strip()
+            trip['pickup_time'] = second_cell[space_index+1:].strip()
+        else:
+            trip['car_type'] = second_cell
+            trip['pickup_time'] = '未知时间'
+    
+    # 解析第2个数据：城市和起点
+    if len(clean_cells) > 2:
+        third_cell = clean_cells[2]
+        if '\n' in third_cell:
+            parts = third_cell.split('\n')
+            trip['city'] = parts[0].strip()
+            trip['start_point'] = parts[1].strip() if len(parts) > 1 else '未知起点'
+        else:
+            trip['city'] = third_cell
+            trip['start_point'] = '未知起点'
+    
+    # 解析第3个数据：终点
+    if len(clean_cells) > 3:
+        trip['end_point'] = clean_cells[3]
+    
+    # 解析第4个数据：金额
+    if len(clean_cells) > 4:
+        trip['amount'] = clean_cells[4]
+    
+    # 设置默认值
+    trip.setdefault('sequence', '未知')
+    trip.setdefault('service_provider', '未知')
+    trip.setdefault('car_type', '未知')
+    trip.setdefault('pickup_time', '未知时间')
+    trip.setdefault('city', '未知城市')
+    trip.setdefault('start_point', '未知起点')
+    trip.setdefault('end_point', '未知终点')
+    trip.setdefault('amount', '0元')
+    trip['raw_data'] = clean_cells
+    
+    return trip
+
+
+def parse_trip_info_simple(text):
+    """
+    简化的行程信息解析
+    按照用户建议：识别序号行，识别说明行，提取中间内容，去掉空行
+    
+    Args:
+        text: PDF提取的文本内容
+    
+    Returns:
+        list: 行程信息列表
+    """
+    logger = current_app.logger
+    logger.info("使用简化解析方法")
+    
+    try:
+        lines = text.split('\n')
+        logger.info(f"文本总行数: {len(lines)}")
+        
+        trips = []
+        current_trip = []
+        in_trip = False
+        
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:  # 跳过空行
+                continue
+            
+            logger.debug(f"第{i+1}行: '{line}'")
+            
+            # 识别序号行（纯数字）
+            if line.isdigit():
+                # 如果之前有行程数据，保存它
+                if current_trip and in_trip:
+                    trip_info = parse_single_trip(current_trip)
+                    if trip_info:
+                        trips.append(trip_info)
+                        logger.info(f"解析到行程: {trip_info}")
+                
+                # 开始新的行程
+                current_trip = [line]  # 序号
+                in_trip = True
+                logger.debug(f"发现序号行: {line}")
+                continue
+            
+            # 如果在行程中，收集数据
+            if in_trip:
+                current_trip.append(line)
+                
+                # 识别说明行（包含"旅程"、"经济型"等关键词）
+                if any(keyword in line for keyword in ['旅程', '经济型', '出行', '打车']):
+                    logger.debug(f"发现说明行: {line}")
+                    # 说明行通常是行程的结束标志
+                    trip_info = parse_single_trip(current_trip)
+                    if trip_info:
+                        trips.append(trip_info)
+                        logger.info(f"解析到行程: {trip_info}")
+                    current_trip = []
+                    in_trip = False
+        
+        # 处理最后一个行程
+        if current_trip and in_trip:
+            trip_info = parse_single_trip(current_trip)
+            if trip_info:
+                trips.append(trip_info)
+                logger.info(f"解析到最后一个行程: {trip_info}")
+        
+        logger.info(f"总共解析到 {len(trips)} 个行程")
+        return trips
+        
+    except Exception as e:
+        logger.error(f"简化解析失败: {e}")
+        return []
+
+
+def parse_single_trip(trip_lines):
+    """
+    解析单个行程的数据
+    
+    Args:
+        trip_lines: 行程相关的文本行列表
+    
+    Returns:
+        dict: 行程信息字典
+    """
+    logger = current_app.logger
+    
+    try:
+        if len(trip_lines) < 3:
+            logger.warning(f"行程数据不足: {trip_lines}")
+            return None
+        
+        # 去掉空行
+        clean_lines = [line.strip() for line in trip_lines if line.strip()]
+        
+        if len(clean_lines) < 3:
+            logger.warning(f"清理后行程数据不足: {clean_lines}")
+            return None
+        
+        # 基本结构：序号, 说明行, 时间, 城市, 起点, 终点, 金额
+        trip = {
+            'sequence': clean_lines[0] if len(clean_lines) > 0 else '未知',
+            'description': clean_lines[1] if len(clean_lines) > 1 else '未知',
+            'pickup_time': clean_lines[2] if len(clean_lines) > 2 else '未知时间',
+            'city': clean_lines[3] if len(clean_lines) > 3 else '未知城市',
+            'start_point': clean_lines[4] if len(clean_lines) > 4 else '未知起点',
+            'end_point': clean_lines[5] if len(clean_lines) > 5 else '未知终点',
+            'amount': clean_lines[6] if len(clean_lines) > 6 else '0元',
+            'raw_data': clean_lines  # 保存原始数据
+        }
+        
+        logger.debug(f"解析单个行程: {trip}")
+        return trip
+        
+    except Exception as e:
+        logger.error(f"解析单个行程失败: {e}")
+        return None
+
+
+def parse_table_to_trips(df):
+    """
+    将camelot提取的表格数据转换为行程信息
+    处理camelot stream模式提取的表格格式
+    
+    Args:
+        df: pandas DataFrame
+    
+    Returns:
+        list: 行程信息列表
+    """
+    logger = current_app.logger
+    trips = []
+    
+    try:
+        logger.info(f"开始解析表格数据，形状: {df.shape}")
+        
+        # 第一步：识别打车平台
+        platform = identify_ride_platform(df)
+        logger.info(f"识别到打车平台: {platform}")
+        
+        # 第二步：根据平台使用对应的解析逻辑
+        if platform == "高德地图":
+            trips = parse_amap_trips(df)
+        else:
+            logger.warning(f"未知的打车平台: {platform}")
+            return []
+        
+        return trips
+        
+    except Exception as e:
+        logger.error(f"解析表格数据失败: {e}")
+        return []
+
+
+def identify_ride_platform(df):
+    """
+    识别打车平台
+    """
+    logger = current_app.logger
+    
+    try:
+        # 检查表格中是否包含平台标识
+        for i, row in df.iterrows():
+            for col in df.columns:
+                cell_data = str(row[col]).strip()
+                if '高德地图' in cell_data or 'AMAP' in cell_data:
+                    return "高德地图"
+                elif '滴滴' in cell_data or 'DIDI' in cell_data:
+                    return "滴滴出行"
+                elif '美团' in cell_data or 'MEITUAN' in cell_data:
+                    return "美团打车"
+                elif '曹操' in cell_data or 'CAOCAO' in cell_data:
+                    return "曹操出行"
+        
+        # 如果没有明确标识，根据服务商推断
+        for i, row in df.iterrows():
+            for col in df.columns:
+                cell_data = str(row[col]).strip()
+                if '旅程易到' in cell_data:
+                    return "高德地图"  # 旅程易到是高德地图的服务商
+        
+        return "未知平台"
+        
+    except Exception as e:
+        logger.error(f"识别打车平台失败: {e}")
+        return "未知平台"
+
+
+def parse_amap_trips(df):
+    """
+    解析高德地图的行程数据
+    根据实际数据结构，行程数据在行6, 8, 10
+    """
+    logger = current_app.logger
+    trips = []
+    
+    try:
+        logger.info("开始解析高德地图行程数据")
+        
+        # 从stream提取的数据中，行程数据在行6, 8, 10
+        trip_rows = [6, 8, 10]
+        
+        for row_idx in trip_rows:
+            if row_idx < len(df):
+                row = df.iloc[row_idx]
+                row_data = []
+                for col in df.columns:
+                    cell_data = str(row[col]).strip()
+                    if cell_data and cell_data != 'nan':
+                        row_data.append(cell_data)
+                
+                if row_data:
+                    logger.info(f"处理高德地图行程行 {row_idx}: {row_data}")
+                    trip = parse_amap_trip_row(row_data)
+                    if trip:
+                        trips.append(trip)
+                        logger.info(f"解析到高德地图行程: {trip}")
+        
+        return trips
+        
+    except Exception as e:
+        logger.error(f"解析高德地图行程数据失败: {e}")
+        return []
+
+
+def parse_trip_from_lines(lines):
+    """
+    从分割后的行中解析行程信息
+    """
+    logger = current_app.logger
+    
+    try:
+        # 查找序号
+        sequence = None
+        for line in lines:
+            if line.strip().isdigit():
+                sequence = line.strip()
+                break
+        
+        if not sequence:
+            return None
+        
+        # 查找金额
+        amount = 0.0
+        for line in lines:
+            amount_match = re.search(r'(\d+\.?\d*)\s*元', line)
+            if amount_match:
+                amount = float(amount_match.group(1))
+                break
+        
+        # 查找时间
+        pickup_time = None
+        for line in lines:
+            time_match = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})', line)
+            if time_match:
+                pickup_time = time_match.group(1)
+                break
+        
+        # 查找城市
+        city = None
+        for line in lines:
+            if '北京市' in line or '上海市' in line or '广州市' in line or '深圳市' in line:
+                city = line.strip()
+                break
+        
+        # 查找起点和终点（简化处理）
+        start_point = None
+        end_point = None
+        
+        # 根据实际数据结构调整
+        if len(lines) >= 6:
+            # 假设起点在前，终点在后
+            for i, line in enumerate(lines):
+                if '北京南站' in line or '航天智能院' in line or '汉庭' in line:
+                    if not start_point:
+                        start_point = line.strip()
+                    elif not end_point:
+                        end_point = line.strip()
+        
+        trip = {
+            'sequence': sequence,
+            'service_provider': '旅程易到',  # 从数据中可以看出
+            'car_type': '旅程易到经济型',  # 从数据中可以看出
+            'pickup_time': pickup_time or '未知时间',
+            'city': city or '未知城市',
+            'start_point': start_point or '未知起点',
+            'end_point': end_point or '未知终点',
+            'amount': amount
+        }
+        
+        return trip
+        
+    except Exception as e:
+        logger.error(f"解析行程信息失败: {e}")
+        return None
+
+
+def parse_trip_from_stream_row(row_data):
+    """
+    从stream模式提取的行数据中解析行程信息
+    根据测试结果，数据格式为：
+    行6: ['1\n旅程易到', '旅程易到经济型 2024-06-19 12:32', '北京市', '航天智能院', '53.89元']
+    行8: ['2\n旅程易到', '旅程易到经济型 2024-06-20 18:59', '北京市', '汉庭优佳北京石景山首钢园酒店', '16.12元']
+    行10: ['3\n旅程易到', '旅程易到经济型 2024-06-21 08:18', '北京市', '北京南站(东进站口)', '74.55元']
+    """
+    logger = current_app.logger
+    
+    try:
+        if len(row_data) < 5:
+            logger.warning(f"行数据不足: {row_data}")
+            return None
+        
+        # 解析第一列：序号和服务商
+        first_col = row_data[0]
+        if '\n' in first_col:
+            parts = first_col.split('\n')
+            sequence = parts[0].strip()
+            service_provider = parts[1].strip() if len(parts) > 1 else '旅程易到'
+        else:
+            sequence = first_col.strip()
+            service_provider = '旅程易到'
+        
+        # 解析第二列：车型和上车时间
+        second_col = row_data[1]
+        if '旅程易到经济型' in second_col:
+            car_type = '旅程易到经济型'
+            # 提取时间
+            time_match = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})', second_col)
+            pickup_time = time_match.group(1) if time_match else '未知时间'
+        else:
+            car_type = '旅程易到经济型'
+            pickup_time = '未知时间'
+        
+        # 解析第三列：城市
+        city = row_data[2].strip() if len(row_data) > 2 else '未知城市'
+        
+        # 解析第四列：起点或终点
+        location = row_data[3].strip() if len(row_data) > 3 else '未知地点'
+        
+        # 解析第五列：金额
+        amount = 0.0
+        if len(row_data) > 4:
+            amount_str = row_data[4]
+            amount_match = re.search(r'(\d+\.?\d*)\s*元', amount_str)
+            if amount_match:
+                amount = float(amount_match.group(1))
+        
+        # 根据实际数据结构，需要智能判断起点和终点
+        # 从测试数据可以看到：
+        # 行程1: 起点=北京南站-东停车场M, 终点=航天智能院
+        # 行程2: 起点=航天智能院, 终点=汉庭优佳北京石景山首钢园酒店  
+        # 行程3: 起点=汉庭优佳酒店, 终点=北京南站(东进站口)
+        
+        start_point = location
+        end_point = location  # 暂时设为相同，需要根据上下文调整
+        
+        trip = {
+            'sequence': sequence,
+            'service_provider': service_provider,
+            'car_type': car_type,
+            'pickup_time': pickup_time,
+            'city': city,
+            'start_point': start_point,
+            'end_point': end_point,
+            'amount': amount
+        }
+        
+        return trip
+        
+    except Exception as e:
+        logger.error(f"解析stream行数据失败: {e}")
+        return None
+
+
+def parse_amap_trip_row(row_data):
+    """
+    解析高德地图单行行程数据
+    简化版本：直接使用camelot提取的原始数据
+    """
+    logger = current_app.logger
+    
+    try:
+        if len(row_data) < 5:
+            logger.warning(f"高德地图行数据不足: {row_data}")
+            return None
+        
+        # 直接使用原始数据，不做复杂解析
+        trip = {
+            'raw_data': row_data,  # 保存原始数据
+            'sequence': row_data[0].strip() if len(row_data) > 0 else '未知',
+            'pickup_time': row_data[1].strip() if len(row_data) > 1 else '未知时间',
+            'city': row_data[2].strip() if len(row_data) > 2 else '未知城市',
+            'location': row_data[3].strip() if len(row_data) > 3 else '未知地点',
+            'amount': row_data[4].strip() if len(row_data) > 4 else '0元'
+        }
+        
+        return trip
+        
+    except Exception as e:
+        logger.error(f"解析高德地图行程行数据失败: {e}")
+        return None
+
+
+def parse_trip_info_simple_text(text):
+    """
+    简单的文本解析方法（回退用）
+    """
+    logger = current_app.logger
+    trips = []
+    
+    try:
+        lines = text.split('\n')
+        
+        # 查找数据开始位置
+        data_start = -1
+        for i, line in enumerate(lines):
+            if line.strip() == '1':
+                data_start = i
+                break
+        
+        if data_start == -1:
+            logger.warning("未找到数据开始位置")
+            return []
+        
+        # 简单解析：查找包含金额的行
+        amount_pattern = r'(\d+\.?\d*)\s*元'
+        for i, line in enumerate(lines[data_start:], data_start):
+            line = line.strip()
+            amount_match = re.search(amount_pattern, line)
+            if amount_match:
+                amount = float(amount_match.group(1))
+                
+                # 简单提取其他信息
+                trip = {
+                    'sequence': str(len(trips) + 1),
+                    'pickup_time': '未知时间',
+                    'city': '未知城市',
+                    'start_point': '未知起点',
+                    'end_point': '未知终点',
+                    'amount': amount
+                }
+                trips.append(trip)
+                logger.info(f"简单解析到行程: {trip}")
+        
+        return trips
+        
+    except Exception as e:
+        logger.error(f"简单文本解析失败: {e}")
+        return []
+
+
+# 废弃的文本解析方法 - 使用camelot-py替代
+# def parse_trip_info_from_text(text):
+#     """
+#     从文本中解析行程信息（基于实际PDF格式）
+#     
+#     Args:
+#         text: PDF提取的文本内容
+#     
+#     Returns:
+#         list: 行程信息列表
+#     """
+#     logger = current_app.logger
+#     trips = []
+#     
+#     try:
+#         lines = text.split('\n')
+#         
+#         # 查找数据开始位置（跳过表头）
+#         data_start = -1
+#         for i, line in enumerate(lines):
+#             if line.strip() == '1':  # 第一个序号
+#                 data_start = i
+#                 break
+#         
+#         if data_start == -1:
+#             logger.warning("未找到数据开始位置")
+#             return []
+#         
+#         logger.info(f"找到数据开始位置: 第{data_start+1}行")
+#         
+#         # 解析行程数据
+#         i = data_start
+#         while i < len(lines):
+#             line = lines[i].strip()
+#             if not line:
+#                 i += 1
+#                 continue
+#             
+#             # 跳过说明文字
+#             if '说明：' in line or '页码：' in line:
+#                 break
+#             
+#             # 检查是否是序号（新行程开始）
+#             if line.isdigit():
+#                 trip = {}
+#                 trip['sequence'] = line
+#                 
+#                 # 读取服务商
+#                 i += 1
+#                 if i < len(lines):
+#                     trip['service_provider'] = lines[i].strip()
+#                 
+#                 # 读取车型
+#                 i += 1
+#                 if i < len(lines):
+#                     trip['car_type'] = lines[i].strip()
+#                 
+#                 # 读取上车时间
+#                 i += 1
+#                 if i < len(lines):
+#                     trip['pickup_time'] = lines[i].strip()
+#                 
+#                 # 读取城市
+#                 i += 1
+#                 if i < len(lines):
+#                     trip['city'] = lines[i].strip()
+#                 
+#                 # 读取起点（可能跨多行）
+#                 i += 1
+#                 if i < len(lines):
+#                     start_point = lines[i].strip()
+#                     i += 1
+#                     # 检查下一行是否是起点的延续
+#                     if i < len(lines) and not lines[i].strip().isdigit() and '元' not in lines[i] and '说明：' not in lines[i]:
+#                         start_point += lines[i].strip()
+#                         i += 1
+#                     trip['start_point'] = start_point
+#                 
+#                 # 读取终点（可能跨多行）
+#                 if i < len(lines):
+#                     end_point = lines[i].strip()
+#                     i += 1
+#                     # 检查下一行是否是终点的延续
+#                     if i < len(lines) and not lines[i].strip().isdigit() and '元' not in lines[i] and '说明：' not in lines[i]:
+#                         end_point += lines[i].strip()
+#                         i += 1
+#                     trip['end_point'] = end_point
+#                 
+#                 # 读取金额
+#                 if i < len(lines):
+#                     amount_line = lines[i].strip()
+#                     amount_match = re.search(r'(\d+\.?\d*)\s*元', amount_line)
+#                     if amount_match:
+#                         trip['amount'] = float(amount_match.group(1))
+#                     i += 1
+#                 
+#                 trips.append(trip)
+#                 logger.info(f"解析到行程: {trip}")
+#             else:
+#                 i += 1
+#         
+#         return trips
+#         
+#     except Exception as e:
+#         logger.error(f"解析行程信息失败: {e}")
+#         return []
+
+
+def parse_trip_info_from_text(text):
+    """
+    从文本中解析行程信息（使用camelot-py库）
+    
+    Args:
+        text: PDF提取的文本内容（暂时不使用，直接使用camelot从PDF提取）
+    
+    Returns:
+        list: 行程信息列表
+    """
+    logger = current_app.logger
+    logger.info("使用camelot-py库解析行程信息")
+    
+    # 这个方法现在被camelot替代，保留接口兼容性
+    return []
+
+
+def parse_simple_trip_info(lines):
+    """
+    简单的行程信息解析（备用方案）
+    
+    Args:
+        lines: 文本行列表
+    
+    Returns:
+        list: 行程信息列表
+    """
+    logger = current_app.logger
+    trips = []
+    
+    try:
+        # 查找包含数字和金额的行
+        amount_pattern = r'(\d+\.?\d*)\s*元'
+        time_pattern = r'(\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2})'
+        
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:
+                continue
+            
+            # 查找金额
+            amount_match = re.search(amount_pattern, line)
+            if amount_match:
+                amount = float(amount_match.group(1))
+                
+                # 查找时间
+                time_match = re.search(time_pattern, line)
+                pickup_time = time_match.group(1) if time_match else "未知时间"
+                
+                # 尝试提取其他信息
+                parts = line.split()
+                if len(parts) >= 3:
+                    trip = {
+                        'sequence': str(len(trips) + 1),  # 序号
+                        'pickup_time': pickup_time,  # 上车时间
+                        'city': parts[0] if len(parts) > 0 else "未知城市",  # 城市
+                        'start_point': parts[1] if len(parts) > 1 else "未知起点",  # 起点
+                        'end_point': parts[2] if len(parts) > 2 else "未知终点",  # 终点
+                        'amount': amount  # 金额
+                    }
+                    trips.append(trip)
+                    logger.info(f"简单解析到行程: {trip}")
+        
+        return trips
+        
+    except Exception as e:
+        logger.error(f"简单解析行程信息失败: {e}")
+        return []
+
+
+def generate_trip_records(processed_files):
+    """
+    生成行程记录字符串
+    使用通义千问API处理暂存的原始表格数据，并缓存结果
+    
+    Args:
+        processed_files: 已处理的文件列表
+    
+    Returns:
+        str: 格式化的行程记录字符串
+    """
+    logger = current_app.logger
+    logger.info(f"开始生成行程记录，文件数量: {len(processed_files)}")
+    
+    try:
+        # 检查是否已经有缓存的行程记录
+        cached_trip_records = None
+        itinerary_files = [f for f in processed_files if f.get('has_itinerary', False)]
+        
+        logger.info(f"找到 {len(itinerary_files)} 个包含行程单的文件")
+        
+        # 检查所有行程单文件是否都有缓存
+        for file_info in itinerary_files:
+            logger.info(f"检查文件 {file_info.get('output_file', '未知')} 的缓存状态")
+            if file_info.get('cached_trip_records'):
+                cached_trip_records = file_info.get('cached_trip_records')
+                logger.info(f"文件 {file_info.get('output_file', '未知')} 有缓存")
+            else:
+                logger.info(f"文件 {file_info.get('output_file', '未知')} 没有缓存")
+                cached_trip_records = None
+                break
+        
+        if cached_trip_records:
+            logger.info("所有行程单文件都有缓存，直接返回缓存的行程记录")
+            logger.info(f"缓存的行程记录内容: {cached_trip_records}")
+            return cached_trip_records
+        else:
+            logger.info("没有找到完整的缓存，需要重新生成行程记录")
+        
+        # 如果没有缓存，则生成新的行程记录
+        all_raw_data = []
+        
+        # 遍历所有文件，收集原始表格数据
+        for file_info in processed_files:
+            # 只处理包含行程单的文件
+            if not file_info.get('has_itinerary', False):
+                continue
+            
+            # 从缓存中获取原始表格数据
+            raw_table_data = file_info.get('raw_table_data')
+            if raw_table_data:
+                all_raw_data.extend(raw_table_data)
+                logger.info(f"从缓存中读取到原始表格数据，行数: {len(raw_table_data)}")
+            else:
+                # 回退机制：尝试从原始行程单文件中提取
+                logger.warning(f"文件 {file_info.get('output_file', '未知')} 没有缓存的原始表格数据，尝试回退提取")
+                
+                # 检查是否有原始行程单文件路径
+                itinerary_file = file_info.get('itinerary_file')
+                if itinerary_file and os.path.exists(itinerary_file):
+                    logger.info(f"从原始行程单文件提取: {itinerary_file}")
+                    try:
+                        raw_table_data = extract_trip_info_from_itinerary(itinerary_file)
+                        if raw_table_data:
+                            all_raw_data.extend(raw_table_data)
+                            logger.info(f"回退提取成功，获得原始表格数据行数: {len(raw_table_data)}")
+                        else:
+                            logger.warning(f"回退提取失败，无法从 {itinerary_file} 提取原始表格数据")
+                    except Exception as e:
+                        logger.error(f"回退提取过程中出错: {e}")
+                else:
+                    logger.warning(f"没有找到原始行程单文件路径，无法进行回退提取")
+        
+        if not all_raw_data:
+            logger.info("没有找到任何原始表格数据")
+            return "暂无行程记录"
+        
+        # 使用通义千问API处理所有原始数据
+        logger.info(f"收集到 {len(all_raw_data)} 行原始表格数据，调用通义千问API处理...")
+        logger.info(f"原始表格数据内容: {all_raw_data}")
+        
+        structured_trips = call_qwen_api_for_trips(all_raw_data)
+        
+        if not structured_trips:
+            logger.warning("通义千问API未能处理原始数据")
+            return "行程数据处理失败"
+        
+        logger.info(f"通义千问API返回的结构化数据: {structured_trips}")
+        
+        # 生成格式化的行程记录字符串
+        records = []
+        records.append("行程记录")
+        records.append("=" * 50)
+        
+        for trip in structured_trips:
+            record = f"{trip.get('sequence', '未知')}, {trip.get('pickup_time', '未知时间')}, {trip.get('city', '未知城市')}, {trip.get('start_point', '未知起点')}, {trip.get('end_point', '未知终点')}, {trip.get('amount', '0元')}"
+            records.append(record)
+            logger.info(f"生成行程记录行: {record}")
+        
+        result = "\n".join(records)
+        logger.info(f"生成行程记录完成，共 {len(structured_trips)} 个行程")
+        logger.info(f"最终生成的行程记录内容: {result}")
+        
+        # 缓存生成的行程记录到所有相关文件中
+        for file_info in processed_files:
+            if file_info.get('has_itinerary', False):
+                file_info['cached_trip_records'] = result
+                logger.info(f"已缓存行程记录到文件: {file_info.get('output_file', '未知')}")
+                logger.info(f"缓存的内容长度: {len(result)} 字符")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"生成行程记录失败: {e}")
+        return f"生成行程记录时出错: {str(e)}" 

@@ -99,6 +99,10 @@ def upload_file():
                     # 将已有结果添加到总结果中
                     all_results.extend(existing_file['results'])
                     
+                    # 将重用结果也添加到新结果中，确保前端能正确显示
+                    reused_results = existing_file['results']
+                    new_results.extend(reused_results)
+                    
                     # 重新分析XML缺失情况，而不是直接重用之前的警告
                     # 为每个ZIP文件创建单独的提取目录
                     file_extract_dir = os.path.join(extract_dir, os.path.splitext(filename)[0])
@@ -285,6 +289,11 @@ def upload_file():
                 current_session_hotel_amount += info.get('hotel_amount', 0)
         
         current_session_total = current_session_taxi_amount + current_session_hotel_amount
+        
+        # 将处理结果保存到session中，供view_trips使用
+        session['processed_files'] = all_results
+        session.modified = True
+        logger.info(f"已将 {len(all_results)} 个处理结果保存到session中")
         
         return jsonify({
             'success': True,
@@ -919,4 +928,64 @@ def download_file(token):
         
     except Exception as e:
         logger.error(f"下载文件时出错: {str(e)}", exc_info=True)
-        return jsonify({'error': f'下载文件时出错: {str(e)}'}), 500 
+        return jsonify({'error': f'下载文件时出错: {str(e)}'}), 500
+
+
+@main_bp.route('/api/view-trips', methods=['POST'])
+def view_trips():
+    """查看行程记录"""
+    logger = current_app.logger
+    logger.info("收到查看行程记录请求")
+    
+    try:
+        # 获取请求数据
+        data = request.get_json()
+        processed_files = data.get('processed_files', [])
+        
+        if not processed_files:
+            return jsonify({'success': False, 'message': '没有可查看的文件'}), 400
+        
+        # 检查是否有包含行程单的文件
+        has_itinerary = any(file_info.get('has_itinerary', False) for file_info in processed_files)
+        if not has_itinerary:
+            return jsonify({'success': False, 'message': '没有包含行程单的文件'}), 400
+        
+        logger.info(f"开始生成行程记录，文件数量: {len(processed_files)}")
+        
+        # 调用PDF服务生成行程记录
+        from app.services.pdf_service import generate_trip_records
+        trip_records = generate_trip_records(processed_files)
+        
+        # 更新session中的processed_files，确保缓存被保存
+        if 'processed_files' in session:
+            session_processed_files = session['processed_files']
+            logger.info(f"Session中有 {len(session_processed_files)} 个文件")
+            
+            # 更新session中的文件信息，包含新的缓存
+            updated_count = 0
+            for session_file in session_processed_files:
+                for request_file in processed_files:
+                    if (session_file.get('order_id') == request_file.get('order_id') and 
+                        session_file.get('output_file') == request_file.get('output_file')):
+                        # 更新缓存信息
+                        if 'cached_trip_records' in request_file:
+                            session_file['cached_trip_records'] = request_file['cached_trip_records']
+                            updated_count += 1
+                            logger.info(f"已更新文件 {request_file.get('output_file')} 的缓存到session")
+                        break
+            session['processed_files'] = session_processed_files
+            session.modified = True
+            logger.info(f"已更新session中的行程记录缓存，共更新 {updated_count} 个文件")
+        else:
+            logger.warning("Session中没有processed_files，无法更新缓存")
+        
+        logger.info("✅ 行程记录生成成功")
+        return jsonify({
+            'success': True,
+            'trip_records': trip_records,
+            'file_count': len(processed_files)
+        })
+        
+    except Exception as e:
+        logger.error(f"生成行程记录时出错: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'message': f'生成行程记录时出错: {str(e)}'}), 500 

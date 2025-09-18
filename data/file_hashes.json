@@ -1,438 +1,181 @@
 {
-  "93f94ebb804d23e5b925a241a9dcd2638c4d986a9002acd2fb15800b152c9811": {
-    "filename": "6.zip",
-    "original_filename": "高德打车电子发票 (6).zip",
-    "upload_time": "2025-09-08 20:57:02",
-    "session_id": "0347d147-9e98-410a-876a-fe4065038bc2",
+  "53fc4c2f8571fb94d7828741060eed23efaeec000d5baa88693117c0b10ca59a": {
+    "filename": "2.zip",
+    "original_filename": "高德打车电子发票 (2).zip",
+    "upload_time": "2025-09-17 20:18:46",
+    "session_id": "5ca37c5d-0479-4369-9016-2568dc733ad8",
     "results": [
       {
-        "order_id": "曹操出行-83.92元-2个行程",
-        "amount": 83.92,
-        "output_file": "order_1_441bee9c.pdf",
+        "order_id": "妥妥E行-38.57元-2个行程",
+        "amount": 38.57,
+        "output_file": "order_1_a3bdd462.pdf",
         "has_itinerary": true,
         "has_invoice": true,
         "has_hotel_bill": false,
         "page_count": 1,
-        "combined_type": "single_page"
-      },
-      {
-        "order_id": "首汽约车-101.61元-1个行程",
-        "amount": 101.61,
-        "output_file": "order_2_80bb834e.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "has_hotel_bill": false,
-        "page_count": 1,
-        "combined_type": "single_page"
-      },
-      {
-        "order_id": "曹操出行-89.66元-1个行程",
-        "amount": 89.66,
-        "output_file": "order_3_f8411955.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "has_hotel_bill": false,
-        "page_count": 1,
-        "combined_type": "single_page"
-      },
-      {
-        "order_id": "火箭出行-724.37元-19个行程",
-        "amount": 724.37,
-        "output_file": "order_4_8839e616.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "has_hotel_bill": false,
-        "page_count": 2,
-        "combined_type": "multi_page"
+        "combined_type": "single_page",
+        "trip_info": [],
+        "itinerary_file": "/home/bdca/project/order_reimbursement/order_reimbursement/temp/5ca37c5d-0479-4369-9016-2568dc733ad8/extracted/2/【妥妥E行-38.57元-2个行程】高德打车电子行程单.pdf"
       }
     ]
   },
-  "8f2353840f55259eea92c5806fc2adf3394fcce8dc8afcd8aa1725f7d666b85d": {
-    "filename": "9.zip",
-    "original_filename": "高德打车电子发票 (9).zip",
-    "upload_time": "2025-09-08 20:35:57",
-    "session_id": "37794597-6429-466e-84bc-6270d98aa96f",
-    "results": [
-      {
-        "order_id": "小牛快跑-21.88元-1个行程",
-        "amount": 21.88,
-        "output_file": "order_1_6618aaaf.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "has_hotel_bill": false,
-        "page_count": 1,
-        "combined_type": "single_page"
-      }
-    ]
-  },
-  "7e614197421a8fe14240518067602a103b308e98152c8e8ef7fb065231beb716": {
-    "filename": "7.zip",
-    "original_filename": "高德打车电子发票 (7).zip",
-    "upload_time": "2025-09-08 20:35:57",
-    "session_id": "37794597-6429-466e-84bc-6270d98aa96f",
-    "results": [
-      {
-        "order_id": "旅程约车-72.78元-1个行程",
-        "amount": 72.78,
-        "output_file": "order_1_a4d4082f.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "has_hotel_bill": false,
-        "page_count": 1,
-        "combined_type": "single_page"
-      }
-    ]
-  },
-  "e145a04d4c7f1f90d37106ebfa857d06148bc49e29e94f20adc9f4693cf82eb7": {
-    "filename": "25114000000003462819.zip",
-    "original_filename": "【华住酒店集团】桔子北京石景山八角游乐园酒店发票已开具，感谢您的支持！（发票号码：25114000000003462819）.zip",
-    "upload_time": "2025-09-08 20:58:01",
-    "session_id": "34dc628d-e79d-43f0-b90b-b2060b839422",
-    "results": [
-      {
-        "order_id": "hotel_25114000000003462819",
-        "amount": 1224.97,
-        "output_file": "order_1_4dd321dc.pdf",
-        "has_itinerary": false,
-        "has_invoice": true,
-        "has_hotel_bill": true,
-        "page_count": 1,
-        "combined_type": "hotel_accommodation"
-      }
-    ]
-  },
-  "5a3f273e179cdea246e5c77f4eef1bc956c1d9db333d21803f74455501c62ecf": {
-    "filename": "25114000000003472725.zip",
-    "original_filename": "【华住酒店集团】桔子北京石景山八角游乐园酒店发票已开具，感谢您的支持！（发票号码：25114000000003472725）.zip",
-    "upload_time": "2025-09-08 20:57:17",
-    "session_id": "dfeeb821-1446-484c-80bb-d92f484c8b89",
-    "results": [
-      {
-        "order_id": "hotel_25114000000003472725",
-        "amount": 1409.87,
-        "output_file": "order_1_f9fe7d60.pdf",
-        "has_itinerary": false,
-        "has_invoice": true,
-        "has_hotel_bill": true,
-        "page_count": 1,
-        "combined_type": "hotel_accommodation"
-      }
-    ]
-  },
-  "a7f913ca08e18908a668ed6161710e44a89dec136e1a42acff4bb57277158678": {
-    "filename": "25114000000003482806.zip",
-    "original_filename": "【华住酒店集团】桔子北京石景山八角游乐园酒店发票已开具，感谢您的支持！（发票号码：25114000000003482806）.zip",
-    "upload_time": "2025-09-08 20:57:17",
-    "session_id": "dfeeb821-1446-484c-80bb-d92f484c8b89",
-    "results": [
-      {
-        "order_id": "hotel_25114000000003482806",
-        "amount": 1676.36,
-        "output_file": "order_1_f5ba8fd8.pdf",
-        "has_itinerary": false,
-        "has_invoice": true,
-        "has_hotel_bill": true,
-        "page_count": 1,
-        "combined_type": "hotel_accommodation"
-      }
-    ]
-  },
-  "f2d2b6fc272c3eda192ce602cc8d269db6059801cfea82a012067778aa904fb7": {
-    "filename": "25114000000003442854.zip",
-    "original_filename": "【华住酒店集团】桔子北京石景山八角游乐园酒店发票已开具，感谢您的支持！（发票号码：25114000000003442854）.zip",
-    "upload_time": "2025-09-08 20:53:56",
-    "session_id": "fcd2ee14-825e-4eef-aa78-e449daa47fc0",
-    "results": [
-      {
-        "order_id": "hotel_25114000000003442854",
-        "amount": 438.15,
-        "output_file": "order_1_ba3898bd.pdf",
-        "has_itinerary": false,
-        "has_invoice": true,
-        "has_hotel_bill": true,
-        "page_count": 1,
-        "combined_type": "hotel_accommodation"
-      }
-    ]
-  },
-  "4554e4ec16d1e0180213f61d07bee3431d87d13062798c170ecf318b5ea4071f": {
-    "filename": "25114000000003452699.zip",
-    "original_filename": "【华住酒店集团】桔子北京石景山八角游乐园酒店发票已开具，感谢您的支持！（发票号码：25114000000003452699）.zip",
-    "upload_time": "2025-09-08 20:53:57",
-    "session_id": "fcd2ee14-825e-4eef-aa78-e449daa47fc0",
-    "results": [
-      {
-        "order_id": "hotel_25114000000003452699",
-        "amount": 1391.45,
-        "output_file": "order_1_a9281a1f.pdf",
-        "has_itinerary": false,
-        "has_invoice": true,
-        "has_hotel_bill": true,
-        "page_count": 1,
-        "combined_type": "hotel_accommodation"
-      }
-    ]
-  },
-  "a4224a3feeb1d4d08b7d7fd444edaa85c07343cc8b71b7cd8428f08ef0f53af3": {
-    "filename": "25112000000184120470.zip",
-    "original_filename": "【华住酒店集团】汉庭北京房山龙湖天街酒店发票已开具，感谢您的支持！（发票号码：25112000000184120470）.zip",
-    "upload_time": "2025-09-08 20:54:09",
-    "session_id": "673dad68-0a64-4409-817d-2ddade41efa1",
-    "results": [
-      {
-        "order_id": "hotel_25112000000184120470",
-        "amount": 399.0,
-        "output_file": "order_1_1857c6a7.pdf",
-        "has_itinerary": false,
-        "has_invoice": true,
-        "has_hotel_bill": true,
-        "page_count": 1,
-        "combined_type": "hotel_accommodation"
-      }
-    ]
-  },
-  "2a3b2ba56ded937f618aa90cfa2dfdab2a24f2b7950dcce2455337564a912efa": {
-    "filename": "8.zip",
-    "original_filename": "高德打车电子发票 (8).zip",
-    "upload_time": "2025-09-08 20:54:19",
-    "session_id": "43c08ae3-06f4-431b-9a19-a1738360b8fc",
-    "results": [
-      {
-        "order_id": "旗妙出行-21.01元-1个行程",
-        "amount": 21.01,
-        "output_file": "order_1_f0a22876.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "has_hotel_bill": false,
-        "page_count": 1,
-        "combined_type": "single_page"
-      },
-      {
-        "order_id": "飞嘀打车-80.72元-1个行程",
-        "amount": 80.72,
-        "output_file": "order_2_cc66382f.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "has_hotel_bill": false,
-        "page_count": 1,
-        "combined_type": "single_page"
-      }
-    ]
-  },
-  "c49b2f00775506d9d1dcc33627a4159d73c7c571edc65c3d9308d9a016592ccc": {
-    "filename": "12.zip",
-    "original_filename": "高德打车电子发票 (12).zip",
-    "upload_time": "2025-09-08 20:54:20",
-    "session_id": "43c08ae3-06f4-431b-9a19-a1738360b8fc",
-    "results": [
-      {
-        "order_id": "曹操出行-14.50元-1个行程",
-        "amount": 14.5,
-        "output_file": "order_1_5ac7ee85.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "has_hotel_bill": false,
-        "page_count": 1,
-        "combined_type": "single_page"
-      },
-      {
-        "order_id": "曹操出行-18.45元-1个行程",
-        "amount": 18.45,
-        "output_file": "order_2_05df6ecd.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "has_hotel_bill": false,
-        "page_count": 1,
-        "combined_type": "single_page"
-      },
-      {
-        "order_id": "有序出行-148.12元-1个行程",
-        "amount": 148.12,
-        "output_file": "order_3_d108c76e.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "has_hotel_bill": false,
-        "page_count": 1,
-        "combined_type": "single_page"
-      }
-    ]
-  },
-  "88ced7631558079bd1bd3a0ddf20ff6b7d5f5edcc29222baf1aa21aaf625a784": {
-    "filename": "25114000000003472723.zip",
-    "original_filename": "【华住酒店集团】桔子北京石景山八角游乐园酒店发票已开具，感谢您的支持！（发票号码：25114000000003472723）.zip",
-    "upload_time": "2025-09-08 20:54:39",
-    "session_id": "f2078478-25f1-4468-9ac8-d7fcf84f5e18",
-    "results": [
-      {
-        "order_id": "hotel_25114000000003472723",
-        "amount": 1732.88,
-        "output_file": "order_1_2ceee323.pdf",
-        "has_itinerary": false,
-        "has_invoice": true,
-        "has_hotel_bill": true,
-        "page_count": 1,
-        "combined_type": "hotel_accommodation"
-      }
-    ]
-  },
-  "63a568c5f5b41893f290cea25bc200ae0633d44da3f8390f08e3e657dd7f8c1a": {
-    "filename": "25112000000184120469.zip",
-    "original_filename": "【华住酒店集团】汉庭北京房山龙湖天街酒店发票已开具，感谢您的支持！（发票号码：25112000000184120469）.zip",
-    "upload_time": "2025-09-08 20:58:05",
-    "session_id": "34dc628d-e79d-43f0-b90b-b2060b839422",
-    "results": [
-      {
-        "order_id": "hotel_25112000000184120469",
-        "amount": 458.15,
-        "output_file": "order_1_94a39296.pdf",
-        "has_itinerary": false,
-        "has_invoice": true,
-        "has_hotel_bill": true,
-        "page_count": 1,
-        "combined_type": "hotel_accommodation"
-      }
-    ]
-  },
-  "a2ac9f063ea44f6fc3130394cded894136948dd723baa0764e0ac649b5d8ccf6": {
-    "filename": "25112000000184110556.zip",
-    "original_filename": "【华住酒店集团】汉庭北京房山龙湖天街酒店发票已开具，感谢您的支持！（发票号码：25112000000184110556）.zip",
-    "upload_time": "2025-09-08 20:58:05",
-    "session_id": "34dc628d-e79d-43f0-b90b-b2060b839422",
-    "results": [
-      {
-        "order_id": "hotel_25112000000184110556",
-        "amount": 288.15,
-        "output_file": "order_1_bf3da7d8.pdf",
-        "has_itinerary": false,
-        "has_invoice": true,
-        "has_hotel_bill": true,
-        "page_count": 1,
-        "combined_type": "hotel_accommodation"
-      }
-    ]
-  },
-  "0ee716cce849cbe62c0c1c956ffa6d2beeab1ab7003f36255e3ccb46e9847f07": {
+  "b6a7b26c03a18dd304a9dfb935bc3011c16121427186cb9a6b86726b23a413c6": {
     "filename": "1.zip",
-    "original_filename": "腾讯出行服务电子发票及行程报销单 (1).zip",
-    "upload_time": "2025-09-17 17:19:38",
-    "session_id": "29cead33-3978-4965-bcb8-ece0ae278bc6",
+    "original_filename": "高德打车电子发票 (1).zip",
+    "upload_time": "2025-09-18 10:35:47",
+    "session_id": "bb269147-308e-4205-8ae9-b59fc5e64d61",
     "results": [
       {
-        "order_id": "腾讯出行-99.45元-2025年08月12日14时16分",
-        "amount": 99.45,
-        "output_file": "order_1_adaed67d.pdf",
+        "order_id": "及时用车-53.21元-2个行程",
+        "amount": 53.21,
+        "output_file": "order_1_3e944665.pdf",
         "has_itinerary": true,
         "has_invoice": true,
         "has_hotel_bill": false,
         "page_count": 1,
-        "combined_type": "single_page"
+        "combined_type": "single_page",
+        "trip_info": [],
+        "itinerary_file": "/home/bdca/project/order_reimbursement/order_reimbursement/temp/bb269147-308e-4205-8ae9-b59fc5e64d61/extracted/1/【及时用车-53.21元-2个行程】高德打车电子行程单.pdf"
       }
     ]
   },
-  "a21fdc42be29ebfd225910fc1a36da5c3a953145aadde621afa01b00ba5d824c": {
-    "filename": "1.zip",
-    "original_filename": "滴滴出行电子发票 (1).zip",
-    "upload_time": "2025-09-10 14:46:51",
-    "session_id": "73e8a0ef-fb81-4c49-b6c6-6781bf06a4cb",
-    "results": []
-  },
-  "adb076d162b4ce4f8c780827964de8b87dac46d42917ebef84f1c8e87d772422": {
-    "filename": "15.zip",
-    "original_filename": "高德打车电子发票 (15).zip",
-    "upload_time": "2025-09-10 14:47:00",
-    "session_id": "09bb8426-f880-493e-b261-882e185681dd",
+  "102d021ab9794c228234ce9795c4220ffd2d61911b301660037dee44b7317532": {
+    "filename": "5.zip",
+    "original_filename": "高德打车电子发票 (5).zip",
+    "upload_time": "2025-09-18 14:03:04",
+    "session_id": "14439ec1-8a20-418c-bacf-35c6440f4cc8",
     "results": [
       {
-        "order_id": "聚的出租车-67.41元-1个行程",
-        "amount": 67.41,
-        "output_file": "order_1_869877ef.pdf",
+        "order_id": "及时用车-28.86元-1个行程",
+        "amount": 28.86,
+        "output_file": "order_1_c61214c3.pdf",
         "has_itinerary": true,
         "has_invoice": true,
         "has_hotel_bill": false,
         "page_count": 1,
-        "combined_type": "single_page"
+        "combined_type": "single_page",
+        "raw_table_data": [
+          [
+            "序号",
+            "服务商",
+            "车型",
+            "上车时间",
+            "城市",
+            "起点",
+            "终点",
+            "金额"
+          ],
+          [
+            "1 及时用车 及时经济型 2025-02-20 15:35 杭州市 天荟未来之光城(北门) 杭州西站(4层东进站口) 28.86元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ],
+        "itinerary_file": "/home/bdca/project/order_reimbursement/order_reimbursement/temp/14439ec1-8a20-418c-bacf-35c6440f4cc8/extracted/5/【及时用车-28.86元-1个行程】高德打车电子行程单.pdf"
       },
       {
-        "order_id": "曹操出行-42.08元-1个行程",
-        "amount": 42.08,
-        "output_file": "order_2_7f9b5fef.pdf",
+        "order_id": "阳光出行-32.13元-1个行程",
+        "amount": 32.13,
+        "output_file": "order_2_8236de6c.pdf",
         "has_itinerary": true,
         "has_invoice": true,
         "has_hotel_bill": false,
         "page_count": 1,
-        "combined_type": "single_page"
-      }
-    ]
-  },
-  "c2544209bf4a0089fb970d1926ca6906d1dde2c9aab8ca452e498cc369863c17": {
-    "filename": "zip",
-    "original_filename": "高德打车电子发票.zip",
-    "upload_time": "2025-09-17 14:07:28",
-    "session_id": "fea992fe-75dc-4662-abe3-f41ffb64a2fa",
-    "results": [
+        "combined_type": "single_page",
+        "raw_table_data": [
+          [
+            "序号",
+            "服务商",
+            "车型",
+            "上车时间",
+            "城市",
+            "起点",
+            "终点",
+            "金额"
+          ],
+          [
+            "汉口站-地下停车场-\n1 阳光出行 阳光经济型 2025-02-20 21:02 武汉市 海友酒店(武汉黄鹤楼首义店) 32.13元\nG区-网约车停车场",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ],
+        "itinerary_file": "/home/bdca/project/order_reimbursement/order_reimbursement/temp/14439ec1-8a20-418c-bacf-35c6440f4cc8/extracted/5/【阳光出行-32.13元-1个行程】高德打车电子行程单.pdf"
+      },
       {
-        "order_id": "优e出行-58.37元-1个行程",
-        "amount": 58.37,
-        "output_file": "order_1_e763df44.pdf",
+        "order_id": "曹操出行-19.85元-1个行程",
+        "amount": 19.85,
+        "output_file": "order_3_6a2d901d.pdf",
         "has_itinerary": true,
         "has_invoice": true,
         "has_hotel_bill": false,
         "page_count": 1,
-        "combined_type": "single_page"
-      }
-    ]
-  },
-  "2b74169778faf2d488fec03979316b51be004382ee3b20833765e5875ba7c5ff": {
-    "filename": "-test.zip",
-    "original_filename": "高德打车电子发票-test.zip",
-    "upload_time": "2025-09-17 14:08:14",
-    "session_id": "677bc1e2-7fd1-4424-9b25-647f24bfc011",
-    "results": [
+        "combined_type": "single_page",
+        "raw_table_data": [
+          [
+            "序号",
+            "服务商",
+            "车型",
+            "上车时间",
+            "城市",
+            "起点",
+            "终点",
+            "金额"
+          ],
+          [
+            "1 曹操出行 曹操经济型 2025-02-28 12:40 武汉市 海友酒店(武汉黄鹤楼首义店) 瑶瑶平价副食(燕马社区店) 19.85元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ],
+        "itinerary_file": "/home/bdca/project/order_reimbursement/order_reimbursement/temp/14439ec1-8a20-418c-bacf-35c6440f4cc8/extracted/5/【曹操出行-19.85元-1个行程】高德打车电子行程单.pdf"
+      },
       {
-        "order_id": "优e出行-58.37元-1个行程",
-        "amount": 58.37,
-        "output_file": "order_1_f19e5c0c.pdf",
+        "order_id": "T3出行-32.62元-1个行程",
+        "amount": 32.62,
+        "output_file": "order_4_b29ca65b.pdf",
         "has_itinerary": true,
         "has_invoice": true,
         "has_hotel_bill": false,
         "page_count": 1,
-        "combined_type": "single_page"
-      }
-    ]
-  },
-  "323cd8ad8f4438deb646496a6c6d7bba91622b4d68a18a95d288971126214982": {
-    "filename": "25114000000002437876.zip",
-    "original_filename": "【华住酒店集团】桔子北京石景山大悦城首钢园酒店发票已开具，感谢您的支持！（发票号码：25114000000002437876）.zip",
-    "upload_time": "2025-09-17 17:24:46",
-    "session_id": "3d0b139b-7b28-4a91-bb22-62c11522e471",
-    "results": [
-      {
-        "order_id": "hotel_25114000000002437876",
-        "amount": 489.0,
-        "output_file": "order_1_68f4eb3d.pdf",
-        "has_itinerary": false,
-        "has_invoice": true,
-        "has_hotel_bill": true,
-        "page_count": 1,
-        "combined_type": "hotel_accommodation"
-      }
-    ]
-  },
-  "d1170e8f8945edc8093389001c7f2f4d4f6e0c5d9b5fd5b9081bac5041bd0e53": {
-    "filename": "4.zip",
-    "original_filename": "高德打车电子发票 (4).zip",
-    "upload_time": "2025-09-17 17:25:29",
-    "session_id": "b6b57acc-9e74-4a39-805b-360aef831294",
-    "results": [
-      {
-        "order_id": "小牛快跑-17.71元-1个行程",
-        "amount": 17.71,
-        "output_file": "order_1_b362e4ff.pdf",
-        "has_itinerary": true,
-        "has_invoice": true,
-        "has_hotel_bill": false,
-        "page_count": 1,
-        "combined_type": "single_page"
+        "combined_type": "single_page",
+        "raw_table_data": [
+          [
+            "序号",
+            "服务商",
+            "车型",
+            "上车时间",
+            "城市",
+            "起点",
+            "终点",
+            "金额"
+          ],
+          [
+            "1 T3出行 T3经济型 2025-02-26 08:06 武汉市 海友酒店(武汉黄鹤楼首义店) 黄家湖试验场 32.62元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ],
+        "itinerary_file": "/home/bdca/project/order_reimbursement/order_reimbursement/temp/14439ec1-8a20-418c-bacf-35c6440f4cc8/extracted/5/【T3出行-32.62元-1个行程】高德打车电子行程单.pdf"
       }
     ]
   }
