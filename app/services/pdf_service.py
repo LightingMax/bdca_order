@@ -2408,19 +2408,69 @@ def generate_trip_records(processed_files):
         
         logger.info(f"通义千问API返回的结构化数据: {structured_trips}")
         
-        # 生成格式化的行程记录字符串
-        records = []
-        records.append("行程记录")
-        records.append("=" * 50)
+        # 生成HTML表格格式的行程记录
+        html_table = []
+        html_table.append('<div class="trip-records-container">')
+        html_table.append('<h4 class="mb-3">📋 行程记录</h4>')
+        html_table.append('<div class="table-responsive">')
+        html_table.append('<table class="table table-striped table-hover">')
         
+        # 表头
+        html_table.append('<thead class="table-dark">')
+        html_table.append('<tr>')
+        html_table.append('<th scope="col">序号</th>')
+        html_table.append('<th scope="col">服务商</th>')
+        html_table.append('<th scope="col">车型</th>')
+        html_table.append('<th scope="col">上车时间</th>')
+        html_table.append('<th scope="col">城市</th>')
+        html_table.append('<th scope="col">起点</th>')
+        html_table.append('<th scope="col">终点</th>')
+        html_table.append('<th scope="col">金额</th>')
+        html_table.append('</tr>')
+        html_table.append('</thead>')
+        
+        # 表格内容
+        html_table.append('<tbody>')
         for trip in structured_trips:
-            record = f"{trip.get('sequence', '未知')}, {trip.get('pickup_time', '未知时间')}, {trip.get('city', '未知城市')}, {trip.get('start_point', '未知起点')}, {trip.get('end_point', '未知终点')}, {trip.get('amount', '0元')}"
-            records.append(record)
-            logger.info(f"生成行程记录行: {record}")
+            html_table.append('<tr>')
+            html_table.append(f'<td><span class="badge bg-primary">{trip.get("sequence", "未知")}</span></td>')
+            html_table.append(f'<td>{trip.get("service_provider", "未知")}</td>')
+            html_table.append(f'<td><small class="text-muted">{trip.get("car_type", "未知")}</small></td>')
+            html_table.append(f'<td><strong>{trip.get("pickup_time", "未知时间")}</strong></td>')
+            html_table.append(f'<td><span class="badge bg-info">{trip.get("city", "未知城市")}</span></td>')
+            html_table.append(f'<td>{trip.get("start_point", "未知起点")}</td>')
+            html_table.append(f'<td>{trip.get("end_point", "未知终点")}</td>')
+            html_table.append(f'<td><span class="badge bg-success">{trip.get("amount", "0元")}</span></td>')
+            html_table.append('</tr>')
+            logger.info(f"生成行程记录行: {trip.get('sequence')} - {trip.get('pickup_time')} - {trip.get('start_point')} -> {trip.get('end_point')} - {trip.get('amount')}")
         
-        result = "\n".join(records)
-        logger.info(f"生成行程记录完成，共 {len(structured_trips)} 个行程")
-        logger.info(f"最终生成的行程记录内容: {result}")
+        html_table.append('</tbody>')
+        html_table.append('</table>')
+        html_table.append('</div>')
+        
+        # 统计信息
+        total_amount = 0
+        for trip in structured_trips:
+            amount_str = trip.get('amount', '0元')
+            try:
+                # 提取金额数字
+                import re
+                amount_match = re.search(r'(\d+\.?\d*)', amount_str)
+                if amount_match:
+                    total_amount += float(amount_match.group(1))
+            except:
+                pass
+        
+        html_table.append('<div class="mt-3 p-3 bg-light rounded">')
+        html_table.append(f'<h6 class="mb-2">📊 统计信息</h6>')
+        html_table.append(f'<p class="mb-1"><strong>总行程数：</strong>{len(structured_trips)} 个</p>')
+        html_table.append(f'<p class="mb-0"><strong>总金额：</strong><span class="text-success fw-bold">¥{total_amount:.2f}</span></p>')
+        html_table.append('</div>')
+        html_table.append('</div>')
+        
+        result = "\n".join(html_table)
+        logger.info(f"生成HTML表格格式行程记录完成，共 {len(structured_trips)} 个行程，总金额 ¥{total_amount:.2f}")
+        logger.info(f"最终生成的HTML内容长度: {len(result)} 字符")
         
         # 缓存生成的行程记录到所有相关文件中
         for file_info in processed_files:

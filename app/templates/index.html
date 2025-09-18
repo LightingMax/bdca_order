@@ -2785,18 +2785,20 @@
                 modal.id = 'tripRecordsModal';
                 modal.tabIndex = -1;
                 modal.innerHTML = `
-                    <div class="modal-dialog modal-lg">
+                    <div class="modal-dialog modal-xl">
                         <div class="modal-content">
                             <div class="modal-header">
-                                <h5 class="modal-title">行程记录</h5>
+                                <h5 class="modal-title">📋 行程记录</h5>
                                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                             </div>
-                            <div class="modal-body">
-                                <pre style="white-space: pre-wrap; font-family: monospace; background-color: #f8f9fa; padding: 15px; border-radius: 5px; max-height: 500px; overflow-y: auto;">${tripRecords}</pre>
+                            <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+                                ${tripRecords}
                             </div>
                             <div class="modal-footer">
                                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
-                                <button type="button" class="btn btn-primary" onclick="copyTripRecords()">复制</button>
+                                <button type="button" class="btn btn-primary" onclick="copyTripRecords()">
+                                    <i class="fas fa-copy me-1"></i>复制
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -2819,7 +2821,9 @@
             function copyTripRecords() {
                 // 优先使用缓存的行程记录
                 if (cachedTripRecords) {
-                    navigator.clipboard.writeText(cachedTripRecords).then(() => {
+                    // 将HTML转换为纯文本格式
+                    const textContent = convertHtmlToText(cachedTripRecords);
+                    navigator.clipboard.writeText(textContent).then(() => {
                         showNotification('行程记录已复制到剪贴板', 'success');
                     }).catch(err => {
                         console.error('复制失败:', err);
@@ -2831,9 +2835,10 @@
                 // 回退到从模态框复制
                 const modal = document.getElementById('tripRecordsModal');
                 if (modal) {
-                    const preElement = modal.querySelector('pre');
-                    if (preElement) {
-                        navigator.clipboard.writeText(preElement.textContent).then(() => {
+                    const modalBody = modal.querySelector('.modal-body');
+                    if (modalBody) {
+                        const textContent = convertHtmlToText(modalBody.innerHTML);
+                        navigator.clipboard.writeText(textContent).then(() => {
                             showNotification('行程记录已复制到剪贴板', 'success');
                         }).catch(err => {
                             console.error('复制失败:', err);
@@ -2843,6 +2848,53 @@
                 } else {
                     showNotification('没有可复制的内容', 'warning');
                 }
+            }
+            
+            // 将HTML转换为纯文本格式
+            function convertHtmlToText(html) {
+                // 创建临时div来解析HTML
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = html;
+                
+                // 提取表格数据并格式化为文本
+                const table = tempDiv.querySelector('table');
+                if (table) {
+                    let text = '行程记录\n';
+                    text += '='.repeat(50) + '\n\n';
+                    
+                    // 提取表头
+                    const headers = [];
+                    const headerCells = table.querySelectorAll('thead th');
+                    headerCells.forEach(cell => {
+                        headers.push(cell.textContent.trim());
+                    });
+                    text += headers.join('\t') + '\n';
+                    text += '-'.repeat(headers.join('\t').length) + '\n';
+                    
+                    // 提取数据行
+                    const rows = table.querySelectorAll('tbody tr');
+                    rows.forEach(row => {
+                        const cells = row.querySelectorAll('td');
+                        const rowData = [];
+                        cells.forEach(cell => {
+                            // 移除badge等装饰元素，只保留文本
+                            const cellText = cell.textContent.trim();
+                            rowData.push(cellText);
+                        });
+                        text += rowData.join('\t') + '\n';
+                    });
+                    
+                    // 添加统计信息
+                    const statsDiv = tempDiv.querySelector('.bg-light');
+                    if (statsDiv) {
+                        text += '\n' + statsDiv.textContent.trim();
+                    }
+                    
+                    return text;
+                }
+                
+                // 如果不是表格，直接返回文本内容
+                return tempDiv.textContent || tempDiv.innerText || '';
             }
             
             // 添加预览按钮事件处理
