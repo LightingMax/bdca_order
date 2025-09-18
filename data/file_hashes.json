@@ -178,5 +178,46 @@
         "itinerary_file": "/home/bdca/project/order_reimbursement/order_reimbursement/temp/14439ec1-8a20-418c-bacf-35c6440f4cc8/extracted/5/【T3出行-32.62元-1个行程】高德打车电子行程单.pdf"
       }
     ]
+  },
+  "d1170e8f8945edc8093389001c7f2f4d4f6e0c5d9b5fd5b9081bac5041bd0e53": {
+    "filename": "4.zip",
+    "original_filename": "高德打车电子发票 (4).zip",
+    "upload_time": "2025-09-18 15:21:14",
+    "session_id": "8a8f63a7-2b53-4655-ad16-cd26c74d702e",
+    "results": [
+      {
+        "order_id": "小牛快跑-17.71元-1个行程",
+        "amount": 17.71,
+        "output_file": "order_1_205ecf21.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page",
+        "raw_table_data": [
+          [
+            "序号",
+            "服务商",
+            "车型",
+            "上车时间",
+            "城市",
+            "起点",
+            "终点",
+            "金额"
+          ],
+          [
+            "杭州市公安局余杭区分局交通\n1 小牛快跑 小牛经济型 2025-02-20 11:52 杭州市 天荟未来之光城11幢 17.71元\n警察大队机动车管理所东北侧",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ],
+        "itinerary_file": "/home/bdca/project/order_reimbursement/order_reimbursement/temp/8a8f63a7-2b53-4655-ad16-cd26c74d702e/extracted/4/【小牛快跑-17.71元-1个行程】高德打车电子行程单.pdf"
+      }
+    ]
   }
 }

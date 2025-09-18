@@ -2061,8 +2061,9 @@
                     if (typeof processedFiles === 'undefined') {
                         console.log('🆕 processedFiles 未定义，初始化为空数组');
                         processedFiles = [];
-                        // 清除缓存的行程记录
+                        // 清除缓存的行程记录和文件哈希
                         cachedTripRecords = null;
+                        cachedFileHashes = null;
                     }
                     
                     console.log('📥 添加新结果前，processedFiles 长度:', processedFiles.length);
@@ -2554,8 +2555,9 @@
                         
                         // 重置处理文件数组
                         processedFiles = [];
-                        // 清除缓存的行程记录
+                        // 清除缓存的行程记录和文件哈希
                         cachedTripRecords = null;
+                        cachedFileHashes = null;
                         console.log('✅ 处理文件数组已重置，缓存已清除');
                         
                         // 重置重用文件数组
@@ -2706,8 +2708,9 @@
                 }
             });
             
-            // 缓存行程记录
+            // 缓存行程记录和文件状态
             let cachedTripRecords = null;
+            let cachedFileHashes = null;
             
             // 使用事件委托绑定查看行程按钮
             document.addEventListener('click', function(e) {
@@ -2726,12 +2729,25 @@
                         return;
                     }
                     
-                    // 检查是否有缓存的行程记录
-                    if (cachedTripRecords) {
-                        console.log('✅ 使用缓存的行程记录');
+                    // 生成当前文件的哈希值用于缓存验证
+                    const currentFileHashes = processedFiles
+                        .filter(file => file.has_itinerary === true)
+                        .map(file => `${file.order_id}_${file.output_file}`)
+                        .sort()
+                        .join('|');
+                    
+                    console.log('当前文件哈希:', currentFileHashes);
+                    console.log('缓存文件哈希:', cachedFileHashes);
+                    
+                    // 检查缓存是否仍然有效（文件没有变化）
+                    if (cachedTripRecords && cachedFileHashes === currentFileHashes) {
+                        console.log('✅ 使用缓存的行程记录（文件未变化）');
                         showTripRecords(cachedTripRecords);
                         showNotification('显示缓存的行程记录', 'info');
                         return;
+                    } else if (cachedTripRecords && cachedFileHashes !== currentFileHashes) {
+                        console.log('🔄 文件已变化，需要重新生成行程记录');
+                        cachedTripRecords = null; // 清除旧缓存
                     }
                     
                     // 添加加载动画
@@ -2754,8 +2770,11 @@
                         if (data.success) {
                             console.log('✅ 行程记录生成成功:', data);
                             
-                            // 缓存行程记录
+                            // 缓存行程记录和当前文件状态
                             cachedTripRecords = data.trip_records;
+                            cachedFileHashes = currentFileHashes;
+                            
+                            console.log('✅ 已更新缓存，文件哈希:', cachedFileHashes);
                             
                             // 显示行程记录
                             showTripRecords(data.trip_records);
