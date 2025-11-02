@@ -772,6 +772,30 @@
       ],
       "total_amount": 2442.1700000000005,
       "total_prints": 63
+    },
+    "192.168.20.77": {
+      "print_history": [
+        {
+          "timestamp": "2025-11-02 15:25:03",
+          "file_count": 1,
+          "total_amount": 1079.92,
+          "order_ids": [
+            "火箭出行-1079.92元-28个行程"
+          ]
+        },
+        {
+          "timestamp": "2025-11-02 15:34:37",
+          "file_count": 3,
+          "total_amount": 360.78,
+          "order_ids": [
+            "曹操出行-58.76元-1个行程",
+            "曹操出行-87.05元-3个行程",
+            "火箭出行-214.97元-7个行程"
+          ]
+        }
+      ],
+      "total_amount": 1440.7,
+      "total_prints": 4
     }
   }
 }

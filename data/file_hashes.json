@@ -219,5 +219,585 @@
         "itinerary_file": "/home/bdca/project/order_reimbursement/order_reimbursement/temp/8a8f63a7-2b53-4655-ad16-cd26c74d702e/extracted/4/【小牛快跑-17.71元-1个行程】高德打车电子行程单.pdf"
       }
     ]
+  },
+  "7554537acfb2ac093df71ff5fd7176fd05dbcd2f9a03237b6f981d6d5fb933bf": {
+    "filename": "zip",
+    "original_filename": "测试.zip",
+    "upload_time": "2025-11-02 15:23:50",
+    "session_id": "aa099c90-6e86-4a3a-91ea-eab6ebd27114",
+    "results": [
+      {
+        "order_id": "及时用车-53.21元-2个行程",
+        "amount": 53.21,
+        "output_file": "order_1_303daaec.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page",
+        "raw_table_data": [
+          [
+            "序号",
+            "服务商",
+            "车型",
+            "上车时间",
+            "城市",
+            "起点",
+            "终点",
+            "金额"
+          ],
+          [
+            "1 及时用车 及时经济型 2025-02-21 19:38 武汉市 东一路八一路口(公交站) 万松园雪松路美食街 23.78元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "国家电网(江汉供\n2 及时用车 及时经济型 2025-02-28 17:17 武汉市 海友酒店(武汉黄鹤楼首义店) 29.43元\n电服务站营业厅)",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ],
+        "itinerary_file": "/home/bdca/project/order_reimbursement/order_reimbursement/temp/aa099c90-6e86-4a3a-91ea-eab6ebd27114/extracted/zip/高德打车电子发票 (1)/【及时用车-53.21元-2个行程】高德打车电子行程单.pdf"
+      }
+    ]
+  },
+  "412a0ccb1f30ecd6d815b7c11a03bc3ee6593ba0c54db8b35b96eb01e37401c1": {
+    "filename": "zip",
+    "original_filename": "测试长单页.zip",
+    "upload_time": "2025-11-02 15:25:03",
+    "session_id": "34feff4e-2d91-49d0-85b7-5561bf217ee5",
+    "results": [
+      {
+        "order_id": "火箭出行-1079.92元-28个行程",
+        "amount": 1079.92,
+        "output_file": "order_1_3fcf2a6a.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page",
+        "raw_table_data": [
+          [
+            "序号",
+            "服务商",
+            "车型",
+            "上车时间",
+            "城市",
+            "起点",
+            "终点",
+            "金额"
+          ],
+          [
+            "1 火箭出行 火箭经济型 2024-11-02 14:37 北京市 汉庭优佳北京石景山首钢园酒店 航天智能院 18.98元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "2 火箭出行 火箭经济型 2024-11-02 16:06 北京市 首钢园-服贸会北登录厅东侧 汉庭优佳北京石景山首钢园酒店 16.41元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "3 火箭出行 火箭经济型 2024-11-04 09:11 北京市 汉庭优佳北京石景山首钢园酒店 航天智能院 18.66元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "4 火箭出行 火箭经济型 2024-11-05 09:09 北京市 汉庭优佳北京石景山首钢园酒店 航天智能院 19.72元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "5 火箭出行 火箭经济型 2024-11-05 23:06 北京市 首钢园-服贸会北登录厅东侧 汉庭优佳北京石景山首钢园酒店 17.27元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "6 火箭出行 火箭经济型 2024-11-06 09:10 北京市 汉庭优佳北京石景山首钢园酒店 航天智能院 19.56元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "7 火箭出行 火箭经济型 2024-11-06 09:36 北京市 首钢园-服贸会北登录厅东侧 新元科技园 95.52元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "8 火箭出行 火箭经济型 2024-11-08 14:37 北京市 汉庭优佳北京石景山首钢园酒店 航天智能院 16.91元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "9 火箭出行 火箭优享型 2024-11-08 20:08 北京市 上庄路口东(公交站) 汉庭优佳北京石景山首钢园酒店 77.13元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "10 火箭出行 火箭经济型 2024-11-14 09:55 北京市 汉庭优佳北京石景山首钢园酒店 航天智能院 14.99元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "11 火箭出行 火箭经济型 2024-11-14 11:15 北京市 首钢园-服贸会北登录厅东侧 汉庭优佳北京石景山首钢园酒店 14.49元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "12 火箭出行 火箭经济型 2024-11-14 15:53 北京市 上庄路口东(公交站) 汉庭优佳北京石景山首钢园酒店 54.41元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "13 火箭出行 火箭经济型 2024-11-19 09:10 北京市 汉庭优佳北京石景山首钢园酒店 航天智能院 17.99元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "14 火箭出行 火箭经济型 2024-11-20 13:31 北京市 汉庭优佳北京石景山首钢园酒店 上庄路口东(公交站) 51.75元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ],
+        "itinerary_file": "/home/bdca/project/order_reimbursement/order_reimbursement/temp/34feff4e-2d91-49d0-85b7-5561bf217ee5/extracted/zip/测试长单页/【火箭出行-1079.92元-28个行程】高德打车电子行程单.pdf"
+      }
+    ]
+  },
+  "79e2bd10e1bdcf8e0a1ba5b2d99f8a72ccba5a8f5501ef1f32c4aafa371fb1b1": {
+    "filename": "v2.zip",
+    "original_filename": "测试多页v2.zip",
+    "upload_time": "2025-11-02 15:25:49",
+    "session_id": "ca3c6d87-37d8-4a43-9f26-2bfa0e1b893c",
+    "results": [
+      {
+        "order_id": "火箭出行-1079.92元-28个行程",
+        "amount": 1079.92,
+        "output_file": "order_1_e254811e.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 2,
+        "combined_type": "multi_page",
+        "raw_table_data": [
+          [
+            "序号",
+            "服务商",
+            "车型",
+            "上车时间",
+            "城市",
+            "起点",
+            "终点",
+            "金额"
+          ],
+          [
+            "1 火箭出行 火箭经济型 2024-11-02 14:37 北京市 汉庭优佳北京石景山首钢园酒店 航天智能院 18.98元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "2 火箭出行 火箭经济型 2024-11-02 16:06 北京市 首钢园-服贸会北登录厅东侧 汉庭优佳北京石景山首钢园酒店 16.41元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "3 火箭出行 火箭经济型 2024-11-04 09:11 北京市 汉庭优佳北京石景山首钢园酒店 航天智能院 18.66元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "4 火箭出行 火箭经济型 2024-11-05 09:09 北京市 汉庭优佳北京石景山首钢园酒店 航天智能院 19.72元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "5 火箭出行 火箭经济型 2024-11-05 23:06 北京市 首钢园-服贸会北登录厅东侧 汉庭优佳北京石景山首钢园酒店 17.27元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "6 火箭出行 火箭经济型 2024-11-06 09:10 北京市 汉庭优佳北京石景山首钢园酒店 航天智能院 19.56元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "7 火箭出行 火箭经济型 2024-11-06 09:36 北京市 首钢园-服贸会北登录厅东侧 新元科技园 95.52元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "8 火箭出行 火箭经济型 2024-11-08 14:37 北京市 汉庭优佳北京石景山首钢园酒店 航天智能院 16.91元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "9 火箭出行 火箭优享型 2024-11-08 20:08 北京市 上庄路口东(公交站) 汉庭优佳北京石景山首钢园酒店 77.13元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "10 火箭出行 火箭经济型 2024-11-14 09:55 北京市 汉庭优佳北京石景山首钢园酒店 航天智能院 14.99元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "11 火箭出行 火箭经济型 2024-11-14 11:15 北京市 首钢园-服贸会北登录厅东侧 汉庭优佳北京石景山首钢园酒店 14.49元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "12 火箭出行 火箭经济型 2024-11-14 15:53 北京市 上庄路口东(公交站) 汉庭优佳北京石景山首钢园酒店 54.41元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "13 火箭出行 火箭经济型 2024-11-19 09:10 北京市 汉庭优佳北京石景山首钢园酒店 航天智能院 17.99元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "14 火箭出行 火箭经济型 2024-11-20 13:31 北京市 汉庭优佳北京石景山首钢园酒店 上庄路口东(公交站) 51.75元",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ],
+        "itinerary_file": "/home/bdca/project/order_reimbursement/order_reimbursement/temp/ca3c6d87-37d8-4a43-9f26-2bfa0e1b893c/extracted/v2/【火箭出行-1079.92元-28个行程】高德打车电子行程单.pdf"
+      }
+    ]
+  },
+  "3d58cd903340aa88d32bf029843bc2b70b06a5b81b9c3297848b3e2239aabec4": {
+    "filename": "6.zip",
+    "original_filename": "高德打车电子发票 (6).zip",
+    "upload_time": "2025-11-02 15:34:37",
+    "session_id": "2969a141-024f-44bb-95ca-2cd199fd1768",
+    "results": [
+      {
+        "order_id": "曹操出行-58.76元-1个行程",
+        "amount": 58.76,
+        "output_file": "order_1_95d65d84.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page",
+        "raw_table_data": [
+          [
+            "序号",
+            "服务商",
+            "车型",
+            "上车时间",
+            "城市",
+            "起点",
+            "终点",
+            "金额"
+          ],
+          [
+            "桔子酒店(八\n1 曹操出行 经济型 2025-10-25 10:08 北京市 北京南站(西进站口) 58.76元\n角游乐园店)",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ],
+        "itinerary_file": "/home/bdca/project/order_reimbursement/order_reimbursement/temp/2969a141-024f-44bb-95ca-2cd199fd1768/extracted/6/【曹操出行-58.76元-1个行程】高德打车电子行程单.pdf"
+      },
+      {
+        "order_id": "曹操出行-87.05元-3个行程",
+        "amount": 87.05,
+        "output_file": "order_2_73e57a97.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page",
+        "raw_table_data": [
+          [
+            "序号",
+            "服务商",
+            "车型",
+            "上车时间",
+            "城市",
+            "起点",
+            "终点",
+            "金额"
+          ],
+          [
+            "桔子酒店(八\n1 曹操出行 经济型 2025-10-15 19:03 北京市 珠市口(地铁站) 53.55元\n角游乐园店)",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "首钢园-服贸 桔子酒店(八\n2 曹操出行 经济型 2025-10-17 15:41 北京市 17.43元\n会北登录厅东侧 角游乐园店)",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "首钢园-服贸 桔子酒店(八\n3 曹操出行 经济型 2025-10-24 11:08 北京市 16.07元\n会北登录厅东侧 角游乐园店)",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ],
+        "itinerary_file": "/home/bdca/project/order_reimbursement/order_reimbursement/temp/2969a141-024f-44bb-95ca-2cd199fd1768/extracted/6/【曹操出行-87.05元-3个行程】高德打车电子行程单.pdf"
+      },
+      {
+        "order_id": "火箭出行-214.97元-7个行程",
+        "amount": 214.97,
+        "output_file": "order_3_a177c901.pdf",
+        "has_itinerary": true,
+        "has_invoice": true,
+        "has_hotel_bill": false,
+        "page_count": 1,
+        "combined_type": "single_page",
+        "raw_table_data": [
+          [
+            "序号",
+            "服务商",
+            "车型",
+            "上车时间",
+            "城市",
+            "起点",
+            "终点",
+            "金额"
+          ],
+          [
+            "北京南站-东停车场 桔子酒店(八\n1 火箭出行 经济型 2025-10-14 18:03 北京市 64.08元\nM层(夹层)-B2通道 角游乐园店)",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "桔子酒店(八\n2 火箭出行 经济型 2025-10-15 14:44 北京市 航天智能院 18.64元\n角游乐园店)",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "首钢园-服贸\n3 火箭出行 经济型 2025-10-15 16:45 北京市 珠市口地铁站A西北口 65.21元\n会北登录厅东侧",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "首钢园-服贸 桔子酒店(八\n4 火箭出行 经济型 2025-10-16 16:50 北京市 15.19元\n会北登录厅东侧 角游乐园店)",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "桔子酒店(八\n5 火箭出行 经济型 2025-10-17 14:20 北京市 航天智能院 17.37元\n角游乐园店)",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "桔子酒店(八\n6 火箭出行 特惠快车 2025-10-21 13:54 北京市 航天智能院 13.23元\n角游乐园店)",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "桔子酒店(八\n7 火箭出行 经济型 2025-10-23 09:33 北京市 航天智能院 21.25元\n角游乐园店)",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ],
+        "itinerary_file": "/home/bdca/project/order_reimbursement/order_reimbursement/temp/2969a141-024f-44bb-95ca-2cd199fd1768/extracted/6/【火箭出行-214.97元-7个行程】高德打车电子行程单.pdf"
+      }
+    ]
   }
 }

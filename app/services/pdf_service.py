@@ -819,12 +819,12 @@ def create_smart_combined_pdf(itinerary_path: str, invoice_path: str, output_pat
 
 def create_smart_combined_single_page(itinerary_path: str, invoice_path: str, output_path: str) -> bool:
     """
-    创建单页智能拼接：发票在上（占40%高度），行程单在下（占60%高度），压缩到一页
+    创建单页智能拼接：发票在上（占50%高度），行程单在下（占50%高度），压缩到一页
     
     采用图片拼接方式，更加稳定可靠，避免PDF工具拼接的黑色区域问题
     """
     logger = current_app.logger
-    logger.info(f"🚀 开始创建单页智能拼接：发票在上（40%）+ 行程单在下（60%），压缩到一页")
+    logger.info(f"🚀 开始创建单页智能拼接：发票在上（50%）+ 行程单在下（50%），压缩到一页")
     
     try:
         # 导入必要的库
@@ -879,9 +879,9 @@ def create_smart_combined_single_page(itinerary_path: str, invoice_path: str, ou
             
             logger.info(f"✂️ 行程单裁剪区域: 顶部{crop_top}px, 底部{crop_bottom}px")
             
-            # 调整行程单尺寸（占下半部分，约60%高度）
+            # 调整行程单尺寸（占下半部分，50%高度）
             ratio = USABLE_WIDTH / top_half.width
-            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.6))
+            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.5))
             top_half = top_half.resize(new_size, Image.Resampling.LANCZOS)
             
             # 转换发票为图片
@@ -889,9 +889,9 @@ def create_smart_combined_single_page(itinerary_path: str, invoice_path: str, ou
             invoice_images = convert_from_path(invoice_path, dpi=300)
             invoice_image = invoice_images[0]
             
-            # 调整发票尺寸（占上半部分，约40%高度）
-            ratio = 0.9 * USABLE_WIDTH / invoice_image.width
-            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.4))
+            # 调整发票尺寸（占上半部分，50%高度）
+            ratio = USABLE_WIDTH / invoice_image.width
+            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.5))
             invoice_image = invoice_image.resize(new_size, Image.Resampling.LANCZOS)
             
             # 创建新的空白图片
