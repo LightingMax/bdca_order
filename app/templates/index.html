@@ -1215,6 +1215,7 @@
             // 显示打印选项
             function showPrintOptions(files) {
                 console.log('🖨️ 显示打印选项，文件数量:', files.length);
+                console.log('📋 当前已有文件数量:', rawProcessedFiles.length);
                 
                 // 首先显示整个结果区域
                 const rawResultArea = document.getElementById('rawResultArea');
@@ -1223,9 +1224,10 @@
                     console.log('✅ 显示原始打印结果区域');
                 }
                 
-                // 清空之前的结果
-                rawResultList.innerHTML = '';
-                rawProcessedFiles = [];
+                // 不清空之前的结果，累积文件列表
+                // 只清空显示列表，保留rawProcessedFiles累积
+                const currentFileCount = rawProcessedFiles.length;
+                console.log(`📦 累积模式：当前已有 ${currentFileCount} 个文件，新增 ${files.length} 个文件`);
                 
                 // 隐藏无结果内容，显示有结果内容
                 const rawResultContent = document.getElementById('rawResultContent');
@@ -1240,29 +1242,59 @@
                     console.log('✅ 隐藏原始打印无结果内容');
                 }
                 
-                // 为每个文件创建打印选项
-                Array.from(files).forEach((file, index) => {
-                    const resultDiv = document.createElement('div');
-                    resultDiv.className = 'alert alert-success mb-3 animate-fade-in';
-                    resultDiv.style.animationDelay = (index * 0.1) + 's';
+                // 先添加新文件到rawProcessedFiles，然后重新渲染所有文件
+                const newFiles = [];
+                Array.from(files).forEach((file) => {
+                    // 处理文件信息，兼容后端返回的格式
+                    const fileName = file.name || file.filename || `文件${rawProcessedFiles.length + 1}`;
+                    const fileSize = file.size || file.file_size || 0;
+                    const fileType = file.type || file.file_type || 'unknown';
+                    const displayName = fileName;
+                    const storageName = file.filename || fileName;
+                    
+                    // 检查是否已存在相同文件（避免重复添加）
+                    const isDuplicate = rawProcessedFiles.some(existing => 
+                        existing.storageName === storageName || existing.name === displayName
+                    );
+                    
+                    if (!isDuplicate) {
+                        newFiles.push({
+                            name: displayName,
+                            storageName: storageName,
+                            size: fileSize,
+                            status: 'ready',
+                            type: fileType,
+                            originalFile: file
+                        });
+                    } else {
+                        console.log(`⚠️ 跳过重复文件: ${displayName}`);
+                    }
+                });
+                
+                // 将新文件添加到列表中
+                rawProcessedFiles.push(...newFiles);
+                console.log(`✅ 添加了 ${newFiles.length} 个新文件，总文件数: ${rawProcessedFiles.length}`);
+                
+                // 清空显示列表，重新渲染所有文件
+                rawResultList.innerHTML = '';
+                
+                // 为所有文件（包括已有的和新添加的）创建打印选项
+                rawProcessedFiles.forEach((fileInfo, index) => {
+                    const fileName = fileInfo.name;
+                    const fileSize = fileInfo.size || 0;
+                    const fileType = fileInfo.type || 'unknown';
                     
                     // 根据文件类型显示不同的图标
                     let fileIcon = 'bi-file-earmark';
-                    if (file.name.toLowerCase().endsWith('.pdf')) fileIcon = 'bi-file-pdf';
-                    else if (file.name.toLowerCase().endsWith('.jpg') || file.name.toLowerCase().endsWith('.jpeg') || file.name.toLowerCase().endsWith('.png')) fileIcon = 'bi-file-image';
-                    else if (file.name.toLowerCase().endsWith('.doc') || file.name.toLowerCase().endsWith('.docx')) fileIcon = 'bi-file-word';
-                    else if (file.name.toLowerCase().endsWith('.zip')) fileIcon = 'bi-file-zip';
-                    else if (file.name.toLowerCase().endsWith('.txt')) fileIcon = 'bi-file-text';
+                    if (fileName.toLowerCase().endsWith('.pdf')) fileIcon = 'bi-file-pdf';
+                    else if (fileName.toLowerCase().endsWith('.jpg') || fileName.toLowerCase().endsWith('.jpeg') || fileName.toLowerCase().endsWith('.png')) fileIcon = 'bi-file-image';
+                    else if (fileName.toLowerCase().endsWith('.doc') || fileName.toLowerCase().endsWith('.docx')) fileIcon = 'bi-file-word';
+                    else if (fileName.toLowerCase().endsWith('.zip')) fileIcon = 'bi-file-zip';
+                    else if (fileName.toLowerCase().endsWith('.txt')) fileIcon = 'bi-file-text';
                     
-                    // 处理文件信息，兼容后端返回的格式
-                    // 优先使用name字段（原始文件名），fallback到filename
-                    const fileName = file.name || file.filename || `文件${index + 1}`;
-                    const fileSize = file.size || file.file_size || 0;
-                    const fileType = file.type || file.file_type || 'unknown';
-                    
-                    // 保存原始文件名和存储文件名，用于打印操作
-                    const displayName = fileName;  // 显示名称
-                    const storageName = file.filename || fileName;  // 存储名称（用于后端查找）
+                    const resultDiv = document.createElement('div');
+                    resultDiv.className = 'alert alert-success mb-3 animate-fade-in';
+                    resultDiv.style.animationDelay = (index * 0.1) + 's';
                     
                     resultDiv.innerHTML = `
                         <div class="d-flex align-items-start">
@@ -1282,15 +1314,15 @@
                                 </p>
                                 <div class="action-buttons-row">
                                     <div class="btn-group main-actions" role="group">
-                                        <button class="btn btn-sm btn-outline-primary modern-btn" onclick="previewRawFile('${fileName}')">
+                                        <button class="btn btn-sm btn-outline-primary modern-btn" onclick="previewRawFile('${fileInfo.storageName || fileName}')">
                                             <i class="bi bi-eye"></i> 预览
                                         </button>
-                                        <button class="btn btn-sm btn-primary modern-btn" onclick="printRawFile('${fileName}')">
+                                        <button class="btn btn-sm btn-primary modern-btn" onclick="printRawFile('${fileInfo.storageName || fileName}')">
                                             <i class="bi bi-printer"></i> 立即打印
                                         </button>
                                     </div>
                                     <button class="btn btn-sm modern-remove-btn" 
-                                            onclick="removeRawFile('${fileName}', ${index})"
+                                            onclick="removeRawFile('${fileInfo.storageName || fileName}', ${index})"
                                             title="从打印列表中移除此文件">
                                         <i class="bi bi-trash3"></i>
                                         <span class="ms-1">移除</span>
@@ -1301,16 +1333,6 @@
                     `;
                     
                     rawResultList.appendChild(resultDiv);
-                    
-                    // 添加到处理文件列表
-                    rawProcessedFiles.push({
-                        name: displayName,        // 显示名称（原始文件名）
-                        storageName: storageName, // 存储名称（用于后端查找）
-                        size: fileSize,
-                        status: 'ready',
-                        type: fileType,
-                        originalFile: file // 保存原始文件信息，可能包含后端返回的额外数据
-                    });
                 });
                 
                 console.log('✅ 打印选项显示完成，共', rawProcessedFiles.length, '个文件');
@@ -1332,39 +1354,57 @@
                 rawPrintAllBtn.disabled = true;
                 rawPrintAllBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> 任务创建中...';
                 
-                // 批量发送打印请求
-                let completedCount = 0;
-                let successCount = 0;
-                let failedCount = 0;
+                // 收集所有文件名
+                const filenames = rawProcessedFiles.map(file => file.storageName || file.name);
                 
-                const printPromises = rawProcessedFiles.map(file => {
-                    // 使用存储名称进行打印，确保后端能找到文件
-                    return printRawFile(file.storageName || file.name, true); // 传入silent参数，静默打印
-                });
-                
-                // 等待所有打印请求完成
-                Promise.allSettled(printPromises).then(results => {
-                    results.forEach((result, index) => {
-                        if (result.status === 'fulfilled' && result.value) {
-                            successCount++;
+                // 调用批量打印接口
+                fetch('/api/print-raw-batch', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        filenames: filenames,
+                        printer_name: 'HP-LaserJet-MFP-M437-M443'
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    // 恢复按钮状态
+                    rawPrintAllBtn.disabled = false;
+                    rawPrintAllBtn.innerHTML = '<i class="bi bi-printer"></i> 打印全部';
+                    
+                    if (data.success) {
+                        const successCount = data.success_count || 0;
+                        const failedCount = data.failed_count || 0;
+                        const total = data.total || rawProcessedFiles.length;
+                        
+                        console.log(`✅ 批量打印完成：成功 ${successCount}，失败 ${failedCount}，总计 ${total}`);
+                        
+                        // 显示最终结果
+                        if (failedCount === 0) {
+                            showNotification(`🎉 打印任务创建成功！${successCount} 个文件已发送到打印机，请检查打印机状态。`, 'success');
                         } else {
-                            failedCount++;
+                            // 如果有失败的文件，显示详细信息
+                            const failedFiles = data.results.filter(r => !r.success).map(r => r.filename).join('、');
+                            showNotification(`⚠️ 打印任务部分完成：${successCount} 个成功，${failedCount} 个失败。失败文件：${failedFiles}`, 'warning');
+                            
+                            // 在控制台输出详细结果
+                            console.log('📋 批量打印详细结果：', data.results);
                         }
-                        completedCount++;
-                    });
+                    } else {
+                        console.error('批量打印失败:', data.message);
+                        showNotification(`批量打印失败: ${data.message || '未知错误'}`, 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('批量打印请求出错:', error);
                     
                     // 恢复按钮状态
                     rawPrintAllBtn.disabled = false;
                     rawPrintAllBtn.innerHTML = '<i class="bi bi-printer"></i> 打印全部';
                     
-                    // 显示最终结果
-                    if (failedCount === 0) {
-                        showNotification(`🎉 打印任务创建成功！${successCount} 个文件已发送到打印机，请检查打印机状态。`, 'success');
-                    } else {
-                        showNotification(`⚠️ 打印任务部分完成：${successCount} 个成功，${failedCount} 个失败。请检查失败的打印任务。`, 'warning');
-                    }
-                    
-                    console.log(`✅ 批量打印完成：成功 ${successCount}，失败 ${failedCount}`);
+                    showNotification('批量打印请求失败，请重试', 'error');
                 });
             });
             
@@ -2815,7 +2855,7 @@
                             </div>
                             <div class="modal-footer">
                                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
-                                <button type="button" class="btn btn-primary" onclick="copyTripRecords()">
+                                <button type="button" class="btn btn-primary" id="copyTripRecordsBtn">
                                     <i class="fas fa-copy me-1"></i>复制
                                 </button>
                             </div>
@@ -2825,10 +2865,53 @@
                 
                 // 添加到页面
                 document.body.appendChild(modal);
+                console.log('✅ 模态框已添加到页面');
+                
+                // 等待模态框显示后绑定事件（确保DOM完全渲染）
+                setTimeout(() => {
+                    const copyBtn = modal.querySelector('#copyTripRecordsBtn');
+                    console.log('🔍 查找复制按钮，结果:', copyBtn);
+                    console.log('🔍 window.copyTripRecords存在:', typeof window.copyTripRecords);
+                    
+                    if (copyBtn) {
+                        console.log('✅ 找到复制按钮，绑定事件');
+                        copyBtn.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            console.log('========================================');
+                            console.log('🔘 复制按钮被点击（通过addEventListener）！');
+                            console.log('🔘 事件目标:', e.target);
+                            console.log('🔘 按钮元素:', this);
+                            console.log('🔘 当前时间:', new Date().toISOString());
+                            console.log('🔘 copyTripRecords函数类型:', typeof copyTripRecords);
+                            console.log('🔘 window.copyTripRecords函数类型:', typeof window.copyTripRecords);
+                            // 确保在用户交互上下文中执行
+                            try {
+                                if (typeof copyTripRecords === 'function') {
+                                    copyTripRecords();
+                                } else if (typeof window.copyTripRecords === 'function') {
+                                    window.copyTripRecords();
+                                } else {
+                                    console.error('❌ copyTripRecords函数未定义');
+                                    alert('复制功能未初始化，请刷新页面重试');
+                                }
+                            } catch (err) {
+                                console.error('❌ 复制函数执行异常:', err);
+                                console.error('❌ 错误堆栈:', err.stack);
+                                showNotification('复制功能出错，请查看控制台', 'error');
+                            }
+                            return false;
+                        });
+                        console.log('✅ 复制按钮事件已绑定');
+                    } else {
+                        console.error('❌ 未找到复制按钮元素');
+                    }
+                }, 300);
                 
                 // 显示模态框
                 const bsModal = new bootstrap.Modal(modal);
                 bsModal.show();
+                console.log('✅ 模态框已显示');
                 
                 // 模态框关闭后移除元素
                 modal.addEventListener('hidden.bs.modal', function() {
@@ -2838,39 +2921,331 @@
             
             // 复制行程记录到剪贴板
             function copyTripRecords() {
-                // 优先使用缓存的行程记录
-                if (cachedTripRecords) {
-                    // 将HTML转换为纯文本格式
-                    const textContent = convertHtmlToText(cachedTripRecords);
-                    navigator.clipboard.writeText(textContent).then(() => {
-                        showNotification('行程记录已复制到剪贴板', 'success');
-                    }).catch(err => {
-                        console.error('复制失败:', err);
-                        showNotification('复制失败', 'error');
-                    });
-                    return;
-                }
+                console.log('========================================');
+                console.log('📋 开始复制行程记录...');
+                console.log('📋 当前时间:', new Date().toISOString());
+                console.log('📋 页面URL:', window.location.href);
+                console.log('📋 是否HTTPS:', window.location.protocol === 'https:');
+                console.log('📋 是否localhost:', window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+                console.log('📋 cachedTripRecords存在:', !!cachedTripRecords);
                 
-                // 回退到从模态框复制
+                let htmlContent = null;
+                
+                // 优先从模态框获取（最准确）
                 const modal = document.getElementById('tripRecordsModal');
+                console.log('📋 模态框元素:', modal ? '找到' : '未找到');
                 if (modal) {
                     const modalBody = modal.querySelector('.modal-body');
                     if (modalBody) {
-                        const textContent = convertHtmlToText(modalBody.innerHTML);
-                        navigator.clipboard.writeText(textContent).then(() => {
-                            showNotification('行程记录已复制到剪贴板', 'success');
-                        }).catch(err => {
-                            console.error('复制失败:', err);
-                            showNotification('复制失败', 'error');
-                        });
+                        console.log('✅ 从模态框获取行程记录');
+                        htmlContent = modalBody.innerHTML;
+                        console.log('📋 模态框HTML长度:', htmlContent ? htmlContent.length : 0);
+                        console.log('📋 模态框HTML预览（前200字符）:', htmlContent ? htmlContent.substring(0, 200) : 'null');
+                    } else {
+                        console.warn('⚠️ 模态框存在但找不到modal-body');
                     }
                 } else {
+                    console.warn('⚠️ 未找到模态框，尝试使用缓存');
+                }
+                
+                // 如果模态框获取失败，使用缓存的行程记录
+                if (!htmlContent && cachedTripRecords) {
+                    console.log('✅ 使用缓存的行程记录');
+                    htmlContent = cachedTripRecords;
+                    console.log('📋 缓存HTML长度:', htmlContent ? htmlContent.length : 0);
+                }
+                
+                if (!htmlContent) {
+                    console.error('❌ 没有找到可复制的内容');
+                    console.error('❌ 模态框状态:', modal ? '存在' : '不存在');
+                    console.error('❌ 缓存状态:', cachedTripRecords ? '存在' : '不存在');
                     showNotification('没有可复制的内容', 'warning');
+                    return;
+                }
+                
+                // 将HTML转换为纯文本格式（Tab分隔）
+                console.log('🔄 开始转换HTML为文本...');
+                const textContent = convertHtmlToText(htmlContent);
+                console.log('📄 转换后的文本内容长度:', textContent ? textContent.length : 0);
+                if (textContent && textContent.length > 0) {
+                    console.log('📄 转换后的文本内容（前500字符）:');
+                    console.log(textContent.substring(0, 500));
+                    console.log('📄 转换后的文本内容（后200字符）:');
+                    console.log(textContent.substring(Math.max(0, textContent.length - 200)));
+                } else {
+                    console.error('❌ 转换后的文本内容为空或null');
+                }
+                
+                if (!textContent || textContent.trim().length === 0) {
+                    console.error('❌ 转换后的文本内容为空');
+                    showNotification('无法提取行程记录内容', 'warning');
+                    return;
+                }
+                
+                // 检查浏览器支持情况
+                console.log('📋 浏览器信息:');
+                console.log('  - 页面协议:', window.location.protocol);
+                console.log('  - 页面主机:', window.location.hostname);
+                console.log('  - 是否安全上下文:', window.isSecureContext);
+                console.log('  - navigator.clipboard存在:', !!navigator.clipboard);
+                console.log('  - navigator.clipboard.writeText存在:', !!(navigator.clipboard && navigator.clipboard.writeText));
+                console.log('  - document.execCommand存在:', !!document.execCommand);
+                console.log('  - 用户代理:', navigator.userAgent);
+                
+                // 优先使用Clipboard API（更可靠，特别是在Mac Chrome上）
+                // Clipboard API 需要安全上下文（HTTPS 或 localhost）
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    console.log('🔄 优先尝试使用Clipboard API（更可靠）');
+                    navigator.clipboard.writeText(textContent).then(() => {
+                        console.log('✅ 使用Clipboard API复制成功');
+                        // 验证剪贴板内容
+                        setTimeout(() => {
+                            navigator.clipboard.readText().then(clipboardText => {
+                                if (clipboardText && clipboardText.substring(0, 100) === textContent.substring(0, 100)) {
+                                    console.log('✅ 剪贴板验证成功：内容已正确复制');
+                                    showNotification('行程记录已复制到剪贴板', 'success');
+                                } else {
+                                    console.warn('⚠️ 剪贴板验证失败，显示手动复制选项');
+                                    showManualCopyOption(textContent);
+                                }
+                            }).catch(() => {
+                                // 无法验证，假设成功
+                                console.log('⚠️ 无法验证剪贴板，假设复制成功');
+                                showNotification('行程记录已复制到剪贴板', 'success');
+                            });
+                        }, 100);
+                    }).catch(err => {
+                        console.error('❌ Clipboard API复制失败:', err);
+                        console.error('❌ 错误详情:', err.message);
+                        console.log('🔄 回退到execCommand方法');
+                        // 如果Clipboard API失败，尝试execCommand
+                        const execCommandSuccess = fallbackCopyTextToClipboard(textContent);
+                        if (!execCommandSuccess) {
+                            console.log('🔄 显示手动复制选项');
+                            showManualCopyOption(textContent);
+                        }
+                    });
+                } else {
+                    // Clipboard API 不可用，可能的原因：
+                    // 1. 页面不是 HTTPS 或 localhost（需要安全上下文）
+                    // 2. 浏览器不支持
+                    console.log('⚠️ Clipboard API 不可用');
+                    console.log('📋 页面协议:', window.location.protocol);
+                    console.log('📋 页面主机:', window.location.hostname);
+                    console.log('📋 是否安全上下文:', window.isSecureContext);
+                    
+                    if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+                        console.warn('⚠️ 页面不是 HTTPS 或 localhost，Clipboard API 需要安全上下文');
+                        console.warn('⚠️ 建议：使用 HTTPS 或 localhost 访问页面以启用 Clipboard API');
+                        showNotification('提示：使用 HTTPS 或 localhost 访问可启用 Clipboard API', 'info');
+                    }
+                    
+                    console.log('🔄 使用 execCommand 方法作为备用');
+                    const execCommandSuccess = fallbackCopyTextToClipboard(textContent);
+                    if (!execCommandSuccess) {
+                        console.log('🔄 显示手动复制选项');
+                        showManualCopyOption(textContent);
+                    }
+                }
+                console.log('========================================');
+            }
+            
+            // 将复制函数暴露到全局作用域（作为备选方案，用于onclick）
+            window.copyTripRecords = copyTripRecords;
+            
+            // 使用execCommand复制（同步方法，必须在用户交互上下文中执行）
+            function fallbackCopyTextToClipboard(text) {
+                console.log('🔄 开始execCommand复制流程...');
+                console.log('📋 要复制的文本长度:', text.length);
+                
+                let textArea = null;
+                try {
+                    // 创建textarea元素
+                    textArea = document.createElement('textarea');
+                    textArea.value = text;
+                    
+                    // 设置样式：完全隐藏但可选中
+                    // 注意：不能使用display:none，否则无法选中
+                    textArea.style.position = 'fixed';
+                    textArea.style.left = '0';
+                    textArea.style.top = '0';
+                    textArea.style.width = '2px';
+                    textArea.style.height = '2px';
+                    textArea.style.opacity = '0';
+                    textArea.style.pointerEvents = 'none';
+                    textArea.style.zIndex = '-1';
+                    textArea.setAttribute('readonly', '');
+                    textArea.setAttribute('aria-hidden', 'true');
+                    
+                    console.log('📋 创建textArea元素完成');
+                    
+                    // 添加到DOM（必须在用户交互上下文中同步执行）
+                    document.body.appendChild(textArea);
+                    console.log('📋 textArea已添加到DOM');
+                    
+                    // 立即聚焦并选择（同步执行，不能使用setTimeout）
+                    textArea.focus();
+                    console.log('📋 textArea已聚焦');
+                    
+                    textArea.select();
+                    console.log('📋 textArea已选择');
+                    
+                    // 确保选择范围正确
+                    textArea.setSelectionRange(0, text.length);
+                    console.log('📋 选择范围已设置: 0 到', text.length);
+                    
+                    // 验证选择
+                    const selectedText = textArea.value.substring(textArea.selectionStart, textArea.selectionEnd);
+                    console.log('📋 选中的文本长度:', selectedText.length);
+                    console.log('📋 选中的文本预览（前100字符）:', selectedText.substring(0, 100));
+                    
+                    // 执行复制命令（同步执行）
+                    console.log('📋 执行execCommand("copy")...');
+                    const successful = document.execCommand('copy');
+                    console.log('📋 execCommand返回:', successful);
+                    
+                    // 立即移除元素
+                    if (textArea && textArea.parentNode) {
+                        document.body.removeChild(textArea);
+                        console.log('📋 textArea已移除');
+                    }
+                    
+                    if (successful) {
+                        // 验证剪贴板是否真的被更新了（使用Clipboard API读取）
+                        console.log('📋 验证剪贴板内容...');
+                        if (navigator.clipboard && navigator.clipboard.readText) {
+                            // 等待一小段时间让剪贴板更新
+                            setTimeout(() => {
+                                navigator.clipboard.readText().then(clipboardText => {
+                                    console.log('📋 剪贴板内容长度:', clipboardText ? clipboardText.length : 0);
+                                    console.log('📋 剪贴板内容预览（前200字符）:', clipboardText ? clipboardText.substring(0, 200) : 'null');
+                                    
+                                    // 比较剪贴板内容和要复制的内容
+                                    const textStart = text.substring(0, 100);
+                                    const clipboardStart = clipboardText ? clipboardText.substring(0, 100) : '';
+                                    
+                                    if (clipboardText && clipboardText.substring(0, 100) === textStart) {
+                                        console.log('✅ 剪贴板验证成功：内容已正确复制');
+                                        showNotification('行程记录已复制到剪贴板', 'success');
+                                    } else {
+                                        console.warn('⚠️ 剪贴板验证失败：内容可能未正确复制');
+                                        console.warn('⚠️ 要复制的内容开头:', textStart);
+                                        console.warn('⚠️ 剪贴板内容开头:', clipboardStart);
+                                        // 如果验证失败，显示手动复制选项
+                                        showNotification('自动复制可能失败，请使用手动复制', 'warning');
+                                        showManualCopyOption(text);
+                                    }
+                                }).catch(err => {
+                                    console.warn('⚠️ 无法读取剪贴板验证（可能是权限问题）:', err);
+                                    // 如果无法验证，显示手动复制选项（更可靠）
+                                    console.log('⚠️ 无法验证剪贴板，显示手动复制选项以确保成功');
+                                    showNotification('无法验证复制结果，请使用手动复制', 'warning');
+                                    showManualCopyOption(text);
+                                });
+                            }, 100);
+                        } else {
+                            // 如果浏览器不支持读取剪贴板，直接显示手动复制选项（更可靠）
+                            // 在Mac Chrome上，execCommand可能返回true但实际未复制
+                            // 特别是在非安全上下文（外网IP）中，execCommand可能不可靠
+                            console.log('⚠️ execCommand返回成功，但无法验证剪贴板（浏览器不支持读取）');
+                            console.log('⚠️ 在非安全上下文中（外网IP），execCommand可能返回true但实际未复制');
+                            console.log('⚠️ 为了确保复制成功，显示手动复制选项');
+                            // 不显示通知，直接显示手动复制选项（更友好）
+                            showManualCopyOption(text);
+                        }
+                        return true;
+                    } else {
+                        console.error('❌ execCommand返回false - 可能的原因：');
+                        console.error('  1. 浏览器安全策略阻止');
+                        console.error('  2. 不在用户交互上下文中');
+                        console.error('  3. 页面不是HTTPS或localhost');
+                        return false;
+                    }
+                } catch (err) {
+                    console.error('❌ execCommand复制异常:', err);
+                    console.error('❌ 错误类型:', err.name);
+                    console.error('❌ 错误消息:', err.message);
+                    console.error('❌ 错误堆栈:', err.stack);
+                    // 确保元素被移除
+                    if (textArea && textArea.parentNode) {
+                        try {
+                            document.body.removeChild(textArea);
+                        } catch (e) {
+                            console.warn('⚠️ 移除textArea时出错:', e);
+                        }
+                    }
+                    return false;
                 }
             }
             
-            // 将HTML转换为纯文本格式
+            // 显示手动复制选项（最后的备选方案）
+            function showManualCopyOption(text) {
+                // 创建一个模态框显示文本内容，让用户手动复制
+                const copyModal = document.createElement('div');
+                copyModal.className = 'modal fade';
+                copyModal.id = 'manualCopyModal';
+                copyModal.innerHTML = `
+                    <div class="modal-dialog modal-lg">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">📋 请手动复制以下内容</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p class="text-muted mb-2">自动复制失败，请手动选择并复制以下文本：</p>
+                                <textarea class="form-control" rows="15" readonly style="font-family: monospace; font-size: 12px;">${text.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                                <div class="mt-2">
+                                    <button class="btn btn-primary btn-sm" onclick="selectAllText(this)">
+                                        <i class="fas fa-check-square me-1"></i>全选
+                                    </button>
+                                    <small class="text-muted ms-2">提示：全选后按 Cmd+C (Mac) 或 Ctrl+C (Windows) 复制</small>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                document.body.appendChild(copyModal);
+                const bsModal = new bootstrap.Modal(copyModal);
+                bsModal.show();
+                
+                // 自动全选文本
+                setTimeout(() => {
+                    const textarea = copyModal.querySelector('textarea');
+                    if (textarea) {
+                        textarea.select();
+                        textarea.setSelectionRange(0, text.length);
+                    }
+                }, 300);
+                
+                // 关闭后移除
+                copyModal.addEventListener('hidden.bs.modal', function() {
+                    document.body.removeChild(copyModal);
+                });
+            }
+            
+            // 全选文本辅助函数
+            window.selectAllText = function(btn) {
+                const modal = btn.closest('.modal');
+                const textarea = modal.querySelector('textarea');
+                if (textarea) {
+                    textarea.select();
+                    textarea.setSelectionRange(0, textarea.value.length);
+                }
+            };
+            
+            // 将HTML转换为纯文本格式（Tab分隔）
             function convertHtmlToText(html) {
+                console.log('🔄 开始转换HTML为文本，HTML长度:', html ? html.length : 0);
+                
+                if (!html || html.trim().length === 0) {
+                    console.error('❌ HTML内容为空');
+                    return '';
+                }
+                
                 // 创建临时div来解析HTML
                 const tempDiv = document.createElement('div');
                 tempDiv.innerHTML = html;
@@ -2878,42 +3253,100 @@
                 // 提取表格数据并格式化为文本
                 const table = tempDiv.querySelector('table');
                 if (table) {
-                    let text = '行程记录\n';
-                    text += '='.repeat(50) + '\n\n';
+                    console.log('✅ 找到表格元素');
+                    let text = '';
                     
                     // 提取表头
                     const headers = [];
                     const headerCells = table.querySelectorAll('thead th');
-                    headerCells.forEach(cell => {
-                        headers.push(cell.textContent.trim());
-                    });
-                    text += headers.join('\t') + '\n';
-                    text += '-'.repeat(headers.join('\t').length) + '\n';
+                    console.log('📋 表头数量:', headerCells.length);
                     
-                    // 提取数据行
-                    const rows = table.querySelectorAll('tbody tr');
-                    rows.forEach(row => {
-                        const cells = row.querySelectorAll('td');
-                        const rowData = [];
-                        cells.forEach(cell => {
-                            // 移除badge等装饰元素，只保留文本
-                            const cellText = cell.textContent.trim();
-                            rowData.push(cellText);
+                    if (headerCells.length === 0) {
+                        // 如果没有thead，尝试从第一行获取表头
+                        const firstRow = table.querySelector('tbody tr:first-child, tr:first-child');
+                        if (firstRow) {
+                            const firstRowCells = firstRow.querySelectorAll('th, td');
+                            firstRowCells.forEach(cell => {
+                                const cellText = cell.textContent.trim().replace(/\s+/g, ' ');
+                                headers.push(cellText);
+                            });
+                            console.log('📋 从第一行提取表头，数量:', headers.length);
+                        }
+                    } else {
+                        headerCells.forEach(cell => {
+                            // 获取纯文本，移除所有HTML标签和装饰
+                            const cellText = cell.textContent.trim().replace(/\s+/g, ' ');
+                            headers.push(cellText);
                         });
-                        text += rowData.join('\t') + '\n';
-                    });
-                    
-                    // 添加统计信息
-                    const statsDiv = tempDiv.querySelector('.bg-light');
-                    if (statsDiv) {
-                        text += '\n' + statsDiv.textContent.trim();
                     }
                     
-                    return text;
+                    // 如果找到表头，添加表头行
+                    if (headers.length > 0) {
+                        text += headers.join('\t') + '\n';
+                        console.log('📋 表头:', headers);
+                    }
+                    
+                    // 提取数据行
+                    const rows = table.querySelectorAll('tbody tr, tr:not(:first-child)');
+                    console.log('📊 数据行数量:', rows.length);
+                    
+                    rows.forEach((row, rowIndex) => {
+                        // 跳过表头行（如果表头在tbody中）
+                        if (rowIndex === 0 && headers.length > 0 && row.querySelectorAll('th').length > 0) {
+                            return;
+                        }
+                        
+                        const cells = row.querySelectorAll('td, th');
+                        const rowData = [];
+                        cells.forEach(cell => {
+                            // 获取纯文本，移除所有HTML标签和装饰（badge、strong等）
+                            // textContent 会自动移除所有HTML标签，只保留文本
+                            let cellText = cell.textContent.trim();
+                            // 清理多余的空白字符（保留单个空格）
+                            cellText = cellText.replace(/\s+/g, ' ');
+                            rowData.push(cellText);
+                        });
+                        
+                        // 确保行数据数量与表头一致
+                        if (rowData.length > 0) {
+                            // 如果列数不匹配，补齐或截断
+                            while (rowData.length < headers.length) {
+                                rowData.push('');
+                            }
+                            if (rowData.length > headers.length) {
+                                rowData = rowData.slice(0, headers.length);
+                            }
+                            text += rowData.join('\t') + '\n';
+                            if (rowIndex < 3) {
+                                console.log(`📊 第${rowIndex + 1}行数据:`, rowData);
+                            }
+                        }
+                    });
+                    
+                    // 添加统计信息（如果有）
+                    const statsDiv = tempDiv.querySelector('.bg-light, .statistics, [class*="stat"]');
+                    if (statsDiv) {
+                        const statsText = statsDiv.textContent.trim().replace(/\s+/g, ' ');
+                        if (statsText) {
+                            text += '\n' + statsText;
+                            console.log('📊 添加统计信息:', statsText);
+                        }
+                    }
+                    
+                    const result = text.trim();
+                    console.log('✅ 转换完成，文本长度:', result.length);
+                    if (result.length > 0) {
+                        console.log('📄 转换后的文本预览（前300字符）:', result.substring(0, 300));
+                    }
+                    return result;
                 }
                 
-                // 如果不是表格，直接返回文本内容
-                return tempDiv.textContent || tempDiv.innerText || '';
+                console.warn('⚠️ 未找到表格元素，尝试提取所有文本');
+                // 如果不是表格，尝试提取所有文本内容
+                const textContent = tempDiv.textContent || tempDiv.innerText || '';
+                const result = textContent.trim();
+                console.log('📄 提取的纯文本长度:', result.length);
+                return result;
             }
             
             // 添加预览按钮事件处理

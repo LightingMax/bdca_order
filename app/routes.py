@@ -279,16 +279,33 @@ def upload_file():
         logger.info(f"文件处理完成，成功处理 {len(all_results)} 个订单，其中新处理 {len(new_results)} 个")
         logger.info(f"📊 分类统计: 网约车 {all_classification_info['taxi_amount']:.2f}元, 酒店 {all_classification_info['hotel_amount']:.2f}元")
         
-        # 计算本次处理的金额（只计算新处理的文件）
+        # 计算本次处理的金额（只计算新处理的订单，不包括重用的）
+        # 从 new_results 中计算金额，而不是从 processed_files
         current_session_taxi_amount = 0
         current_session_hotel_amount = 0
-        for file_result in processed_files:
-            if 'classification_info' in file_result:
-                info = file_result['classification_info']
-                current_session_taxi_amount += info.get('taxi_amount', 0)
-                current_session_hotel_amount += info.get('hotel_amount', 0)
+        
+        # 方法1：从 new_results 直接计算（最准确）
+        for result in new_results:
+            amount = result.get('amount', 0)
+            order_id = result.get('order_id', '')
+            # 判断是网约车还是酒店（根据order_id前缀或文件类型）
+            if order_id.startswith('hotel_'):
+                current_session_hotel_amount += amount
+            else:
+                current_session_taxi_amount += amount
+        
+        # 方法2：如果方法1没有金额，尝试从 processed_files 的 classification_info 计算
+        # 但只计算新处理的文件，不包括重用的文件
+        if current_session_taxi_amount == 0 and current_session_hotel_amount == 0:
+            for file_result in processed_files:
+                if 'classification_info' in file_result:
+                    info = file_result['classification_info']
+                    current_session_taxi_amount += info.get('taxi_amount', 0)
+                    current_session_hotel_amount += info.get('hotel_amount', 0)
         
         current_session_total = current_session_taxi_amount + current_session_hotel_amount
+        
+        logger.info(f"📊 本次处理金额计算: 新订单数={len(new_results)}, 网约车={current_session_taxi_amount:.2f}元, 酒店={current_session_hotel_amount:.2f}元, 总计={current_session_total:.2f}元")
         
         # 将处理结果保存到session中，供view_trips使用
         session['processed_files'] = all_results
@@ -547,6 +564,130 @@ def print_raw_file():
     except Exception as e:
         logger.error(f"原始打印文件时出错: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'message': f'打印文件时出错: {str(e)}'}), 500
+
+
+@main_bp.route('/api/print-raw-batch', methods=['POST'])
+def print_raw_files_batch():
+    """批量原始打印文件 - 支持一次打印多个PDF文件"""
+    logger = current_app.logger
+    logger.info("收到批量原始打印请求")
+    
+    try:
+        data = request.get_json()
+        if not data or 'filenames' not in data:
+            return jsonify({'success': False, 'message': '缺少文件名列表参数'}), 400
+        
+        filenames = data.get('filenames', [])
+        if not isinstance(filenames, list) or len(filenames) == 0:
+            return jsonify({'success': False, 'message': '文件名列表为空或格式错误'}), 400
+        
+        logger.info(f"批量打印请求: {len(filenames)} 个文件")
+        logger.info(f"文件列表: {filenames}")
+        
+        # 导入智能打印相关函数
+        try:
+            import sys
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            sys.path.insert(0, project_root)
+            from print_api_service_linux_enhanced import smart_print_pdf
+        except ImportError as e:
+            logger.error(f"导入智能打印函数失败: {e}")
+            return jsonify({
+                'success': False,
+                'message': f'智能打印模块导入失败: {str(e)}'
+            }), 500
+        
+        # 打印选项
+        print_options = {
+            'copies': '1',
+            'tray': 'auto'
+        }
+        printer_name = data.get('printer_name', 'HP-LaserJet-MFP-M437-M443')
+        
+        # 在临时目录中查找所有文件
+        temp_folder = current_app.config['TEMP_FOLDER']
+        
+        # 批量处理结果
+        print_results = []
+        success_count = 0
+        failed_count = 0
+        
+        for filename in filenames:
+            file_found = False
+            file_path = None
+            
+            # 递归搜索临时目录中的文件
+            for root, dirs, files in os.walk(temp_folder):
+                if filename in files:
+                    file_path = os.path.join(root, filename)
+                    file_found = True
+                    break
+            
+            if not file_found or not os.path.exists(file_path):
+                logger.warning(f"文件未找到: {filename}")
+                print_results.append({
+                    'filename': filename,
+                    'success': False,
+                    'message': f'文件 {filename} 未找到，可能已被清理或移动',
+                    'printer': printer_name,
+                    'job_id': None
+                })
+                failed_count += 1
+                continue
+            
+            logger.info(f"找到文件: {file_path}，开始打印")
+            
+            # 调用智能打印函数
+            try:
+                success = smart_print_pdf(printer_name, file_path, print_options)
+                
+                if success:
+                    logger.info(f"文件 {filename} 打印任务提交成功")
+                    print_results.append({
+                        'filename': filename,
+                        'success': True,
+                        'message': f'文件 {filename} 已发送至打印机',
+                        'printer': printer_name,
+                        'job_id': 'direct_call'
+                    })
+                    success_count += 1
+                else:
+                    logger.error(f"文件 {filename} 智能打印函数返回失败")
+                    print_results.append({
+                        'filename': filename,
+                        'success': False,
+                        'message': f'文件 {filename} 智能打印失败',
+                        'printer': printer_name,
+                        'job_id': None
+                    })
+                    failed_count += 1
+                    
+            except Exception as e:
+                logger.error(f"打印文件 {filename} 时出错: {str(e)}")
+                print_results.append({
+                    'filename': filename,
+                    'success': False,
+                    'message': f'打印文件 {filename} 时出错: {str(e)}',
+                    'printer': printer_name,
+                    'job_id': None
+                })
+                failed_count += 1
+        
+        # 返回批量打印结果
+        logger.info(f"批量打印完成: 成功 {success_count}/{len(filenames)}, 失败 {failed_count}/{len(filenames)}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'批量打印完成: {success_count} 个成功, {failed_count} 个失败',
+            'total': len(filenames),
+            'success_count': success_count,
+            'failed_count': failed_count,
+            'results': print_results
+        })
+        
+    except Exception as e:
+        logger.error(f"批量原始打印文件时出错: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'message': f'批量打印文件时出错: {str(e)}'}), 500
 
 
 @main_bp.route('/api/get-raw-file', methods=['POST'])

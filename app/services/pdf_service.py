@@ -9,90 +9,93 @@ from PyPDF2 import PdfReader, PdfWriter
 from flask import current_app
 from app.services.file_service import get_file_paths, group_files_by_type
 
-def call_qwen_api_for_trips(table_data_list):
-    """调用通义千问API规整行程数据"""
-    logger = current_app.logger
-    
-    # 从配置文件获取通义千问API配置
-    url = f"{current_app.config['QWEN_API_BASE_URL']}/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {current_app.config['QWEN_API_KEY']}",
-        "Content-Type": "application/json"
-    }
-    
-    # 构建提示词
-    prompt = f"""
-请帮我整理以下行程记录：将它们按照上车时间升序排列并重新编号，然后以JSON格式返回结果。每个行程记录应包含序号、服务商、车型、上车时间、城市、起点、终点和金额等所有字段。请确保返回标准的JSON数组格式，无需添加任何额外解释。
-
-原始表格数据：
-{table_data_list}
-
-请返回JSON数组格式，每个对象包含以下字段：
-- sequence: 序号（字符串）
-- service_provider: 服务商（字符串）
-- car_type: 车型（字符串）
-- pickup_time: 上车时间（字符串）
-- city: 城市（字符串）
-- start_point: 起点（字符串）
-- end_point: 终点（字符串）
-- amount: 金额（字符串）
-"""
-    
-    data = {
-        "model": current_app.config['QWEN_MODEL'],
-        "messages": [
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.1
-    }
-    
-    try:
-        import time
-        start_time = time.time()
-        
-        logger.info("调用通义千问API规整行程数据...")
-        logger.info(f"API请求URL: {url}")
-        logger.info(f"API超时设置: {current_app.config['QWEN_API_TIMEOUT']} 秒")
-        logger.info(f"请求数据大小: {len(str(table_data_list))} 字符")
-        logger.info(f"请求开始时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time))}")
-        
-        response = requests.post(url, headers=headers, json=data, timeout=current_app.config['QWEN_API_TIMEOUT'])
-        
-        end_time = time.time()
-        duration = end_time - start_time
-        logger.info(f"API请求完成，耗时: {duration:.2f} 秒")
-        response.raise_for_status()
-        result = response.json()
-        content = result['choices'][0]['message']['content']
-        
-        logger.info(f"通义千问API原始返回内容长度: {len(content)} 字符")
-        logger.info(f"通义千问API原始返回内容: {content[:500]}...")  # 只显示前500字符
-        
-        # 提取JSON部分
-        import re
-        json_match = re.search(r'\[.*\]', content, re.DOTALL)
-        if json_match:
-            json_str = json_match.group()
-            logger.info(f"提取到的JSON字符串长度: {len(json_str)} 字符")
-            logger.info(f"提取到的JSON字符串: {json_str}")
-            
-            parsed_data = json.loads(json_str)
-            logger.info(f"通义千问API成功规整了 {len(parsed_data)} 个行程")
-            
-            # 详细输出每个行程的信息
-            for i, trip in enumerate(parsed_data):
-                logger.info(f"行程{i+1}: 序号={trip.get('sequence')}, 服务商={trip.get('service_provider')}, 时间={trip.get('pickup_time')}, 起点={trip.get('start_point')}, 终点={trip.get('end_point')}, 金额={trip.get('amount')}")
-            
-            return parsed_data
-        else:
-            logger.error("通义千问API返回结果中未找到JSON数据")
-            logger.error(f"完整返回内容: {content}")
-            return []
-            
-    except Exception as e:
-        logger.error(f"调用通义千问API失败: {e}")
-        logger.error(f"请求数据: {data}")
-        return []
+# ============================================================================
+# 以下函数已废弃，改用高德打车PDF解析器（parse_gaode_itinerary_enhanced）
+# ============================================================================
+# def call_qwen_api_for_trips(table_data_list):
+#     """调用通义千问API规整行程数据（已废弃，改用高德打车PDF解析器）"""
+#     logger = current_app.logger
+#     
+#     # 从配置文件获取通义千问API配置
+#     url = f"{current_app.config['QWEN_API_BASE_URL']}/chat/completions"
+#     headers = {
+#         "Authorization": f"Bearer {current_app.config['QWEN_API_KEY']}",
+#         "Content-Type": "application/json"
+#     }
+#     
+#     # 构建提示词
+#     prompt = f"""
+# 请帮我整理以下行程记录：将它们按照上车时间升序排列并重新编号，然后以JSON格式返回结果。每个行程记录应包含序号、服务商、车型、上车时间、城市、起点、终点和金额等所有字段。请确保返回标准的JSON数组格式，无需添加任何额外解释。
+# 
+# 原始表格数据：
+# {table_data_list}
+# 
+# 请返回JSON数组格式，每个对象包含以下字段：
+# - sequence: 序号（字符串）
+# - service_provider: 服务商（字符串）
+# - car_type: 车型（字符串）
+# - pickup_time: 上车时间（字符串）
+# - city: 城市（字符串）
+# - start_point: 起点（字符串）
+# - end_point: 终点（字符串）
+# - amount: 金额（字符串）
+# """
+#     
+#     data = {
+#         "model": current_app.config['QWEN_MODEL'],
+#         "messages": [
+#             {"role": "user", "content": prompt}
+#         ],
+#         "temperature": 0.1
+#     }
+#     
+#     try:
+#         import time
+#         start_time = time.time()
+#         
+#         logger.info("调用通义千问API规整行程数据...")
+#         logger.info(f"API请求URL: {url}")
+#         logger.info(f"API超时设置: {current_app.config['QWEN_API_TIMEOUT']} 秒")
+#         logger.info(f"请求数据大小: {len(str(table_data_list))} 字符")
+#         logger.info(f"请求开始时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time))}")
+#         
+#         response = requests.post(url, headers=headers, json=data, timeout=current_app.config['QWEN_API_TIMEOUT'])
+#         
+#         end_time = time.time()
+#         duration = end_time - start_time
+#         logger.info(f"API请求完成，耗时: {duration:.2f} 秒")
+#         response.raise_for_status()
+#         result = response.json()
+#         content = result['choices'][0]['message']['content']
+#         
+#         logger.info(f"通义千问API原始返回内容长度: {len(content)} 字符")
+#         logger.info(f"通义千问API原始返回内容: {content[:500]}...")  # 只显示前500字符
+#         
+#         # 提取JSON部分
+#         import re
+#         json_match = re.search(r'\[.*\]', content, re.DOTALL)
+#         if json_match:
+#             json_str = json_match.group()
+#             logger.info(f"提取到的JSON字符串长度: {len(json_str)} 字符")
+#             logger.info(f"提取到的JSON字符串: {json_str}")
+#             
+#             parsed_data = json.loads(json_str)
+#             logger.info(f"通义千问API成功规整了 {len(parsed_data)} 个行程")
+#             
+#             # 详细输出每个行程的信息
+#             for i, trip in enumerate(parsed_data):
+#                 logger.info(f"行程{i+1}: 序号={trip.get('sequence')}, 服务商={trip.get('service_provider')}, 时间={trip.get('pickup_time')}, 起点={trip.get('start_point')}, 终点={trip.get('end_point')}, 金额={trip.get('amount')}")
+#             
+#             return parsed_data
+#         else:
+#             logger.error("通义千问API返回结果中未找到JSON数据")
+#             logger.error(f"完整返回内容: {content}")
+#             return []
+#             
+#     except Exception as e:
+#         logger.error(f"调用通义千问API失败: {e}")
+#         logger.error(f"请求数据: {data}")
+#         return []
 
 def extract_amount_from_xml(xml_path):
     """从XML文件中提取订单金额"""
@@ -2322,7 +2325,7 @@ def parse_simple_trip_info(lines):
 def generate_trip_records(processed_files):
     """
     生成行程记录字符串
-    使用通义千问API处理暂存的原始表格数据，并缓存结果
+    使用高德打车PDF解析器提取行程信息，支持多文件合并和按时间排序
     
     Args:
         processed_files: 已处理的文件列表
@@ -2359,54 +2362,94 @@ def generate_trip_records(processed_files):
             logger.info("没有找到完整的缓存，需要重新生成行程记录")
         
         # 如果没有缓存，则生成新的行程记录
-        all_raw_data = []
+        # 导入高德打车PDF解析器
+        import sys
+        from pathlib import Path
+        project_root = Path(__file__).parent.parent.parent
+        sys.path.insert(0, str(project_root))
+        from utils.trip_table_parse_enhanced import parse_gaode_itinerary_enhanced
         
-        # 遍历所有文件，收集原始表格数据
+        all_trips = []  # 收集所有文件的行程记录
+        
+        # 遍历所有文件，使用新的解析器提取行程信息
         for file_info in processed_files:
             # 只处理包含行程单的文件
             if not file_info.get('has_itinerary', False):
                 continue
             
-            # 从缓存中获取原始表格数据
-            raw_table_data = file_info.get('raw_table_data')
-            if raw_table_data:
-                all_raw_data.extend(raw_table_data)
-                logger.info(f"从缓存中读取到原始表格数据，行数: {len(raw_table_data)}")
-            else:
-                # 回退机制：尝试从原始行程单文件中提取
-                logger.warning(f"文件 {file_info.get('output_file', '未知')} 没有缓存的原始表格数据，尝试回退提取")
+            # 检查是否有原始行程单文件路径
+            itinerary_file = file_info.get('itinerary_file')
+            if not itinerary_file or not os.path.exists(itinerary_file):
+                logger.warning(f"文件 {file_info.get('output_file', '未知')} 没有找到原始行程单文件路径")
+                continue
+            
+            logger.info(f"开始解析行程单文件: {itinerary_file}")
+            try:
+                # 使用新的解析器解析高德打车行程单
+                parse_result = parse_gaode_itinerary_enhanced(itinerary_file)
                 
-                # 检查是否有原始行程单文件路径
-                itinerary_file = file_info.get('itinerary_file')
-                if itinerary_file and os.path.exists(itinerary_file):
-                    logger.info(f"从原始行程单文件提取: {itinerary_file}")
-                    try:
-                        raw_table_data = extract_trip_info_from_itinerary(itinerary_file)
-                        if raw_table_data:
-                            all_raw_data.extend(raw_table_data)
-                            logger.info(f"回退提取成功，获得原始表格数据行数: {len(raw_table_data)}")
-                        else:
-                            logger.warning(f"回退提取失败，无法从 {itinerary_file} 提取原始表格数据")
-                    except Exception as e:
-                        logger.error(f"回退提取过程中出错: {e}")
+                if parse_result.get('success') and parse_result.get('trips'):
+                    trips = parse_result['trips']
+                    logger.info(f"✅ 成功解析文件 {itinerary_file}，获得 {len(trips)} 条行程记录")
+                    all_trips.extend(trips)
                 else:
-                    logger.warning(f"没有找到原始行程单文件路径，无法进行回退提取")
+                    error_msg = parse_result.get('error', '未知错误')
+                    logger.warning(f"⚠️ 解析文件 {itinerary_file} 失败: {error_msg}")
+            except Exception as e:
+                logger.error(f"❌ 解析文件 {itinerary_file} 时出错: {e}")
+                import traceback
+                traceback.print_exc()
         
-        if not all_raw_data:
-            logger.info("没有找到任何原始表格数据")
+        if not all_trips:
+            logger.info("没有找到任何行程记录")
             return "暂无行程记录"
         
-        # 使用通义千问API处理所有原始数据
-        logger.info(f"收集到 {len(all_raw_data)} 行原始表格数据，调用通义千问API处理...")
-        logger.info(f"原始表格数据内容: {all_raw_data}")
+        logger.info(f"共收集到 {len(all_trips)} 条行程记录，开始排序和重新编号...")
         
-        structured_trips = call_qwen_api_for_trips(all_raw_data)
+        # 按上车时间排序（解析时间字符串并排序）
+        def parse_time_for_sort(trip):
+            """解析上车时间用于排序"""
+            pickup_time = trip.get('上车时间', '')
+            if not pickup_time:
+                return (0, 0, 0, 0, 0)  # 默认最早时间
+            
+            try:
+                # 格式: "2024-06-19 12:32"
+                import re
+                match = re.match(r'(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})', pickup_time)
+                if match:
+                    year, month, day, hour, minute = map(int, match.groups())
+                    return (year, month, day, hour, minute)
+            except:
+                pass
+            
+            return (0, 0, 0, 0, 0)  # 解析失败时返回默认值
         
-        if not structured_trips:
-            logger.warning("通义千问API未能处理原始数据")
-            return "行程数据处理失败"
+        # 按时间排序
+        all_trips.sort(key=parse_time_for_sort)
+        logger.info(f"✅ 行程记录已按时间排序")
         
-        logger.info(f"通义千问API返回的结构化数据: {structured_trips}")
+        # 重新编号
+        for index, trip in enumerate(all_trips, start=1):
+            trip['序号'] = str(index)
+        
+        logger.info(f"✅ 行程记录已重新编号，共 {len(all_trips)} 条")
+        
+        # 将高德解析器的数据格式转换为HTML表格所需的格式
+        structured_trips = []
+        for trip in all_trips:
+            structured_trips.append({
+                'sequence': trip.get('序号', ''),
+                'service_provider': trip.get('服务商', '未知'),
+                'car_type': trip.get('车型', '未知'),
+                'pickup_time': trip.get('上车时间', '未知时间'),
+                'city': trip.get('城市', '未知城市'),
+                'start_point': trip.get('起点', '未知起点'),
+                'end_point': trip.get('终点', '未知终点'),
+                'amount': f"{trip.get('金额(元)', '0')}元"
+            })
+        
+        logger.info(f"✅ 数据格式转换完成，共 {len(structured_trips)} 条行程记录")
         
         # 生成HTML表格格式的行程记录
         html_table = []
