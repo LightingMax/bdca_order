@@ -8,11 +8,13 @@
 import sys
 import os
 
-# 添加项目根目录到Python路径
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 本脚本位于 test/ 下，与 printer_test.py 同级；不能用包名 `test.*`，会与 Python 标准库 test 冲突。
+_test_dir = os.path.dirname(os.path.abspath(__file__))
+if _test_dir not in sys.path:
+    sys.path.insert(0, _test_dir)
 
-from test.printer_test import PrinterTester
-from test.text_printer_test import TextPrinter
+from printer_test import PrinterTester
+from text_printer_test import TextPrinter
 
 
 def show_menu():

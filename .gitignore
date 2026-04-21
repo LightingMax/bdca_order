@@ -1,13 +1,13 @@
-# Python字节码文件
+# =========================
+# Python
+# =========================
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C扩展
 *.so
-
-# 分发/打包
 .Python
+
+# 打包/分发
 build/
 develop-eggs/
 dist/
@@ -24,12 +24,19 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
-
-# PyInstaller
 *.manifest
 *.spec
 
-# 单元测试/覆盖率报告
+# 虚拟环境
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# 测试/类型/覆盖率
 htmlcov/
 .tox/
 .nox/
@@ -41,88 +48,98 @@ coverage.xml
 *.cover
 .hypothesis/
 .pytest_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
 
 # 翻译
 *.mo
 *.pot
 
-# Django
-*.log
+# 框架/工具常见产物
 local_settings.py
 db.sqlite3
-
-# Flask
 instance/
 .webassets-cache
-
-# Scrapy
 .scrapy
-
-# Sphinx文档
 docs/_build/
-
-# PyBuilder
 target/
-
-# Jupyter Notebook
 .ipynb_checkpoints
-
-# IPython
 profile_default/
 ipython_config.py
-
-# pyenv
 .python-version
-
-# celery
 celerybeat-schedule
 celerybeat.pid
-
-# SageMath
 *.sage.py
 
-# 环境
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder项目设置
+# 项目编辑器/工具
 .spyderproject
 .spyproject
-
-# Rope项目设置
 .ropeproject
-
-# mkdocs文档
 /site
 
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre类型检查器
-.pyre/
-
-# 项目特定的忽略文件
-temp/*
-!temp/.gitkeep
-app/static/uploads/*
-!app/static/uploads/.gitkeep
-app/static/output/*
-!app/static/output/.gitkeep
-data/user_data.json
-
-# IDE文件
+# =========================
+# IDE / 编辑器
+# =========================
 .idea/
 .vscode/
 *.swp
 *.swo
+*.sublime-workspace
+*.sublime-project
 
-# 操作系统文件
+# =========================
+# 操作系统
+# =========================
 .DS_Store
-Thumbs.db 
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# =========================
+# 日志
+# =========================
+*.log
+logs/
+!logs/.gitkeep
+
+# =========================
+# 项目运行时产物（不入库）
+# =========================
+# 用户上传/生成内容
+temp/
+!temp/.gitkeep
+temp_files/
+app/static/uploads/*
+!app/static/uploads/.gitkeep
+app/static/output/*
+!app/static/output/.gitkeep
+
+# 运行时数据（会频繁变动，不适合进库）
+data/user_data.json
+data/file_hashes.json
+global_stats.json
+
+# =========================
+# Docker / 构建产物
+# =========================
+.docker/
+*.tar
+*.tar.gz
+!driver/**/*.tar.gz
+
+# =========================
+# 驱动冗余（只保留压缩包，解压目录视为构建产物）
+# =========================
+driver/ULDLINUX_HewlettPackard_V1.00.39.15_00.23/
+
+# =========================
+# 凭据 / 敏感信息
+# =========================
+*.pem
+*.key
+*.crt
+*.p12
+.secrets
+secrets.json

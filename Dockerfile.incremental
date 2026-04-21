@@ -1,0 +1,31 @@
+ARG BASE_IMAGE=order-app:latest
+FROM ${BASE_IMAGE}
+
+ARG INSTALL_DEPS=0
+ARG BUILD_VERSION=unknown
+ARG BUILD_TIME=unknown
+ARG REQ_SHA256=unknown
+ARG BUILD_MODE=code
+
+WORKDIR /workspace/order
+
+COPY requirements.txt /workspace/order/requirements.txt
+RUN if [ "$INSTALL_DEPS" = "1" ]; then \
+      echo "[incremental] pip install -r requirements.txt --upgrade" && \
+      pip install --no-cache-dir --upgrade -r /workspace/order/requirements.txt ; \
+    else \
+      echo "[incremental] skip pip install (deps unchanged)" ; \
+    fi
+
+COPY . /workspace/order
+
+RUN mkdir -p /workspace/order/.build_meta \
+    && echo "${REQ_SHA256}"    > /workspace/order/.build_meta/requirements.sha256 \
+    && echo "${BUILD_VERSION}" > /workspace/order/.build_meta/version \
+    && echo "${BUILD_TIME}"    > /workspace/order/.build_meta/build_time \
+    && echo "${BUILD_MODE}"    > /workspace/order/.build_meta/build_mode
+
+LABEL order.build.version="${BUILD_VERSION}" \
+      order.build.time="${BUILD_TIME}" \
+      order.build.mode="${BUILD_MODE}" \
+      order.req.sha256="${REQ_SHA256}"

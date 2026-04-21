@@ -8,6 +8,7 @@ Linux版本 - 专门使用CUPS打印系统
 
 import platform
 import sys
+import tempfile
 
 import cups
 import os
@@ -24,6 +25,9 @@ from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def check_operating_system():
     """检查操作系统兼容性"""
@@ -524,25 +528,19 @@ print_lock = threading.Lock()
 # API密钥 - 在生产环境中应该使用更安全的方式存储
 API_KEY = "TOKEN_PRINT_API_KEY_9527"
 
-# 硬编码配置 - 确保服务稳定可靠
-CONFIGURED_PRINTERS = [
-    "HP-LaserJet-MFP-M437-M443",
-    # "HP_LaserJet_Pro_MFP_M128fp_C3B18B_",
-    # "HP_Printer_40",
-    # "NetworkPrinter"
-]
+# 打印机队列名：仅来自环境变量，须与 CUPS 完全一致（lpstat -p / utils/printer_utils.py）
+_default_queue = (os.environ.get("DEFAULT_PRINTER_NAME") or "").strip()
+_configured_raw = os.environ.get("CONFIGURED_PRINTERS", "").strip()
+if _configured_raw:
+    CONFIGURED_PRINTERS = [p.strip() for p in _configured_raw.split(",") if p.strip()]
+else:
+    CONFIGURED_PRINTERS = [_default_queue] if _default_queue else []
+DEFAULT_PRINTER = _default_queue
 
-# 默认打印机 - 硬编码配置
-DEFAULT_PRINTER = "HP-LaserJet-MFP-M437-M443"
-
-# 默认纸盘设置 - 避免使用纸盘1
-# 根据打印机实际支持的纸盘名称设置：
-# - 'auto': 自动选择
-# - 'by-pass-tray': 手动进纸托盘
-# - 'multi': 多功能托盘（Tray 1）
-# - 'top': 上部托盘（Tray 2） - 推荐使用
-# - 'bottom': 下部托盘（Tray 3）
-DEFAULT_TRAY = "auto"  # 默认使用上部托盘（Tray 2）
+# 默认进纸源（CUPS 选项 media-source）。未设置环境变量时一般为 auto，通用性较好。
+# 可通过环境变量 DEFAULT_MEDIA_SOURCE 覆盖；设为空字符串则不在作业里传 media-source（完全使用打印机默认）。
+# 常见值（以打印机 PPD 为准）：auto、tray-1、tray-2 等。
+DEFAULT_TRAY = (os.environ.get("DEFAULT_MEDIA_SOURCE", "auto") or "").strip()
 
 # 检查操作系统兼容性
 if not check_operating_system():
@@ -556,6 +554,11 @@ try:
 except Exception as e:
     logger.error(f"CUPS连接初始化失败: {e}")
     conn = None
+
+if not DEFAULT_PRINTER:
+    logger.warning(
+        "未设置环境变量 DEFAULT_PRINTER_NAME，请在本机 .env 中配置与 CUPS 完全一致的队列名"
+    )
 
 # 初始化FastAPI应用
 app = FastAPI(
@@ -595,7 +598,7 @@ class PrintResponse(BaseModel):
 class PrintFileRequest(BaseModel):
     """文件路径打印请求模型"""
     file_path: str
-    printer_name: str = "HP-LaserJet-MFP-M437-M443"
+    printer_name: str = DEFAULT_PRINTER
     copies: int = 1
     tray: str = "auto"
     page_size: Optional[str] = None
@@ -698,9 +701,44 @@ def test_printer_connection():
 
 
 
+def _submit_print_via_lp(printer_name: str, pdf_path: str, print_options: dict) -> None:
+    """
+    用 lp(1) 提交打印。由当前进程读文件再送给 cupsd，避免 pycups printFile 在部分环境
+    下反复出现 (1280, 'No such file or directory')（IPP 文档不可用，常与调度器打开路径有关）。
+    """
+    if not shutil.which("lp"):
+        raise RuntimeError("系统未找到 lp 命令，请安装 cups-client")
+    cmd = ["lp", "-d", printer_name]
+    opts = dict(print_options)
+    copies = opts.pop("copies", "1")
+    try:
+        nc = max(1, int(str(copies)))
+    except ValueError:
+        nc = 1
+    if nc != 1:
+        cmd.extend(["-n", str(nc)])
+    for k, v in opts.items():
+        if v is None or str(v).strip() == "":
+            continue
+        cmd.extend(["-o", f"{k}={v}"])
+    cmd.append(pdf_path)
+    logger.info("lp 提交: %s", " ".join(cmd))
+    r = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=120, check=False
+    )
+    if r.returncode != 0:
+        msg = (r.stderr or r.stdout or "").strip() or f"lp 退出码 {r.returncode}"
+        raise RuntimeError(msg)
+    out = (r.stdout or "").strip()
+    if out:
+        logger.info("lp: %s", out)
+
+
 def print_with_cups(printer_name, file_path, options=None):
     """使用CUPS API打印 - 专门优化的CUPS打印方法"""
+    cups_readable_path = None
     try:
+        file_path = os.path.abspath(file_path)
         # 验证文件是否存在
         if not os.path.exists(file_path):
             logger.error(f"文件不存在: {file_path}")
@@ -711,7 +749,6 @@ def print_with_cups(printer_name, file_path, options=None):
             logger.error("CUPS连接未初始化")
             return False
         
-        # 验证打印机是否在配置列表中
         if printer_name not in CONFIGURED_PRINTERS:
             logger.error(f"打印机 {printer_name} 不在配置列表中")
             return False
@@ -721,21 +758,40 @@ def print_with_cups(printer_name, file_path, options=None):
         if not printer_status['is_accepting']:
             logger.error(f"打印机 {printer_name} 当前状态: {printer_status['state_text']}")
             return False
+
+        # cupsd 常以 lp 用户读文件；项目目录下 PDF 可能不可被其访问。(1280, 'No such file or directory') 多源于此
+        fd, cups_readable_path = tempfile.mkstemp(
+            suffix=".pdf", prefix="cups_spool_"
+        )
+        os.close(fd)
+        shutil.copy2(file_path, cups_readable_path)
+        os.chmod(cups_readable_path, 0o644)
+        try:
+            sz = os.path.getsize(cups_readable_path)
+        except OSError:
+            sz = -1
+        logger.info(
+            "打印用暂存文件: %s（%s 字节，源: %s）",
+            cups_readable_path,
+            sz,
+            file_path,
+        )
         
         # 构建打印选项，支持纸盘选择
         print_options = {
             'copies': options.get('copies', '1') if options else '1'
         }
         
-        # 纸盘选择优先级：用户指定 > 默认设置
-        # 注意：CUPS的纸盘参数名称可能是 'media-source' 或 'media'
+        # 纸盘：显式 media / tray > 环境变量 DEFAULT_MEDIA_SOURCE（默认 auto）；为空则不传该项
+        tray_choice = ""
         if options and options.get('media'):
-            print_options['media-source'] = options['media']
+            tray_choice = str(options['media']).strip()
         elif options and options.get('tray'):
-            print_options['media-source'] = options['tray']
+            tray_choice = str(options['tray']).strip()
         else:
-            # 使用默认纸盘设置，避免使用纸盘1
-            print_options['media-source'] = DEFAULT_TRAY
+            tray_choice = DEFAULT_TRAY
+        if tray_choice:
+            print_options['media-source'] = tray_choice
         
         # 如果指定了纸张尺寸，添加到选项中
         if options and options.get('page-size'):
@@ -744,37 +800,72 @@ def print_with_cups(printer_name, file_path, options=None):
         logger.info(f"开始CUPS打印: {file_path} 到打印机: {printer_name}")
         logger.info(f"CUPS打印选项: {print_options}")
         
-        # 调试：显示所有可用的打印机选项
-        try:
-            printer_attrs = conn.getPrinterAttributes(printer_name)
-            logger.info(f"打印机 {printer_name} 支持的选项: {list(printer_attrs.keys())}")
-            if 'media-source-supported' in printer_attrs:
-                logger.info(f"支持的纸盘: {printer_attrs['media-source-supported']}")
-        except Exception as e:
-            logger.warning(f"无法获取打印机属性: {e}")
+        # 是否每次作业向打印机 getPrinterAttributes（纸盘等 IPP 选项）：多一次网络往返，远程 IPP 上常见数秒～十余秒延迟。
+        # 与使用 ULD 还是 driverless 无关；ULD 为推荐驱动栈。排障需要完整选项日志时设 CUPS_FETCH_PRINTER_ATTRS=1，
+        # 或把下方【注释保留块】取消注释并替换本 if 块。
+        if os.environ.get("CUPS_FETCH_PRINTER_ATTRS", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            try:
+                printer_attrs = conn.getPrinterAttributes(printer_name)
+                logger.info(
+                    "打印机 %s 支持的选项: %s",
+                    printer_name,
+                    list(printer_attrs.keys()),
+                )
+                if "media-source-supported" in printer_attrs:
+                    logger.info(
+                        "支持的纸盘: %s",
+                        printer_attrs["media-source-supported"],
+                    )
+            except Exception as e:
+                logger.warning("无法获取打印机属性: %s", e)
+        #
+        # 【注释保留】每次作业均拉取打印机 IPP 属性（便于与日志对照；单作业会更慢，按需临时启用）：
+        # try:
+        #     printer_attrs = conn.getPrinterAttributes(printer_name)
+        #     logger.info(
+        #         "打印机 %s 支持的选项: %s",
+        #         printer_name,
+        #         list(printer_attrs.keys()),
+        #     )
+        #     if "media-source-supported" in printer_attrs:
+        #         logger.info(
+        #             "支持的纸盘: %s",
+        #             printer_attrs["media-source-supported"],
+        #         )
+        # except Exception as e:
+        #     logger.warning("无法获取打印机属性: %s", e)
         
         try:
-            # 首先尝试使用指定的纸盘选项
-            job_id = conn.printFile(printer_name, file_path, "PDF打印任务", print_options)
-            logger.info(f"✅ CUPS打印任务已提交（使用纸盘选项），ID: {job_id}")
+            _submit_print_via_lp(printer_name, cups_readable_path, print_options)
+            logger.info("✅ 已通过 lp 提交打印（含当前 CUPS 选项）")
             return True
         except Exception as e:
-            logger.warning(f"使用纸盘选项打印失败: {e}")
-            logger.info("尝试不指定纸盘选项（使用打印机默认设置）")
-            
-            # 如果失败，尝试不指定纸盘选项（像另一个程序那样）
+            logger.warning("lp 提交（含纸盘等选项）失败: %s", e)
+            logger.info("改用 lp 仅传份数，不显式指定纸盘等选项")
             try:
-                basic_options = {'copies': options.get('copies', '1') if options else '1'}
-                job_id = conn.printFile(printer_name, file_path, "PDF打印任务", basic_options)
-                logger.info(f"✅ CUPS打印任务已提交（使用默认设置），ID: {job_id}")
+                basic_options = {
+                    "copies": options.get("copies", "1") if options else "1"
+                }
+                _submit_print_via_lp(printer_name, cups_readable_path, basic_options)
+                logger.info("✅ 已通过 lp 提交打印（仅份数）")
                 return True
             except Exception as e2:
-                logger.error(f"使用默认设置也失败: {e2}")
-                raise e  # 抛出原始错误
+                logger.error("lp 简易提交也失败: %s", e2)
+                raise e2
         
     except Exception as e:
         logger.error(f"CUPS打印失败: {e}")
         return False
+    finally:
+        if cups_readable_path and os.path.exists(cups_readable_path):
+            try:
+                os.remove(cups_readable_path)
+            except OSError:
+                pass
 
 
 
@@ -858,7 +949,6 @@ async def get_default_printer_info(token: str = Depends(verify_token)):
 @app.get("/printer-options/{printer_name}")
 async def get_printer_options(printer_name: str, token: str = Depends(verify_token)):
     """获取打印机的详细选项信息，包括支持的纸盘"""
-    # 验证打印机是否在配置列表中
     if printer_name not in CONFIGURED_PRINTERS:
         return {
             "success": False,
@@ -966,7 +1056,6 @@ async def print_file(
             detail="只支持PDF文件"
         )
     
-    # 验证打印机是否在配置列表中
     if printer_name not in CONFIGURED_PRINTERS:
         return PrintResponse(
             success=False,
@@ -1032,7 +1121,6 @@ async def print_file_by_path(
     
     logger.info(f"收到文件路径打印请求: {file_path}")
     
-    # 验证打印机是否在配置列表中
     if printer_name not in CONFIGURED_PRINTERS:
         return PrintResponse(
             success=False,
@@ -1094,7 +1182,6 @@ async def print_file_by_path(
 @app.get("/printer-status/{printer_name}")
 async def get_printer_status(printer_name: str, token: str = Depends(verify_token)):
     """获取指定打印机的状态 - 基于硬编码配置"""
-    # 验证打印机是否在配置列表中
     if printer_name not in CONFIGURED_PRINTERS:
         return {
             "success": False,

@@ -3,7 +3,9 @@ import zipfile
 import hashlib
 import json
 import sys
+from collections import deque
 from pathlib import Path
+import shutil
 from flask import current_app
 
 # 强制设置文件系统编码为UTF-8
@@ -24,89 +26,174 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in current_app.config['ALLOWED_EXTENSIONS']
 
-def extract_zip(zip_path, extract_dir):
-    """解压ZIP文件到指定目录，支持中文编码 - 使用pathlib库"""
-    logger = current_app.logger
-    
-    # 安全地记录日志，避免编码问题
+def _zipfile_open_read(zip_path):
+    """打开只读 ZipFile；metadata_encoding 仅 Python 3.11+ 支持。"""
+    if sys.version_info >= (3, 11):
+        return zipfile.ZipFile(zip_path, 'r', metadata_encoding='gbk')
+    return zipfile.ZipFile(zip_path, 'r')
+
+def _zip_member_fs_name(member_name):
+    """
+    ZIP 成员名映射为用于创建本地路径的字符串。
+    3.11+ 由 metadata_encoding='gbk' 已得到正确 Unicode；
+    更早版本对常见「按 CP437 误解码的 GBK 字节」做还原。
+    """
+    if sys.version_info >= (3, 11):
+        return member_name
     try:
-        logger.info(f"开始解压文件: {zip_path} 到 {extract_dir}")
-    except Exception:
-        logger.info("开始解压ZIP文件")
-    
-    # 转换为Path对象
+        return member_name.encode('cp437').decode('gbk')
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        return member_name
+
+def _is_zip_file_name(file_name):
+    """判断文件名是否为ZIP。"""
+    return Path(file_name).suffix.lower() == '.zip'
+
+def _safe_target_path(extract_root, member_name):
+    """
+    生成安全目标路径，防止 Zip Slip 路径穿越。
+    返回 Path 或 None。
+    """
+    safe_member = _zip_member_fs_name(member_name).replace('\\', '/')
+    relative = Path(safe_member)
+    if relative.is_absolute() or '..' in relative.parts:
+        return None
+
+    root_resolved = Path(extract_root).resolve()
+    target = (root_resolved / relative).resolve()
+    if target != root_resolved and root_resolved not in target.parents:
+        return None
+    return target
+
+def _build_nested_extract_dir(zip_file_path):
+    """
+    为子ZIP生成唯一解压目录：xxx.zip -> xxx_unzipped / xxx_unzipped_2 ...
+    """
+    base = zip_file_path.with_suffix('')
+    candidate = Path(f"{base}_unzipped")
+    index = 2
+    while candidate.exists():
+        candidate = Path(f"{base}_unzipped_{index}")
+        index += 1
+    return candidate
+
+def _extract_zip_once(zip_path, extract_dir, logger, max_files_per_zip, max_total_uncompressed, current_total_size):
+    """
+    仅解压一层ZIP，返回(本层解压出的文件Path列表, 本层解压字节数)。
+    """
     extract_path = Path(extract_dir)
     extract_path.mkdir(parents=True, exist_ok=True)
-    
+
+    with _zipfile_open_read(zip_path) as zip_ref:
+        infos = zip_ref.infolist()
+        if len(infos) > max_files_per_zip:
+            raise ValueError(f"ZIP条目过多({len(infos)})，超过限制({max_files_per_zip})")
+
+        extracted_files = []
+        layer_size = 0
+
+        for info in infos:
+            member_name = info.filename
+            # 目录条目跳过
+            if info.is_dir() or member_name.endswith('/'):
+                continue
+
+            target_path = _safe_target_path(extract_path, member_name)
+            if target_path is None:
+                logger.warning("检测到可疑ZIP成员路径，已跳过")
+                continue
+
+            # 预估解压总大小，防止压缩炸弹
+            projected_size = current_total_size + layer_size + max(0, info.file_size)
+            if projected_size > max_total_uncompressed:
+                raise ValueError(
+                    f"解压后总大小将超过限制({max_total_uncompressed} bytes)"
+                )
+
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            with zip_ref.open(member_name) as src, target_path.open('wb') as dst:
+                shutil.copyfileobj(src, dst)
+
+            actual_size = target_path.stat().st_size
+            layer_size += actual_size
+            extracted_files.append(target_path)
+
+    return extracted_files, layer_size
+
+def extract_zip(zip_path, extract_dir):
+    """递归解压ZIP到指定目录（支持子ZIP），并带基础安全限制。"""
+    logger = current_app.logger
+
+    # 可通过配置覆盖
+    max_depth = int(current_app.config.get('ZIP_MAX_NESTED_DEPTH', 5))
+    # <=0 表示不限制ZIP数量
+    max_archives = int(current_app.config.get('ZIP_MAX_ARCHIVES', 0))
+    max_files_per_zip = int(current_app.config.get('ZIP_MAX_FILES_PER_ARCHIVE', 10000))
+    max_total_uncompressed = int(
+        current_app.config.get('ZIP_MAX_TOTAL_UNCOMPRESSED_SIZE', 2 * 1024 * 1024 * 1024)
+    )
+
     try:
-        # 使用GBK编码读取ZIP文件，因为测试发现ZIP文件中的文件名是GBK编码的
-        with zipfile.ZipFile(zip_path, 'r', metadata_encoding='gbk') as zip_ref:
-            # 获取所有文件名列表
-            name_list = zip_ref.namelist()
-            logger.info(f"ZIP文件中包含 {len(name_list)} 个文件")
-            
-            # 首先创建所有必要的目录
-            directories_to_create = set()
-            for file_name in name_list:
-                if file_name.endswith('/'):
-                    # 这是一个目录条目
-                    continue
-                
-                # 获取文件的目录路径
-                file_dir = Path(file_name).parent
-                if file_dir != Path('.'):
-                    directories_to_create.add(str(file_dir))
-            
-            # 创建所有必要的目录
-            for dir_path in directories_to_create:
-                try:
-                    full_dir_path = extract_path / dir_path
-                    full_dir_path.mkdir(parents=True, exist_ok=True)
-                    logger.debug(f"创建目录: {dir_path}")
-                except Exception as e:
-                    logger.warning(f"创建目录失败 {dir_path}: {e}")
-            
-            # 遍历处理每个文件（跳过目录条目）
-            extracted_count = 0
-            for file_name in name_list:
-                # 跳过目录条目
-                if file_name.endswith('/'):
-                    logger.debug(f"跳过目录条目: {file_name}")
-                    continue
-                
-                try:
-                    # 使用GBK编码后，文件名应该已经是正确的中文了
-                    decoded_name = file_name
-                    logger.debug(f"使用GBK编码读取的文件名: {decoded_name}")
-                    
-                    # 提取文件
-                    data = zip_ref.read(file_name)
-                    
-                    # 使用pathlib构建目标路径
-                    target_path = extract_path / decoded_name
-                    
-                    # 写入文件（目录已经创建好了）
-                    target_path.write_bytes(data)
-                    
-                    extracted_count += 1
-                    logger.debug("成功解压文件")
-                        
-                except Exception as e:
-                    # 完全避免在日志中包含可能有问题的文件名
-                    error_msg = str(e)
-                    if 'charmap' in error_msg or 'encode' in error_msg:
-                        logger.error("解压文件时遇到编码问题，跳过此文件")
-                    else:
-                        logger.error(f"解压文件时出错: {error_msg}")
-                    
-                    # 如果单个文件解压失败，继续处理其他文件
-                    continue
-        
-        logger.info(f"文件解压完成，共处理 {extracted_count} 个文件")
+        logger.info(f"开始递归解压ZIP: {zip_path} -> {extract_dir}")
+    except Exception:
+        logger.info("开始递归解压ZIP")
+
+    try:
+        queue = deque([(Path(zip_path), Path(extract_dir), 0)])
+        visited_archives = set()
+        extracted_total_files = 0
+        extracted_total_size = 0
+        processed_archives = 0
+
+        while queue:
+            current_zip, current_extract_dir, depth = queue.popleft()
+            zip_key = str(current_zip.resolve())
+            if zip_key in visited_archives:
+                continue
+            visited_archives.add(zip_key)
+
+            if depth > max_depth:
+                logger.warning(f"跳过超过最大层级的ZIP（depth={depth}, max={max_depth}）")
+                continue
+
+            if max_archives > 0 and processed_archives >= max_archives:
+                raise ValueError(f"ZIP数量超过限制({max_archives})，已中止解压")
+
+            if not current_zip.exists():
+                logger.warning(f"ZIP文件不存在，跳过: {current_zip}")
+                continue
+
+            processed_archives += 1
+            logger.info(f"解压第{processed_archives}个ZIP，层级={depth}: {current_zip}")
+
+            extracted_files, layer_size = _extract_zip_once(
+                current_zip,
+                current_extract_dir,
+                logger,
+                max_files_per_zip,
+                max_total_uncompressed,
+                extracted_total_size
+            )
+            extracted_total_files += len(extracted_files)
+            extracted_total_size += layer_size
+
+            # 发现子ZIP继续入队
+            for extracted_file in extracted_files:
+                if _is_zip_file_name(extracted_file.name):
+                    if depth >= max_depth:
+                        logger.warning(f"发现子ZIP但已达最大层级，跳过: {extracted_file.name}")
+                        continue
+                    nested_extract_dir = _build_nested_extract_dir(extracted_file)
+                    queue.append((extracted_file, nested_extract_dir, depth + 1))
+
+        logger.info(
+            f"递归解压完成，共处理ZIP {processed_archives} 个，解压文件 {extracted_total_files} 个，"
+            f"累计大小 {extracted_total_size} bytes"
+        )
     except Exception as e:
-        logger.error(f"解压ZIP文件时发生错误: {str(e)}")
+        logger.error(f"递归解压ZIP文件时发生错误: {str(e)}")
         raise
-    
+
     return extract_dir
 
 def extract_zip_for_raw_print(zip_path, extract_dir):

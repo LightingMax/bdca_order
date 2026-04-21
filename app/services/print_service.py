@@ -47,10 +47,14 @@ def print_pdf(pdf_path, printer_name=None):
         raise FileNotFoundError(f"找不到文件: {pdf_path}")
     
     try:
-        # 如果未指定打印机，使用默认打印机
+        # 如果未指定打印机，使用环境变量中的默认队列（与 .env / print_api 一致）
         if not printer_name:
             printer_name = Config.DEFAULT_PRINTER_NAME
             logger.debug(f"使用默认打印机: {printer_name}")
+        if not printer_name:
+            msg = "未配置 DEFAULT_PRINTER_NAME，请在项目根目录 .env 中设置与 CUPS 完全一致的队列名"
+            logger.error(msg)
+            raise ValueError(msg)
         
         logger.debug(f"开始直接调用智能打印函数，打印机: {printer_name}")
         

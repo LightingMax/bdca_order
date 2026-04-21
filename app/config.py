@@ -36,8 +36,8 @@ class Config:
     PRINT_API_TOKEN = os.environ.get('PRINT_API_TOKEN') or 'TOKEN_PRINT_API_KEY_9527'
     PRINT_API_TIMEOUT = int(os.environ.get('PRINT_API_TIMEOUT', 30))
     
-    # 默认打印机配置
-    DEFAULT_PRINTER_NAME = os.environ.get('DEFAULT_PRINTER_NAME') or 'HP-LaserJet-MFP-M437-M443'
+    # 默认打印机配置（与 print_api 一致，仅来自环境变量；须与 CUPS 队列名完全一致）
+    DEFAULT_PRINTER_NAME = (os.environ.get('DEFAULT_PRINTER_NAME') or '').strip()
     
     # 打印API端点
     PRINT_API_ENDPOINTS = {
