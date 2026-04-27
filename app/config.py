@@ -21,8 +21,8 @@ class Config:
     # 用户数据文件
     USER_DATA_FILE = os.path.join(DATA_FOLDER, 'user_data.json')
     
-    # 允许上传的文件类型
-    ALLOWED_EXTENSIONS = {'zip'}
+    # 允许上传的文件类型（智能处理）
+    ALLOWED_EXTENSIONS = {'zip', 'pdf'}
     
     # 最大上传文件大小 (50MB)
     MAX_CONTENT_LENGTH = 50 * 1024 * 1024
@@ -31,21 +31,9 @@ class Config:
     UPLOAD_CHUNK_SIZE = 8192  # 8KB块大小
     UPLOAD_TIMEOUT = 300  # 5分钟超时
     
-    # 打印API服务配置
-    PRINT_API_BASE_URL = os.environ.get('PRINT_API_BASE_URL') or 'http://localhost:12346'
-    PRINT_API_TOKEN = os.environ.get('PRINT_API_TOKEN') or 'TOKEN_PRINT_API_KEY_9527'
-    PRINT_API_TIMEOUT = int(os.environ.get('PRINT_API_TIMEOUT', 30))
-    
-    # 默认打印机配置（与 print_api 一致，仅来自环境变量；须与 CUPS 队列名完全一致）
+    # 默认打印机配置（仅来自环境变量；须与 CUPS 队列名完全一致）
     DEFAULT_PRINTER_NAME = (os.environ.get('DEFAULT_PRINTER_NAME') or '').strip()
-    
-    # 打印API端点
-    PRINT_API_ENDPOINTS = {
-        'printers': '/printers',
-        'default_printer': '/default-printer',
-        'print': '/print',
-        'health': '/health'
-    }
+    DEFAULT_MEDIA_SOURCE = (os.environ.get('DEFAULT_MEDIA_SOURCE') or 'auto').strip()
     
     # 通义千问API配置
     QWEN_API_BASE_URL = os.environ.get('QWEN_API_BASE_URL') or 'https://dashscope.aliyuncs.com/compatible-mode/v1'

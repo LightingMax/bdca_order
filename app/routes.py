@@ -1,7 +1,6 @@
 import os
 import uuid
 import datetime
-import requests
 from flask import Blueprint, render_template, request, jsonify, current_app, session, send_from_directory
 from werkzeug.utils import secure_filename
 
@@ -12,6 +11,7 @@ from app.services.file_service import (
 )
 from app.services.pdf_service import process_pdf_files
 from app.services.print_service import print_pdf
+from app.config import Config
 from app.services.user_service import get_user_mac, save_user_data, get_all_user_stats, save_global_stats
 
 main_bp = Blueprint('main', __name__)
@@ -146,9 +146,12 @@ def upload_file():
                             'classification_info': existing_file.get('classification_info', {
                                 'taxi_amount': 0,
                                 'hotel_amount': 0,
+                                'train_amount': 0,
                                 'total_amount': 0,
                                 'taxi_orders': 0,
                                 'hotel_orders': 0,
+                                'train_tickets': 0,
+                                'train_groups': 0,
                                 'taxi_warnings': [],
                                 'hotel_warnings': []
                             })
@@ -159,13 +162,21 @@ def upload_file():
             else:
                 logger.info(f"文件 {filename} 在当前会话中首次上传，将进行处理")
             
-            # 为每个ZIP文件创建单独的提取目录
+            # 为每个上传文件创建单独的提取目录
             file_extract_dir = os.path.join(extract_dir, os.path.splitext(filename)[0])
             os.makedirs(file_extract_dir, exist_ok=True)
             
-            # 解压文件
+            # 处理文件：ZIP 解压 / PDF 直存
             try:
-                extract_zip(zip_path, file_extract_dir)
+                if filename.lower().endswith('.zip'):
+                    extract_zip(zip_path, file_extract_dir)
+                elif filename.lower().endswith('.pdf'):
+                    # 兼容火车票“直接上传 PDF（非 zip）”
+                    import shutil
+                    shutil.copy2(zip_path, os.path.join(file_extract_dir, filename))
+                else:
+                    logger.warning(f"不支持的文件类型，跳过: {filename}")
+                    continue
                 
                 # 处理PDF文件（使用原始文件名进行类型识别）
                 results, xml_missing_warnings, classification_info = process_pdf_files(file_extract_dir, original_filename)
@@ -241,8 +252,11 @@ def upload_file():
         # 计算本次新增的分类统计（包括新处理和重用的文件）
         current_taxi_amount = 0
         current_hotel_amount = 0
+        current_train_amount = 0
         current_taxi_orders = 0
         current_hotel_orders = 0
+        current_train_tickets = 0
+        current_train_groups = 0
         current_taxi_warnings = []
         current_hotel_warnings = []
         
@@ -252,8 +266,11 @@ def upload_file():
                 info = file_result['classification_info']
                 current_taxi_amount += info.get('taxi_amount', 0)
                 current_hotel_amount += info.get('hotel_amount', 0)
+                current_train_amount += info.get('train_amount', 0)
                 current_taxi_orders += info.get('taxi_orders', 0)
                 current_hotel_orders += info.get('hotel_orders', 0)
+                current_train_tickets += info.get('train_tickets', 0)
+                current_train_groups += info.get('train_groups', 0)
                 current_taxi_warnings.extend(info.get('taxi_warnings', []))
                 current_hotel_warnings.extend(info.get('hotel_warnings', []))
         
@@ -261,9 +278,12 @@ def upload_file():
         all_classification_info = {
             'taxi_amount': current_taxi_amount,
             'hotel_amount': current_hotel_amount,
-            'total_amount': current_taxi_amount + current_hotel_amount,
+            'train_amount': current_train_amount,
+            'total_amount': current_taxi_amount + current_hotel_amount + current_train_amount,
             'taxi_orders': current_taxi_orders,
             'hotel_orders': current_hotel_orders,
+            'train_tickets': current_train_tickets,
+            'train_groups': current_train_groups,
             'taxi_warnings': current_taxi_warnings,
             'hotel_warnings': current_hotel_warnings
         }
@@ -277,40 +297,83 @@ def upload_file():
         
         # 返回处理结果
         logger.info(f"文件处理完成，成功处理 {len(all_results)} 个订单，其中新处理 {len(new_results)} 个")
-        logger.info(f"📊 分类统计: 网约车 {all_classification_info['taxi_amount']:.2f}元, 酒店 {all_classification_info['hotel_amount']:.2f}元")
+        logger.info(
+            f"📊 分类统计: 网约车 {all_classification_info['taxi_amount']:.2f}元, "
+            f"酒店 {all_classification_info['hotel_amount']:.2f}元, "
+            f"火车票 {all_classification_info['train_tickets']} 张({all_classification_info['train_groups']} 组), "
+            f"火车金额 {all_classification_info['train_amount']:.2f}元"
+        )
         
         # 计算本次处理的金额（只计算新处理的订单，不包括重用的）
         # 从 new_results 中计算金额，而不是从 processed_files
         current_session_taxi_amount = 0
         current_session_hotel_amount = 0
+        current_session_train_amount = 0
         
         # 方法1：从 new_results 直接计算（最准确）
         for result in new_results:
             amount = result.get('amount', 0)
             order_id = result.get('order_id', '')
             # 判断是网约车还是酒店（根据order_id前缀或文件类型）
-            if order_id.startswith('hotel_'):
+            if result.get('is_train_merged_entry') or result.get('has_train_ticket'):
+                current_session_train_amount += amount
+            elif order_id.startswith('hotel_'):
                 current_session_hotel_amount += amount
             else:
                 current_session_taxi_amount += amount
         
         # 方法2：如果方法1没有金额，尝试从 processed_files 的 classification_info 计算
         # 但只计算新处理的文件，不包括重用的文件
-        if current_session_taxi_amount == 0 and current_session_hotel_amount == 0:
+        if current_session_taxi_amount == 0 and current_session_hotel_amount == 0 and current_session_train_amount == 0:
             for file_result in processed_files:
                 if 'classification_info' in file_result:
                     info = file_result['classification_info']
                     current_session_taxi_amount += info.get('taxi_amount', 0)
                     current_session_hotel_amount += info.get('hotel_amount', 0)
+                    current_session_train_amount += info.get('train_amount', 0)
         
-        current_session_total = current_session_taxi_amount + current_session_hotel_amount
+        current_session_total = current_session_taxi_amount + current_session_hotel_amount + current_session_train_amount
         
-        logger.info(f"📊 本次处理金额计算: 新订单数={len(new_results)}, 网约车={current_session_taxi_amount:.2f}元, 酒店={current_session_hotel_amount:.2f}元, 总计={current_session_total:.2f}元")
+        logger.info(
+            f"📊 本次处理金额计算: 新订单数={len(new_results)}, "
+            f"网约车={current_session_taxi_amount:.2f}元, "
+            f"酒店={current_session_hotel_amount:.2f}元, "
+            f"火车={current_session_train_amount:.2f}元, "
+            f"总计={current_session_total:.2f}元"
+        )
         
-        # 将处理结果保存到session中，供view_trips使用
-        session['processed_files'] = all_results
+        # 将处理结果增量保存到session中（用于会话内记录与查看）
+        session_existing_results = session.get('processed_files', [])
+        merged_results_map = {}
+
+        def _result_dedup_key(item):
+            """构建稳定去重键，避免火车票增量上传时重复计数。"""
+            if item.get('is_train_merged_entry'):
+                return 'train_merged_all'
+            if item.get('has_train_ticket') or str(item.get('combined_type', '')).startswith('train_'):
+                order_id = item.get('order_id', '')
+                pages = item.get('train_ticket_pages') or []
+                page_sig = ','.join(str(p) for p in pages) if pages else 'p1'
+                return f"train::{order_id}::{page_sig}"
+            order_id = item.get('order_id')
+            if order_id:
+                return f"order::{order_id}"
+            return item.get('output_file') or str(uuid.uuid4())
+
+        for item in session_existing_results:
+            merged_results_map[_result_dedup_key(item)] = item
+        for item in all_results:
+            merged_results_map[_result_dedup_key(item)] = item
+
+        # 移除旧的火车票整合条目（上传阶段不自动重建，避免单文件上传被历史状态污染）
+        merged_session_results = [
+            item for item in merged_results_map.values()
+            if not item.get('is_train_merged_entry')
+        ]
+
+        session['processed_files'] = merged_session_results
         session.modified = True
-        logger.info(f"已将 {len(all_results)} 个处理结果保存到session中")
+        logger.info(f"已将处理结果增量保存到session中，当前累计 {len(session['processed_files'])} 个")
         
         return jsonify({
             'success': True,
@@ -330,6 +393,7 @@ def upload_file():
             'current_session': {
                 'taxi_amount': current_session_taxi_amount,
                 'hotel_amount': current_session_hotel_amount,
+                'train_amount': current_session_train_amount,
                 'total_amount': current_session_total,
                 'orders': len(new_results)
             }
@@ -479,7 +543,7 @@ def get_file_type(filename):
 
 @main_bp.route('/api/print-raw', methods=['POST'])
 def print_raw_file():
-    """原始打印文件 - 调用FastAPI打印服务"""
+    """原始打印文件。直接通过 CUPS 提交，不再依赖独立打印服务进程。"""
     logger = current_app.logger
     logger.info("收到原始打印请求")
     
@@ -511,55 +575,24 @@ def print_raw_file():
         
         logger.info(f"找到文件: {file_path}")
         
-        # 直接调用linux_enhanced.py中的函数进行打印
-        try:
-            # 导入智能打印相关函数
-            import sys
-            
-            # 添加项目根目录到Python路径
-            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            sys.path.insert(0, project_root)
-            
-            from print_api_service_linux_enhanced import smart_print_pdf
-            
-            logger.info(f"开始直接调用智能打印函数: {file_path}")
-            
-            # 设置打印选项
-            print_options = {
-                'copies': '1',
-                'tray': 'auto'
-            }
-            
-            # 直接调用智能打印函数
-            success = smart_print_pdf('HP-LaserJet-MFP-M437-M443', file_path, print_options)
-            
-            if success:
-                logger.info(f"打印任务提交成功")
-                return jsonify({
-                    'success': True,
-                    'message': f'文件 {filename} 已发送至打印机',
-                    'printer': 'HP-LaserJet-MFP-M437-M443',
-                    'job_id': 'direct_call'
-                })
-            else:
-                logger.error(f"智能打印函数返回失败")
-                return jsonify({
-                    'success': False,
-                    'message': '智能打印失败'
-                }), 500
-                
-        except ImportError as e:
-            logger.error(f"导入智能打印函数失败: {e}")
-            return jsonify({
-                'success': False,
-                'message': f'智能打印模块导入失败: {str(e)}'
-            }), 500
-        except Exception as e:
-            logger.error(f"智能打印失败: {str(e)}")
-            return jsonify({
-                'success': False,
-                'message': f'智能打印失败: {str(e)}'
-            }), 500
+        printer_name = (data.get('printer_name') or Config.DEFAULT_PRINTER_NAME or '').strip() or None
+        copies = int(data.get('copies', 1))
+        tray = (data.get('tray') or os.environ.get('DEFAULT_MEDIA_SOURCE') or 'auto').strip()
+
+        logger.info(f"开始提交原始打印: {file_path}, printer={printer_name}, copies={copies}, tray={tray}")
+        print_result = print_pdf(
+            file_path,
+            printer_name=printer_name,
+            copies=copies,
+            media_source=tray,
+        )
+        status_code = 200 if print_result.get('success') else 500
+        return jsonify({
+            'success': print_result.get('success', False),
+            'message': print_result.get('message', '打印失败'),
+            'printer': print_result.get('printer', printer_name or '未知打印机'),
+            'job_id': print_result.get('job_id', '')
+        }), status_code
             
     except Exception as e:
         logger.error(f"原始打印文件时出错: {str(e)}", exc_info=True)
@@ -584,25 +617,9 @@ def print_raw_files_batch():
         logger.info(f"批量打印请求: {len(filenames)} 个文件")
         logger.info(f"文件列表: {filenames}")
         
-        # 导入智能打印相关函数
-        try:
-            import sys
-            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            sys.path.insert(0, project_root)
-            from print_api_service_linux_enhanced import smart_print_pdf
-        except ImportError as e:
-            logger.error(f"导入智能打印函数失败: {e}")
-            return jsonify({
-                'success': False,
-                'message': f'智能打印模块导入失败: {str(e)}'
-            }), 500
-        
-        # 打印选项
-        print_options = {
-            'copies': '1',
-            'tray': 'auto'
-        }
-        printer_name = data.get('printer_name', 'HP-LaserJet-MFP-M437-M443')
+        printer_name = (data.get('printer_name') or Config.DEFAULT_PRINTER_NAME or '').strip() or None
+        copies = int(data.get('copies', 1))
+        tray = (data.get('tray') or os.environ.get('DEFAULT_MEDIA_SOURCE') or 'auto').strip()
         
         # 在临时目录中查找所有文件
         temp_folder = current_app.config['TEMP_FOLDER']
@@ -637,28 +654,31 @@ def print_raw_files_batch():
             
             logger.info(f"找到文件: {file_path}，开始打印")
             
-            # 调用智能打印函数
             try:
-                success = smart_print_pdf(printer_name, file_path, print_options)
-                
-                if success:
+                print_result = print_pdf(
+                    file_path,
+                    printer_name=printer_name,
+                    copies=copies,
+                    media_source=tray,
+                )
+                if print_result.get('success'):
                     logger.info(f"文件 {filename} 打印任务提交成功")
                     print_results.append({
                         'filename': filename,
                         'success': True,
-                        'message': f'文件 {filename} 已发送至打印机',
-                        'printer': printer_name,
-                        'job_id': 'direct_call'
+                        'message': print_result.get('message', f'文件 {filename} 已发送至打印机'),
+                        'printer': print_result.get('printer', printer_name),
+                        'job_id': print_result.get('job_id', '')
                     })
                     success_count += 1
                 else:
-                    logger.error(f"文件 {filename} 智能打印函数返回失败")
+                    logger.error(f"文件 {filename} 打印失败: {print_result.get('message')}")
                     print_results.append({
                         'filename': filename,
                         'success': False,
-                        'message': f'文件 {filename} 智能打印失败',
-                        'printer': printer_name,
-                        'job_id': None
+                        'message': print_result.get('message', f'文件 {filename} 打印失败'),
+                        'printer': print_result.get('printer', printer_name),
+                        'job_id': print_result.get('job_id', None)
                     })
                     failed_count += 1
                     
@@ -1035,6 +1055,115 @@ def download_collection():
     except Exception as e:
         logger.error(f"创建下载合集时出错: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'message': f'创建合集时出错: {str(e)}'}), 500
+
+
+@main_bp.route('/api/print-merged', methods=['POST'])
+def print_merged_collection():
+    """将多个处理结果先合并为单个PDF，再一次性提交打印。"""
+    logger = current_app.logger
+    logger.info("收到整合打印请求")
+
+    try:
+        data = request.get_json() or {}
+        processed_files = data.get('processed_files', [])
+        only_train = bool(data.get('only_train', False))
+        collection_name = data.get('collection_name', '整合打印合集')
+
+        if not processed_files:
+            return jsonify({'success': False, 'message': '没有可打印的文件'}), 400
+
+        selected_files = [f for f in processed_files if not f.get('is_train_merged_entry')]
+        if only_train:
+            selected_files = [
+                f for f in selected_files
+                if f.get('has_train_ticket') or str(f.get('combined_type', '')).startswith('train_')
+            ]
+            logger.info(f"整合打印(train-only)筛选结果: {len(selected_files)}/{len(processed_files)}")
+
+        if not selected_files:
+            return jsonify({'success': False, 'message': '未找到可整合的火车票文件'}), 400
+
+        # 优先复用“按火车票布局规则重排”的整合条目，确保跨ZIP不是简单拼接
+        from app.services.pdf_service import create_train_merged_entry, create_download_collection
+        train_merge = create_train_merged_entry(selected_files)
+        if train_merge.get('success'):
+            merged_path = train_merge.get('file_path')
+            merged_filename = train_merge.get('result', {}).get('output_file', '')
+        else:
+            # 非火车场景回退到普通合集
+            merge_result = create_download_collection(selected_files, collection_name)
+            if not merge_result.get('success'):
+                return jsonify({
+                    'success': False,
+                    'message': merge_result.get('message', '整合文件创建失败')
+                }), 500
+            merged_path = merge_result['file_path']
+            merged_filename = merge_result.get('filename', '')
+
+        if not merged_path:
+            return jsonify({
+                'success': False,
+                'message': train_merge.get('message', '整合文件创建失败')
+            }), 500
+
+        print_result = print_pdf(merged_path)
+        ok = bool(print_result.get('success'))
+
+        logger.info(
+            f"整合打印完成: success={ok}, merged={merged_filename}, "
+            f"files={len(selected_files)}, printer={print_result.get('printer', '')}"
+        )
+        return jsonify({
+            'success': ok,
+            'message': print_result.get('message', '整合打印完成'),
+            'printer': print_result.get('printer', '未知打印机'),
+            'job_id': print_result.get('job_id', ''),
+            'merged_file': merged_filename,
+            'file_count': len(selected_files),
+            'train_only': only_train,
+        }), (200 if ok else 500)
+
+    except Exception as e:
+        logger.error(f"整合打印时出错: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'message': f'整合打印时出错: {str(e)}'}), 500
+
+
+@main_bp.route('/api/train-merged-entry', methods=['POST'])
+def train_merged_entry():
+    """生成/刷新火车票整合条目（用于前端结果区预览与单条打印）。"""
+    logger = current_app.logger
+    logger.info("收到火车票整合条目生成请求")
+
+    try:
+        data = request.get_json() or {}
+        request_files = data.get('processed_files', [])
+
+        # 严格基于前端传入的当前列表做整合，避免历史session污染当前批次
+        source_files = [f for f in request_files if not f.get('is_train_merged_entry')]
+        if not source_files:
+            return jsonify({'success': False, 'message': '没有可处理的订单结果'}), 400
+
+        from app.services.pdf_service import create_train_merged_entry
+        merge_result = create_train_merged_entry(source_files)
+        if not merge_result.get('success'):
+            return jsonify({
+                'success': False,
+                'message': merge_result.get('message', '火车票整合条目生成失败')
+            }), 400
+
+        merged_result = merge_result.get('result', {})
+        logger.info(
+            f"火车票整合条目生成成功: output={merged_result.get('output_file')}, "
+            f"tickets={merged_result.get('train_ticket_count')}, pages={merged_result.get('page_count')}"
+        )
+        return jsonify({
+            'success': True,
+            'message': '火车票整合条目生成成功',
+            'result': merged_result,
+        })
+    except Exception as e:
+        logger.error(f"生成火车票整合条目时出错: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'message': f'生成火车票整合条目时出错: {str(e)}'}), 500
 
 
 @main_bp.route('/api/download-file/<token>')

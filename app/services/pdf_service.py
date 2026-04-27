@@ -282,13 +282,21 @@ def extract_amount_from_pdf(pdf_path):
         return 0
 
 def identify_pdf_type(pdf_path):
-    """识别PDF文件类型（行程单、发票或结账单）"""
+    """识别 PDF 文件类型（网约车/酒店/火车票）。"""
     logger = current_app.logger
     try:
         filename = Path(pdf_path).name.lower()
         logger.info(f"正在识别PDF类型: {pdf_path}")
-        
+
+        train_keywords = [
+            '火车', '高铁', '铁路', '动车', '乘车', '车票', '报销凭证', '客票',
+            'china railway', 'railway', 'ticket', '12306'
+        ]
+
         # 通过文件名判断
+        if any(keyword in filename for keyword in train_keywords):
+            logger.info(f"通过文件名识别为火车票: {pdf_path}")
+            return 'train_ticket'
         if '发票' in filename or 'invoice' in filename or 'receipt' in filename:
             logger.info(f"通过文件名识别为发票: {pdf_path}")
             return 'invoice'
@@ -302,7 +310,11 @@ def identify_pdf_type(pdf_path):
         # 通过文件内容判断（简单版）
         reader = PdfReader(pdf_path)
         if len(reader.pages) > 0:
-            text = reader.pages[0].extract_text().lower()
+            text = (reader.pages[0].extract_text() or '').lower()
+            train_no_match = re.search(r'\b[gdcztk]\d{1,4}\b', text, flags=re.IGNORECASE)
+            if any(keyword in text for keyword in train_keywords) or train_no_match:
+                logger.info(f"通过内容识别为火车票: {pdf_path}")
+                return 'train_ticket'
             if '发票' in text or 'invoice' in text or 'receipt' in text:
                 logger.info(f"通过内容识别为发票: {pdf_path}")
                 return 'invoice'
@@ -1156,6 +1168,223 @@ def create_hotel_combined_pdf(invoice_path: str, hotel_bill_path: str, output_pa
         return False
 
 
+def _extract_train_amount_from_text(text):
+    """从火车票文本中提取票面金额。"""
+    if not text:
+        return 0.0
+
+    patterns = [
+        r"[¥￥]\s*(\d+\.\d{1,2})",
+        r"票价[：:\s]*([0-9]+\.[0-9]{1,2})",
+        r"票面金额[：:\s]*([0-9]+\.[0-9]{1,2})",
+        r"价税合计[：:\s]*([0-9]+\.[0-9]{1,2})",
+        r"(\d+\.\d{1,2})\s*元",
+        r"(\d+\.\d{1,2})",
+    ]
+    candidates = []
+    for p in patterns:
+        for m in re.findall(p, text, flags=re.IGNORECASE):
+            try:
+                value = float(m)
+            except Exception:
+                continue
+            if 1 <= value <= 10000:
+                candidates.append(value)
+    return max(candidates) if candidates else 0.0
+
+
+def _extract_train_meta_from_text(text, source_name):
+    """提取火车票基础信息：车次、起终点（尽力而为）。"""
+    if not text:
+        return {"train_no": "", "from_station": "", "to_station": "", "display_name": Path(source_name).stem}
+
+    train_no = ""
+    m_no = re.search(r"\b([GDCZTK]\d{1,4})\b", text, flags=re.IGNORECASE)
+    if m_no:
+        train_no = m_no.group(1).upper()
+
+    from_station = ""
+    to_station = ""
+
+    # 英文站名兜底：如 HuashanbeiG1896 ... Hangzhoudong
+    m_from = re.search(r"\b([A-Za-z]{3,})\s*[GDCZTK]\d{1,4}\b", text)
+    if m_from:
+        from_station = m_from.group(1)
+
+    if train_no:
+        m_to = re.search(rf"\b{re.escape(train_no)}\b.*?\b([A-Za-z]{{3,}})\b", text, flags=re.IGNORECASE | re.DOTALL)
+        if m_to:
+            to_station = m_to.group(1)
+
+    display_name = Path(source_name).stem
+    if train_no:
+        display_name = f"{display_name}-{train_no}"
+    if from_station and to_station and from_station.lower() != to_station.lower():
+        display_name = f"{display_name} ({from_station}→{to_station})"
+
+    return {
+        "train_no": train_no,
+        "from_station": from_station,
+        "to_station": to_station,
+        "display_name": display_name,
+    }
+
+
+def _collect_train_ticket_pages(train_ticket_pdfs):
+    """
+    收集火车票页面级数据（每页视作一张票），并提取每页金额。
+    返回 list[dict(pdf_path, page_no, amount, source_name)]。
+    """
+    logger = current_app.logger
+    pages = []
+    try:
+        import fitz
+        use_fitz = True
+    except Exception:
+        use_fitz = False
+
+    for pdf_path in sorted(train_ticket_pdfs, key=lambda p: Path(p).name):
+        try:
+            if use_fitz:
+                doc = fitz.open(pdf_path)
+                for i in range(len(doc)):
+                    text = doc.load_page(i).get_text() or ""
+                    amount = _extract_train_amount_from_text(text)
+                    meta = _extract_train_meta_from_text(text, Path(pdf_path).name)
+                    pages.append({
+                        "pdf_path": pdf_path,
+                        "page_no": i + 1,
+                        "amount": amount,
+                        "source_name": Path(pdf_path).name,
+                        "train_no": meta["train_no"],
+                        "from_station": meta["from_station"],
+                        "to_station": meta["to_station"],
+                        "display_name": meta["display_name"],
+                    })
+                doc.close()
+            else:
+                reader = PdfReader(pdf_path)
+                for i, page in enumerate(reader.pages):
+                    text = page.extract_text() or ""
+                    amount = _extract_train_amount_from_text(text)
+                    meta = _extract_train_meta_from_text(text, Path(pdf_path).name)
+                    pages.append({
+                        "pdf_path": pdf_path,
+                        "page_no": i + 1,
+                        "amount": amount,
+                        "source_name": Path(pdf_path).name,
+                        "train_no": meta["train_no"],
+                        "from_station": meta["from_station"],
+                        "to_station": meta["to_station"],
+                        "display_name": meta["display_name"],
+                    })
+        except Exception as e:
+            logger.warning(f"火车票页面解析失败: {pdf_path}, err={e}")
+
+    return pages
+
+
+def _split_train_ticket_groups(train_ticket_items):
+    """
+    火车票分页规则（最新业务）：
+    - 每页最多 2 张（上下排）
+    - 1 张票 -> 1 页（单票）
+    - 2 张票 -> 1 页（上下排）
+    - 3 张票 -> 第1页2张 + 第2页1张
+    - N 张票 -> 按 2 张一页拆分，最后可能剩 1 张
+    """
+    sorted_items = sorted(
+        train_ticket_items,
+        key=lambda item: (item["source_name"], item["page_no"])
+    )
+    groups = []
+    i = 0
+    while i < len(sorted_items):
+        remaining = len(sorted_items) - i
+        take = 2 if remaining >= 2 else 1
+        groups.append(sorted_items[i:i + take])
+        i += take
+    return groups
+
+
+def create_train_ticket_layout_pdf(train_ticket_items, output_path):
+    """将火车票按数量智能排版到 A4 页面。"""
+    logger = current_app.logger
+    ticket_count = len(train_ticket_items)
+    if ticket_count == 0:
+        return False
+
+    try:
+        from pdf2image import convert_from_path
+        from PIL import Image
+    except ImportError as e:
+        logger.error(f"❌ 缺少火车票排版依赖: {e}")
+        logger.info("请安装: pip install pdf2image Pillow")
+        return False
+
+    # A4 300DPI
+    A4_WIDTH, A4_HEIGHT = 2480, 3508
+    PAGE_MARGIN = 80
+    CELL_GAP = 40
+
+    if ticket_count == 1:
+        rows, cols = 1, 1
+        layout_type = "train_single"
+    elif ticket_count == 2:
+        rows, cols = 2, 1
+        layout_type = "train_double"
+    else:
+        # 业务上限：每页最多2张。兜底保护，避免错误输入导致2x2。
+        rows, cols = 2, 1
+        layout_type = "train_double_fallback"
+
+    cell_width = (A4_WIDTH - 2 * PAGE_MARGIN - (cols - 1) * CELL_GAP) // cols
+    cell_height = (A4_HEIGHT - 2 * PAGE_MARGIN - (rows - 1) * CELL_GAP) // rows
+    canvas = Image.new("RGB", (A4_WIDTH, A4_HEIGHT), (255, 255, 255))
+
+    logger.info(f"🚆 火车票排版开始: tickets={ticket_count}, layout={layout_type}")
+
+    for idx, ticket_item in enumerate(train_ticket_items):
+        try:
+            ticket_path = ticket_item["pdf_path"]
+            page_no = ticket_item["page_no"]
+            images = convert_from_path(ticket_path, dpi=220, first_page=page_no, last_page=page_no)
+            if not images:
+                logger.warning(f"火车票渲染为空: {ticket_path}#p{page_no}")
+                continue
+            ticket_img = images[0].convert("RGB")
+        except Exception as e:
+            logger.error(f"火车票渲染失败: {ticket_path}, err={e}")
+            continue
+
+        row = idx // cols
+        col = idx % cols
+        if row >= rows:
+            # 理论上不会超过，因为分组已控制
+            break
+
+        # 按单元格等比缩放
+        ratio = min(cell_width / ticket_img.width, cell_height / ticket_img.height)
+        resized = ticket_img.resize(
+            (max(1, int(ticket_img.width * ratio)), max(1, int(ticket_img.height * ratio))),
+            Image.Resampling.LANCZOS,
+        )
+
+        cell_x = PAGE_MARGIN + col * (cell_width + CELL_GAP)
+        cell_y = PAGE_MARGIN + row * (cell_height + CELL_GAP)
+        paste_x = cell_x + (cell_width - resized.width) // 2
+        paste_y = cell_y + (cell_height - resized.height) // 2
+        canvas.paste(resized, (paste_x, paste_y))
+
+    canvas.save(output_path, "PDF", resolution=300.0)
+    if not Path(output_path).exists() or Path(output_path).stat().st_size < 1000:
+        logger.error(f"❌ 火车票排版输出异常: {output_path}")
+        return False
+
+    logger.info(f"✅ 火车票排版成功: {output_path}")
+    return True
+
+
 def process_pdf_files(extract_dir, zip_filename=None):
     """处理解压后的PDF和XML文件"""
     logger = current_app.logger
@@ -1168,21 +1397,42 @@ def process_pdf_files(extract_dir, zip_filename=None):
     # 获取所有文件路径
     file_paths = get_file_paths(extract_dir)
     grouped_files = group_files_by_type(file_paths)
-    
+
+    # 先识别火车票，避免与网约车/酒店混淆
+    train_ticket_pdfs = []
+    non_train_pdfs = []
+    for pdf_path in grouped_files['pdf']:
+        pdf_type = identify_pdf_type(pdf_path)
+        if pdf_type == 'train_ticket':
+            train_ticket_pdfs.append(pdf_path)
+        else:
+            non_train_pdfs.append(pdf_path)
+
+    if train_ticket_pdfs:
+        logger.info(f"🚆 识别到火车票文件 {len(train_ticket_pdfs)} 个")
+    if non_train_pdfs:
+        logger.info(f"🚗/🏨 非火车票 PDF 文件 {len(non_train_pdfs)} 个")
+
+    non_train_grouped = {
+        'pdf': non_train_pdfs,
+        'xml': grouped_files['xml'],
+        'other': grouped_files['other'],
+    }
+
     # 根据ZIP类型选择不同的处理策略
     if zip_type == 'hotel':
         # 住宿记录：使用hash前缀关联文件
-        orders, xml_missing_warnings = match_hotel_files_by_hash(grouped_files['pdf'], grouped_files['xml'], extract_dir)
+        orders, xml_missing_warnings = match_hotel_files_by_hash(non_train_grouped['pdf'], non_train_grouped['xml'], extract_dir)
     else:
         # 打车行程单：使用原有的订单匹配逻辑
-        orders, xml_missing_warnings = match_files_by_order(grouped_files['pdf'], grouped_files['xml'])
+        orders, xml_missing_warnings = match_files_by_order(non_train_grouped['pdf'], non_train_grouped['xml'])
         # 特殊处理：如果发现华住酒店文件，尝试智能匹配
         orders = smart_match_hotel_files(orders, extract_dir)
         
         # 如果ZIP类型是unknown但包含华住酒店文件，也尝试酒店匹配
-        if zip_type == 'unknown' and any('dzfp_' in Path(pdf).name for pdf in grouped_files['pdf']):
+        if zip_type == 'unknown' and any('dzfp_' in Path(pdf).name for pdf in non_train_grouped['pdf']):
             logger.info("🔍 检测到华住酒店发票，尝试酒店文件匹配")
-            hotel_orders, hotel_warnings = match_hotel_files_by_hash(grouped_files['pdf'], grouped_files['xml'], extract_dir)
+            hotel_orders, hotel_warnings = match_hotel_files_by_hash(non_train_grouped['pdf'], non_train_grouped['xml'], extract_dir)
             if hotel_orders:
                 logger.info(f"✅ 成功匹配到 {len(hotel_orders)} 个酒店订单")
                 orders.update(hotel_orders)
@@ -1288,7 +1538,74 @@ def process_pdf_files(extract_dir, zip_filename=None):
         except Exception as e:
             logger.error(f"处理订单 {order_id} 时出错: {str(e)}")
     
-    logger.info(f"所有订单处理完成，成功处理 {len(results)} 个订单")
+    # 处理火车票：严格独立于网约车/酒店逻辑
+    train_ticket_items = _collect_train_ticket_pages(train_ticket_pdfs)
+    train_ticket_count = len(train_ticket_items)
+    train_group_count = 0
+    train_amount = 0.0
+    if train_ticket_count > 0:
+        train_groups = _split_train_ticket_groups(train_ticket_items)
+        train_group_count = len(train_groups)
+        logger.info(f"🚆 火车票分组完成: total={train_ticket_count}, groups={train_group_count}")
+
+        for group_index, ticket_group in enumerate(train_groups, start=1):
+            output_filename = f"train_{group_index}_{uuid.uuid4().hex[:8]}.pdf"
+            output_path = Path(current_app.config['OUTPUT_FOLDER']) / output_filename
+            ok = create_train_ticket_layout_pdf(ticket_group, output_path)
+            if not ok:
+                logger.error(f"❌ 火车票组 {group_index} 排版失败")
+                continue
+
+            group_size = len(ticket_group)
+            group_amount = round(sum(item.get("amount", 0.0) for item in ticket_group), 2)
+            train_amount += group_amount
+            if group_size == 1:
+                combined_type = 'train_single'
+            else:
+                combined_type = 'train_double'
+
+            # 订单名优先使用 zip/pdf 名；单票可直接显示来源，分组显示组名
+            if group_size == 1:
+                source = ticket_group[0]
+                order_id = Path(source.get("source_name", f"train_{group_index}")).stem
+            else:
+                order_id = f"train_group_{group_index}"
+
+            # 组内行程展示：优先 from->to，否则用 display_name
+            route_parts = []
+            for item in ticket_group:
+                frm = (item.get("from_station") or "").strip()
+                to = (item.get("to_station") or "").strip()
+                tno = (item.get("train_no") or "").strip()
+                if frm and to and frm.lower() != to.lower():
+                    segment = f"{frm}→{to}"
+                    if tno:
+                        segment = f"{segment}({tno})"
+                    route_parts.append(segment)
+                elif item.get("display_name"):
+                    route_parts.append(item.get("display_name"))
+
+            results.append({
+                'order_id': order_id,
+                'amount': group_amount,
+                'output_file': output_filename,
+                'has_itinerary': False,
+                'has_invoice': False,
+                'has_hotel_bill': False,
+                'has_train_ticket': True,
+                'train_ticket_count': group_size,
+                'train_ticket_files': [item.get("source_name") for item in ticket_group],
+                'train_ticket_pages': [item.get("page_no") for item in ticket_group],
+                'train_routes': route_parts,
+                'train_ticket_items': ticket_group,
+                'page_count': 1,
+                'combined_type': combined_type,
+            })
+            logger.info(
+                f"✅ 火车票组 {group_index} 处理成功: tickets={group_size}, amount={group_amount:.2f}, layout={combined_type}, out={output_filename}"
+            )
+
+    logger.info(f"所有订单处理完成，成功处理 {len(results)} 个订单/批次")
     
     # 分类统计金额和警告
     taxi_amount = 0
@@ -1315,7 +1632,8 @@ def process_pdf_files(extract_dir, zip_filename=None):
     logger.info(f"📊 金额统计结果:")
     logger.info(f"   🚗 网约车总金额: {taxi_amount:.2f}元 ({len([order_id for order_id in orders.keys() if not order_id.startswith('hotel_')])}个订单)")
     logger.info(f"   🏨 酒店总金额: {hotel_amount:.2f}元 ({len([order_id for order_id in orders.keys() if order_id.startswith('hotel_')])}个订单)")
-    logger.info(f"   💰 总金额: {taxi_amount + hotel_amount:.2f}元")
+    logger.info(f"   🚆 火车票总金额: {train_amount:.2f}元 ({train_ticket_count}张)")
+    logger.info(f"   💰 总金额: {taxi_amount + hotel_amount + train_amount:.2f}元")
     
     # 记录分类警告
     if taxi_warnings:
@@ -1332,9 +1650,12 @@ def process_pdf_files(extract_dir, zip_filename=None):
     classification_info = {
         'taxi_amount': taxi_amount,
         'hotel_amount': hotel_amount,
-        'total_amount': taxi_amount + hotel_amount,
+        'train_amount': round(train_amount, 2),
+        'total_amount': round(taxi_amount + hotel_amount + train_amount, 2),
         'taxi_orders': len([order_id for order_id in orders.keys() if not order_id.startswith('hotel_')]),
         'hotel_orders': len([order_id for order_id in orders.keys() if order_id.startswith('hotel_')]),
+        'train_tickets': train_ticket_count,
+        'train_groups': train_group_count,
         'taxi_warnings': taxi_warnings,
         'hotel_warnings': hotel_warnings
     }
@@ -1503,6 +1824,154 @@ def create_download_collection(processed_files, collection_name="报销单据合
             'success': False,
             'message': f'创建合集时出错: {str(e)}'
         }
+
+
+def create_train_merged_entry(processed_files, merged_name_prefix="火车票整合预览"):
+    """
+    从已处理结果中生成“跨ZIP火车票整合条目”。
+    规则：
+    - 聚合所有火车票条目（支持增量）
+    - 按 1/2/4 张规则重新布局
+    - 输出一个可预览/可打印的合并PDF
+    """
+    logger = current_app.logger
+    output_folder = current_app.config['OUTPUT_FOLDER']
+
+    # 收集所有火车票明细项
+    merged_items = []
+    seen_item_keys = set()
+
+    def _train_item_key(item):
+        """
+        火车票条目判重键（不要包含临时路径）。
+        以票面语义信息为主，避免同一张票在不同上传会话被重复计入。
+        """
+        source_name = str(item.get('source_name', '') or '').strip().lower()
+        page_no = int(item.get('page_no', 1) or 1)
+        train_no = str(item.get('train_no', '') or '').strip().upper()
+        from_station = str(item.get('from_station', '') or '').strip().lower()
+        to_station = str(item.get('to_station', '') or '').strip().lower()
+        amount = f"{float(item.get('amount', 0) or 0):.2f}"
+
+        # 优先用来源名+页码，通常已足够稳定（你的样例就是订单号.pdf）
+        if source_name:
+            return ("src", source_name, page_no)
+
+        # 来源名缺失时退化到语义指纹
+        return ("sig", train_no, from_station, to_station, amount, page_no)
+    for file_info in processed_files:
+        if not (file_info.get('has_train_ticket') or str(file_info.get('combined_type', '')).startswith('train_')):
+            continue
+
+        items = file_info.get('train_ticket_items') or []
+        if items:
+            for item in items:
+                key = _train_item_key(item)
+                if key in seen_item_keys:
+                    continue
+                seen_item_keys.add(key)
+                merged_items.append(item)
+            continue
+
+        # 兜底：旧结果没有 train_ticket_items 时，至少把其输出页作为一个票项参与合并
+        output_file = file_info.get('output_file')
+        if output_file:
+            fallback_item = {
+                'pdf_path': os.path.join(output_folder, output_file),
+                'page_no': 1,
+                'amount': float(file_info.get('amount', 0) or 0),
+                'source_name': output_file,
+                'train_no': '',
+                'from_station': '',
+                'to_station': '',
+                'display_name': Path(output_file).stem,
+            }
+            key = _train_item_key(fallback_item)
+            if key not in seen_item_keys:
+                seen_item_keys.add(key)
+                merged_items.append(fallback_item)
+
+    if len(merged_items) <= 1:
+        return {
+            'success': False,
+            'message': '火车票条目不足，至少需要2张才能生成整合条目'
+        }
+
+    groups = _split_train_ticket_groups(merged_items)
+    import tempfile
+    from datetime import datetime
+
+    tmp_files = []
+    merged_filename = f"train_merged_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}.pdf"
+    merged_path = os.path.join(output_folder, merged_filename)
+
+    try:
+        # 每个group生成一页，再合并成多页PDF
+        for idx, group in enumerate(groups, start=1):
+            tmp_path = os.path.join(tempfile.gettempdir(), f"train_group_{idx}_{uuid.uuid4().hex[:8]}.pdf")
+            ok = create_train_ticket_layout_pdf(group, tmp_path)
+            if not ok:
+                logger.error(f"火车票整合预览：第{idx}组布局失败")
+                return {'success': False, 'message': f'第{idx}组布局失败'}
+            tmp_files.append(tmp_path)
+
+        writer = PdfWriter()
+        for tp in tmp_files:
+            reader = PdfReader(tp)
+            for page in reader.pages:
+                writer.add_page(page)
+        with open(merged_path, 'wb') as f:
+            writer.write(f)
+
+        if (not os.path.exists(merged_path)) or os.path.getsize(merged_path) < 1000:
+            return {'success': False, 'message': '整合文件生成失败或为空'}
+
+        total_amount = round(sum(float(i.get('amount', 0) or 0) for i in merged_items), 2)
+        route_parts = []
+        for item in merged_items:
+            frm = (item.get("from_station") or "").strip()
+            to = (item.get("to_station") or "").strip()
+            tno = (item.get("train_no") or "").strip()
+            if frm and to and frm.lower() != to.lower():
+                seg = f"{frm}→{to}"
+                if tno:
+                    seg = f"{seg}({tno})"
+                route_parts.append(seg)
+            elif item.get("display_name"):
+                route_parts.append(item.get("display_name"))
+
+        merged_result = {
+            'order_id': 'train_merged_all',
+            'amount': total_amount,
+            'output_file': merged_filename,
+            'has_itinerary': False,
+            'has_invoice': False,
+            'has_hotel_bill': False,
+            'has_train_ticket': True,
+            'is_train_merged_entry': True,
+            'train_ticket_count': len(merged_items),
+            'train_group_count': len(groups),
+            'train_routes': route_parts[:30],
+            'page_count': len(groups),
+            'combined_type': 'train_merged_all',
+        }
+
+        return {
+            'success': True,
+            'message': '火车票整合条目生成成功',
+            'result': merged_result,
+            'file_path': merged_path,
+        }
+    except Exception as e:
+        logger.error(f"生成火车票整合条目失败: {e}", exc_info=True)
+        return {'success': False, 'message': f'生成失败: {str(e)}'}
+    finally:
+        for tp in tmp_files:
+            try:
+                if os.path.exists(tp):
+                    os.remove(tp)
+            except Exception:
+                pass
 
 
 def extract_trip_info_from_itinerary(pdf_path):

@@ -1,23 +1,22 @@
 # 解释器: Python 3.12+（pip 不读取此行；创建环境请用 python=3.12）
+# Web 应用
 Flask==2.0.1
 Flask-Cors==3.0.10
+Werkzeug==2.0.1
+python-dotenv==0.19.0
+
+# 业务与文件处理
 PyPDF2==2.12.1
 pikepdf==9.10.2
-getmac==0.8.3
-python-dotenv==0.19.0
-Werkzeug==2.0.1
 reportlab==3.6.12
-# 打印API服务依赖
-fastapi==0.104.1
-uvicorn==0.24.0
-# 测试工具依赖
+getmac==0.8.3
 requests==2.31.0
-# Linux打印支持
+
+# Linux CUPS 打印（容器瘦客户端）
 pycups==2.0.1
-# PDF 处理（pdf_service 使用）
+
+# PDF 解析 / 渲染（网约车 + 火车票智能排版）
 pdfplumber==0.11.4
 PyMuPDF==1.24.10
 pdf2image==1.17.0
 Pillow>=10.0.0
-# Windows打印支持
-# pywin32==306

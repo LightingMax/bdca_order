@@ -1,53 +1,53 @@
 import os
-import platform
+import re
+import shutil
 import subprocess
-import requests
-import tempfile
 from flask import current_app
 from app.config import Config
-from app.services.config_service import ConfigService
 
 def get_available_printers():
-    """获取系统可用的打印机列表"""
+    """通过 CUPS 客户端命令获取可用打印机列表。"""
     logger = current_app.logger
-    logger.info("正在获取可用打印机列表")
-    
+    logger.info("正在通过 lpstat 获取可用打印机列表")
+
     try:
-        # 通过配置服务获取API配置
-        api_url = ConfigService.get_print_api_url('printers')
-        headers = ConfigService.get_auth_headers()
-        
-        logger.debug(f"正在请求打印机API: {api_url}")
-        response = requests.get(api_url, headers=headers)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if data["success"]:
-                printers = data["printers"]
-                logger.info(f"通过API找到 {len(printers)} 个打印机")
-                return printers
-            else:
-                logger.warning(f"API返回错误: {data['message']}")
-                return []
-        else:
-            logger.error(f"API请求失败，状态码: {response.status_code}")
+        if shutil.which("lpstat") is None:
+            logger.error("系统未找到 lpstat 命令，请安装 cups-client")
             return []
-            
+
+        result = subprocess.run(
+            ["lpstat", "-p"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            logger.error(f"lpstat 执行失败: {result.stderr.strip()}")
+            return []
+
+        printers = []
+        pattern = re.compile(r"^printer\s+(\S+)\s", re.IGNORECASE)
+        for line in result.stdout.splitlines():
+            match = pattern.match(line.strip())
+            if match:
+                printers.append(match.group(1))
+
+        logger.info(f"通过 CUPS 找到 {len(printers)} 个打印机")
+        return printers
     except Exception as e:
         logger.error(f"获取打印机列表出错: {str(e)}", exc_info=True)
         return []
 
-def print_pdf(pdf_path, printer_name=None):
-    """打印PDF文件 - 直接调用linux_enhanced.py中的函数"""
+def print_pdf(pdf_path, printer_name=None, copies=1, media_source=None):
+    """通过 lp 命令提交 PDF 打印任务。"""
     logger = current_app.logger
     logger.info(f"开始打印PDF文件: {pdf_path}")
-    
+
     if not os.path.exists(pdf_path):
         logger.error(f"找不到文件: {pdf_path}")
         raise FileNotFoundError(f"找不到文件: {pdf_path}")
-    
+
     try:
-        # 如果未指定打印机，使用环境变量中的默认队列（与 .env / print_api 一致）
         if not printer_name:
             printer_name = Config.DEFAULT_PRINTER_NAME
             logger.debug(f"使用默认打印机: {printer_name}")
@@ -55,39 +55,41 @@ def print_pdf(pdf_path, printer_name=None):
             msg = "未配置 DEFAULT_PRINTER_NAME，请在项目根目录 .env 中设置与 CUPS 完全一致的队列名"
             logger.error(msg)
             raise ValueError(msg)
-        
-        logger.debug(f"开始直接调用智能打印函数，打印机: {printer_name}")
-        
-        # 直接调用linux_enhanced.py中的函数进行打印
-        import sys
-        
-        # 添加项目根目录到Python路径
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        sys.path.insert(0, project_root)
-        
-        from print_api_service_linux_enhanced import smart_print_pdf
-        
-        # 设置打印选项
-        print_options = {
-            'copies': '1',
-            'tray': 'auto'
-        }
-        
-        # 直接调用智能打印函数
-        success = smart_print_pdf(printer_name, pdf_path, print_options)
-        
-        if success:
-            logger.info(f"打印任务已提交")
-            return {"success": True, "printer": printer_name, "job_id": "direct_call"}
-        else:
-            error_msg = "智能打印函数返回失败"
+
+        if shutil.which("lp") is None:
+            error_msg = "系统未找到 lp 命令，请安装 cups-client"
             logger.error(error_msg)
-            raise Exception(error_msg)
-    
-    except ImportError as e:
-        error_msg = f"导入智能打印函数失败: {e}"
-        logger.error(error_msg)
-        return {"success": False, "message": error_msg}
+            return {"success": False, "message": error_msg}
+
+        copies_value = str(max(1, int(copies)))
+        tray = (media_source or os.environ.get("DEFAULT_MEDIA_SOURCE") or "auto").strip()
+
+        cmd = ["lp", "-d", printer_name, "-n", copies_value]
+        if tray:
+            cmd.extend(["-o", f"media-source={tray}"])
+        cmd.append(pdf_path)
+
+        logger.info(f"执行打印命令: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            err = result.stderr.strip() or result.stdout.strip() or "未知错误"
+            logger.error(f"lp 提交失败: {err}")
+            return {"success": False, "message": f"lp 提交失败: {err}"}
+
+        # 常见输出: request id is HP_M437_ULD-123 (1 file(s))
+        output = (result.stdout or "").strip()
+        job_id = ""
+        match = re.search(r"request id is\s+(\S+)", output, re.IGNORECASE)
+        if match:
+            job_id = match.group(1)
+
+        logger.info(f"打印任务已提交，job_id={job_id or 'unknown'}")
+        return {
+            "success": True,
+            "printer": printer_name,
+            "job_id": job_id,
+            "message": output or "打印任务已提交",
+        }
     except Exception as e:
         logger.error(f"打印PDF出错: {str(e)}", exc_info=True)
         return {"success": False, "message": str(e)}
