@@ -1154,7 +1154,8 @@ def train_merged_entry():
         merged_result = merge_result.get('result', {})
         logger.info(
             f"火车票整合条目生成成功: output={merged_result.get('output_file')}, "
-            f"tickets={merged_result.get('train_ticket_count')}, pages={merged_result.get('page_count')}"
+            f"tickets={merged_result.get('train_ticket_count')}, pages={merged_result.get('page_count')}, "
+            f"order={merged_result.get('train_merge_order')}"
         )
         return jsonify({
             'success': True,

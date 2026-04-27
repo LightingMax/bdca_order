@@ -495,6 +495,29 @@
             margin-left: 8px;
             vertical-align: middle;
         }
+        .train-sortable-item {
+            cursor: grab;
+            transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+        }
+        .train-sortable-item:active {
+            cursor: grabbing;
+        }
+        .train-sortable-item.dragging {
+            opacity: 0.55;
+            transform: scale(0.98);
+            border-color: #198754;
+            box-shadow: 0 10px 22px rgba(25,135,84,0.18);
+        }
+        .train-sortable-item.drag-over {
+            border-top: 3px solid #198754;
+            transform: translateY(4px);
+        }
+        .train-drag-handle {
+            color: #6c757d;
+            cursor: grab;
+            margin-right: 8px;
+            user-select: none;
+        }
         
         /* 现代化移除按钮 - 保持美观样式 */
         .modern-remove-btn {
@@ -1003,6 +1026,333 @@
             // ==================== 数据管理 ====================
             // 智能处理的数据
             let processedFiles = [];
+            let trainMergedRefreshing = false;
+            let pendingTrainMergeRefresh = null;
+            let trainMergeRefreshSeq = 0;
+
+            function getResultKey(result) {
+                return result.output_file || result.order_id || '';
+            }
+
+            function isTrainResult(result) {
+                const combinedType = result.combined_type || '';
+                return result.has_train_ticket === true || combinedType.startsWith('train_');
+            }
+
+            function getNonMergedTrainFiles() {
+                return processedFiles.filter(item => isTrainResult(item) && !item.is_train_merged_entry);
+            }
+
+            function getTrainTicketCount(files) {
+                return files.reduce((sum, item) => {
+                    const itemCount = Array.isArray(item.train_ticket_items) && item.train_ticket_items.length > 0
+                        ? item.train_ticket_items.length
+                        : (item.train_ticket_count || 1);
+                    return sum + itemCount;
+                }, 0);
+            }
+
+            function withTrainSortIndex(file, index) {
+                const sortedFile = { ...file, train_sort_index: index };
+                if (Array.isArray(file.train_ticket_items)) {
+                    sortedFile.train_ticket_items = file.train_ticket_items.map((item, itemIndex) => ({
+                        ...item,
+                        train_sort_index: index * 1000 + itemIndex
+                    }));
+                }
+                return sortedFile;
+            }
+
+            async function refreshTrainMergedEntry(options = {}) {
+                const { renderAfter = true, notify = false, orderedTrainFiles = null } = options;
+                if (trainMergedRefreshing) {
+                    pendingTrainMergeRefresh = {
+                        renderAfter,
+                        notify,
+                        orderedTrainFiles: orderedTrainFiles ? orderedTrainFiles.map(file => ({ ...file })) : null
+                    };
+                    processedFiles = processedFiles.filter(item => !item.is_train_merged_entry);
+                    if (renderAfter) {
+                        renderOrdersSection(0);
+                    }
+                    console.log('🚆 火车票整合请求进行中，已记录最新排序等待刷新');
+                    return;
+                }
+
+                const nonMergedTrainFiles = (orderedTrainFiles || getNonMergedTrainFiles()).map(withTrainSortIndex);
+                const trainTicketCount = getTrainTicketCount(nonMergedTrainFiles);
+                processedFiles = processedFiles.filter(item => !item.is_train_merged_entry);
+                const refreshSeq = ++trainMergeRefreshSeq;
+
+                if (trainTicketCount <= 1) {
+                    if (renderAfter) {
+                        renderOrdersSection(0);
+                    }
+                    return;
+                }
+
+                trainMergedRefreshing = true;
+                try {
+                    console.log('🚆 开始生成火车票整合条目:', {
+                        refreshSeq,
+                        order: nonMergedTrainFiles.map(item => ({
+                            order_id: item.order_id,
+                            output_file: item.output_file,
+                            train_sort_index: item.train_sort_index,
+                            amount: item.amount
+                        }))
+                    });
+                    const mergedResp = await fetch('/api/train-merged-entry', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ processed_files: nonMergedTrainFiles })
+                    });
+                    const mergedData = await mergedResp.json();
+                    if (mergedData.success && mergedData.result) {
+                        if (pendingTrainMergeRefresh) {
+                            console.log('🚆 发现更新的拖拽顺序，跳过当前旧整合结果:', refreshSeq);
+                        } else {
+                            processedFiles = processedFiles.filter(item => !item.is_train_merged_entry);
+                            processedFiles.push(mergedData.result);
+                            console.log('🚆 火车票整合条目已更新:', {
+                                refreshSeq,
+                                output_file: mergedData.result.output_file,
+                                routes: mergedData.result.train_routes,
+                                merge_order: mergedData.result.train_merge_order
+                            });
+                            if (notify) {
+                                showNotification('火车票整合顺序已更新', 'success');
+                            }
+                        }
+                    } else if (notify) {
+                        showNotification('火车票整合更新失败: ' + (mergedData.message || '未知错误'), 'error');
+                    }
+                } catch (mergeErr) {
+                    console.warn('⚠️ 获取火车票整合条目失败:', mergeErr);
+                    if (notify) {
+                        showNotification('火车票整合更新失败: ' + (mergeErr.message || '请求失败'), 'error');
+                    }
+                } finally {
+                    trainMergedRefreshing = false;
+                    if (renderAfter) {
+                        renderOrdersSection(0);
+                    }
+                    if (pendingTrainMergeRefresh) {
+                        const nextRefresh = pendingTrainMergeRefresh;
+                        pendingTrainMergeRefresh = null;
+                        setTimeout(() => refreshTrainMergedEntry(nextRefresh), 0);
+                    }
+                }
+            }
+
+            function getOrderCategory(result) {
+                if (isTrainResult(result)) {
+                    return 'train';
+                }
+                if (result.has_flight_ticket || (result.combined_type || '').startsWith('flight_')) {
+                    return 'flight';
+                }
+                return 'taxi';
+            }
+
+            function categoryTitle(category) {
+                if (category === 'train') return '🚆 火车票订单处理结果';
+                if (category === 'flight') return '✈️ 机票订单处理结果';
+                return '🚗 网约车订单处理结果';
+            }
+
+            function buildOrderStatus(result) {
+                if (result.has_train_ticket) return '<span class="text-success">✓ 火车票</span>';
+                if (result.has_itinerary && result.has_invoice) return '<span class="text-success">✓ 完整</span>';
+                if (result.has_itinerary || result.has_invoice) return '<span class="text-warning">⚠ 部分</span>';
+                return '<span class="text-danger">✗ 无文件</span>';
+            }
+
+            function buildOrderDetailLine(result) {
+                if (result.has_train_ticket) {
+                    const ticketCount = result.train_ticket_count || 0;
+                    const routeText = (result.train_routes && result.train_routes.length > 0)
+                        ? result.train_routes.join('；')
+                        : '行程信息待识别';
+                    return `车票: ${ticketCount} 张 | 布局: ${result.combined_type || 'train_single'} | 行程: ${routeText}`;
+                }
+                const itineraryLabel = result.has_hotel_bill ? '结账单' : '行程单';
+                const itineraryValue = result.has_hotel_bill ? '有' : (result.has_itinerary ? '有' : '无');
+                return `${itineraryLabel}: ${itineraryValue} | 发票: ${result.has_invoice ? '有' : '无'}`;
+            }
+
+            function renderOrdersSection(newFilesCount = 0) {
+                let ordersDiv = document.getElementById('orders-section');
+                if (!ordersDiv) {
+                    ordersDiv = document.createElement('div');
+                    ordersDiv.id = 'orders-section';
+                    ordersDiv.className = 'animate-fade-in';
+                    ordersDiv.style.animationDelay = '0.3s';
+                    resultList.appendChild(ordersDiv);
+                }
+                ordersDiv.innerHTML = '<h5>订单处理结果</h5>';
+
+                const newOrdersGroup = document.createElement('div');
+                newOrdersGroup.className = 'mb-3 animate-fade-in';
+                newOrdersGroup.style.animationDelay = '0.2s';
+
+                const groupTitle = document.createElement('div');
+                groupTitle.className = 'text-muted mb-2';
+                groupTitle.innerHTML = `<small>📁 当前累计 (${processedFiles.length} 个条目，本次新增 ${newFilesCount} 个)</small>`;
+                newOrdersGroup.appendChild(groupTitle);
+
+                const grouped = { taxi: [], train: [], flight: [] };
+                processedFiles.forEach((result) => {
+                    const category = getOrderCategory(result);
+                    grouped[category].push(result);
+                });
+
+                let globalIndex = 0;
+                ['taxi', 'train', 'flight'].forEach((category) => {
+                    let list = grouped[category];
+                    if (!list || list.length === 0) return;
+
+                    if (category === 'train') {
+                        list = [
+                            ...list.filter(item => item.is_train_merged_entry),
+                            ...list.filter(item => !item.is_train_merged_entry)
+                        ];
+                    }
+
+                    const section = document.createElement('div');
+                    section.className = 'mb-2';
+                    section.innerHTML = `<div class="fw-semibold mb-2">${categoryTitle(category)} (${list.length})</div>`;
+                    if (category === 'train') {
+                        section.classList.add('train-sortable-section');
+                    }
+
+                    list.forEach((result) => {
+                        const fileItem = document.createElement('div');
+                        fileItem.className = 'file-item animate-slide-in';
+                        const resultKey = getResultKey(result);
+                        fileItem.dataset.resultKey = resultKey;
+                        if (result.is_train_merged_entry) {
+                            fileItem.classList.add('train-merged-item');
+                        } else if (category === 'train') {
+                            fileItem.classList.add('train-sortable-item');
+                            fileItem.draggable = true;
+                        }
+                        fileItem.style.animationDelay = (0.3 + globalIndex * 0.08) + 's';
+                        globalIndex += 1;
+
+                        let safeOrderData;
+                        try {
+                            safeOrderData = JSON.stringify(result).replace(/'/g, "&apos;").replace(/"/g, "&quot;");
+                        } catch (e) {
+                            console.error('❌ 订单 JSON 序列化失败:', e);
+                            safeOrderData = '{}';
+                        }
+
+                        const amountValue = Number(result.amount || 0).toFixed(2);
+                        const detailLine = buildOrderDetailLine(result);
+                        let statusIcon = buildOrderStatus(result);
+                        if (result.is_train_merged_entry) {
+                            statusIcon += '<span class="train-merged-badge">整合条目</span>';
+                        }
+                        const dragHandle = category === 'train' && !result.is_train_merged_entry
+                            ? '<span class="train-drag-handle" title="拖拽调整火车票拼接顺序">☰</span>'
+                            : '';
+
+                        fileItem.innerHTML = `
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong>${dragHandle}订单 ${result.order_id}</strong> ${statusIcon}<br>
+                                    <small class="text-muted">金额: ¥${amountValue}</small><br>
+                                    <small class="text-muted">${detailLine}</small>
+                                </div>
+                                <div>
+                                    <button class="btn btn-sm btn-outline-primary preview-btn" data-order='${safeOrderData}'>预览</button>
+                                    <button class="btn btn-sm btn-outline-success print-btn" data-file="${result.output_file}">打印</button>
+                                </div>
+                            </div>
+                        `;
+                        section.appendChild(fileItem);
+                    });
+
+                    newOrdersGroup.appendChild(section);
+                });
+
+                ordersDiv.appendChild(newOrdersGroup);
+                bindPrintButtons();
+                attachTrainDragSortHandlers();
+            }
+
+            function bindPrintButtons() {
+                document.querySelectorAll('.print-btn').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        const filename = this.getAttribute('data-file');
+                        printFile(filename);
+                    });
+                });
+
+                document.querySelectorAll('.reprint-btn:not([data-bound="true"])').forEach(function(btn) {
+                    btn.dataset.bound = 'true';
+                    btn.addEventListener('click', function() {
+                        const fileHash = this.getAttribute('data-hash');
+                        const filename = this.getAttribute('data-filename');
+                        reprintFile(fileHash, filename);
+                    });
+                });
+            }
+
+            function attachTrainDragSortHandlers() {
+                const trainSection = document.querySelector('.train-sortable-section');
+                if (!trainSection) return;
+
+                trainSection.querySelectorAll('.train-sortable-item').forEach(item => {
+                    item.addEventListener('dragstart', (e) => {
+                        item.classList.add('dragging');
+                        e.dataTransfer.effectAllowed = 'move';
+                        e.dataTransfer.setData('text/plain', item.dataset.resultKey || '');
+                    });
+
+                    item.addEventListener('dragend', () => {
+                        item.classList.remove('dragging');
+                        trainSection.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+                        syncTrainOrderFromDom(trainSection);
+                    });
+
+                    item.addEventListener('dragover', (e) => {
+                        e.preventDefault();
+                        const dragging = trainSection.querySelector('.dragging');
+                        if (!dragging || dragging === item) return;
+
+                        const box = item.getBoundingClientRect();
+                        const insertAfter = e.clientY > box.top + box.height / 2;
+                        item.classList.add('drag-over');
+                        if (insertAfter) {
+                            item.after(dragging);
+                        } else {
+                            item.before(dragging);
+                        }
+                    });
+
+                    item.addEventListener('dragleave', () => {
+                        item.classList.remove('drag-over');
+                    });
+                });
+            }
+
+            function syncTrainOrderFromDom(trainSection) {
+                const orderedKeys = Array.from(trainSection.querySelectorAll('.train-sortable-item'))
+                    .map(item => item.dataset.resultKey)
+                    .filter(Boolean);
+                if (orderedKeys.length <= 1) return;
+
+                const orderMap = new Map(orderedKeys.map((key, index) => [key, index]));
+                const trainFiles = getNonMergedTrainFiles().sort((a, b) => {
+                    return (orderMap.get(getResultKey(a)) ?? 9999) - (orderMap.get(getResultKey(b)) ?? 9999);
+                }).map(withTrainSortIndex);
+                const nonTrainFiles = processedFiles.filter(item => !isTrainResult(item) && !item.is_train_merged_entry);
+                processedFiles = [...nonTrainFiles, ...trainFiles];
+                console.log('🚆 火车票拖拽后的拼接顺序:', trainFiles.map(item => item.order_id || item.output_file));
+                refreshTrainMergedEntry({ renderAfter: true, notify: true, orderedTrainFiles: trainFiles });
+            }
             
             // 原始打印的数据
             let rawProcessedFiles = [];
@@ -2146,33 +2496,8 @@
                     });
                     processedFiles = Object.values(mergedMap);
 
-                    // 仅按“当前页面结果”生成火车票整合条目，避免读取历史 session 造成单文件误合并
-                    const nonMergedTrainFiles = processedFiles.filter(item => item.has_train_ticket === true && !item.is_train_merged_entry);
-                    const nonMergedTrainTicketCount = nonMergedTrainFiles.reduce((sum, item) => {
-                        const itemCount = Array.isArray(item.train_ticket_items) && item.train_ticket_items.length > 0
-                            ? item.train_ticket_items.length
-                            : (item.train_ticket_count || 1);
-                        return sum + itemCount;
-                    }, 0);
-                    if (nonMergedTrainTicketCount > 1) {
-                        try {
-                            const mergedResp = await fetch('/api/train-merged-entry', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ processed_files: processedFiles })
-                            });
-                            const mergedData = await mergedResp.json();
-                            if (mergedData.success && mergedData.result) {
-                                const mergedEntry = mergedData.result;
-                                const mergedKey = mergedEntry.output_file || mergedEntry.order_id || '__train_merged__';
-                                mergedMap[mergedKey] = mergedEntry;
-                                processedFiles = Object.values(mergedMap);
-                                console.log('✅ 已按当前页面数据生成火车票整合条目:', mergedEntry);
-                            }
-                        } catch (mergeErr) {
-                            console.warn('⚠️ 获取火车票整合条目失败，继续展示单条记录:', mergeErr);
-                        }
-                    }
+                    // 仅按“当前页面结果”生成火车票整合条目，后续拖拽也复用同一刷新逻辑
+                    await refreshTrainMergedEntry({ renderAfter: false, notify: false });
                     
                     console.log('📤 添加新结果后，processedFiles 长度:', processedFiles.length);
                     console.log('📤 添加新结果后，processedFiles 内容:', JSON.stringify(processedFiles));
@@ -2423,154 +2748,7 @@
                         fileDetailsDiv.innerHTML = fileDetailsHtml;
                     }
                     
-                    // 显示订单结果 - 按当前累计结果重绘，确保增量上传后整合条目即时置顶
-                    // 检查是否已有订单结果区域
-                    let ordersDiv = document.getElementById('orders-section');
-                    if (!ordersDiv) {
-                        // 如果不存在，创建新的订单结果区域
-                        ordersDiv = document.createElement('div');
-                        ordersDiv.id = 'orders-section';
-                        ordersDiv.innerHTML = '<h5>订单处理结果</h5>';
-                        ordersDiv.className = 'animate-fade-in';
-                        ordersDiv.style.animationDelay = '0.3s';
-                        resultList.appendChild(ordersDiv);
-                    }
-                    ordersDiv.innerHTML = '<h5>订单处理结果</h5>';
-                    
-                    // 为当前累计订单创建分组
-                    const newOrdersGroup = document.createElement('div');
-                    newOrdersGroup.className = 'mb-3 animate-fade-in';
-                    newOrdersGroup.style.animationDelay = '0.2s';
-                    
-                    // 添加本次处理的标题
-                    const groupTitle = document.createElement('div');
-                    groupTitle.className = 'text-muted mb-2';
-                    groupTitle.innerHTML = `<small>📁 当前累计 (${processedFiles.length} 个条目，本次新增 ${newFilesCount} 个)</small>`;
-                    newOrdersGroup.appendChild(groupTitle);
-                    
-                    function getOrderCategory(result) {
-                        if (result.has_train_ticket || (result.combined_type || '').startsWith('train_')) {
-                            return 'train';
-                        }
-                        if (result.has_flight_ticket || (result.combined_type || '').startsWith('flight_')) {
-                            return 'flight';
-                        }
-                        return 'taxi';
-                    }
-
-                    function categoryTitle(category) {
-                        if (category === 'train') return '🚆 火车票订单处理结果';
-                        if (category === 'flight') return '✈️ 机票订单处理结果';
-                        return '🚗 网约车订单处理结果';
-                    }
-
-                    function buildOrderStatus(result) {
-                        if (result.has_train_ticket) return '<span class="text-success">✓ 火车票</span>';
-                        if (result.has_itinerary && result.has_invoice) return '<span class="text-success">✓ 完整</span>';
-                        if (result.has_itinerary || result.has_invoice) return '<span class="text-warning">⚠ 部分</span>';
-                        return '<span class="text-danger">✗ 无文件</span>';
-                    }
-
-                    function buildOrderDetailLine(result) {
-                        if (result.has_train_ticket) {
-                            const ticketCount = result.train_ticket_count || 0;
-                            const routeText = (result.train_routes && result.train_routes.length > 0)
-                                ? result.train_routes.join('；')
-                                : '行程信息待识别';
-                            return `车票: ${ticketCount} 张 | 布局: ${result.combined_type || 'train_single'} | 行程: ${routeText}`;
-                        }
-                        const itineraryLabel = result.has_hotel_bill ? '结账单' : '行程单';
-                        const itineraryValue = result.has_hotel_bill ? '有' : (result.has_itinerary ? '有' : '无');
-                        return `${itineraryLabel}: ${itineraryValue} | 发票: ${result.has_invoice ? '有' : '无'}`;
-                    }
-
-                    const grouped = { taxi: [], train: [], flight: [] };
-                    processedFiles.forEach((result) => {
-                        const category = getOrderCategory(result);
-                        grouped[category].push(result);
-                    });
-
-                    let globalIndex = 0;
-                    ['taxi', 'train', 'flight'].forEach((category) => {
-                        let list = grouped[category];
-                        if (!list || list.length === 0) return;
-
-                        // 火车票分组：把“整合条目”置顶
-                        if (category === 'train') {
-                            // 火车票分区保留单条明细 + 整合条目（整合条目置顶）
-                            list = [...list].sort((a, b) => {
-                                const aMerged = a.is_train_merged_entry ? 1 : 0;
-                                const bMerged = b.is_train_merged_entry ? 1 : 0;
-                                return bMerged - aMerged;
-                            });
-                        }
-
-                        const section = document.createElement('div');
-                        section.className = 'mb-2';
-                        section.innerHTML = `<div class="fw-semibold mb-2">${categoryTitle(category)} (${list.length})</div>`;
-
-                        list.forEach((result) => {
-                            const fileItem = document.createElement('div');
-                            fileItem.className = 'file-item animate-slide-in';
-                            if (result.is_train_merged_entry) {
-                                fileItem.classList.add('train-merged-item');
-                            }
-                            fileItem.style.animationDelay = (0.3 + globalIndex * 0.08) + 's';
-                            globalIndex += 1;
-
-                            let safeOrderData;
-                            try {
-                                safeOrderData = JSON.stringify(result).replace(/'/g, "&apos;").replace(/"/g, "&quot;");
-                            } catch (e) {
-                                console.error('❌ 订单 JSON 序列化失败:', e);
-                                safeOrderData = '{}';
-                            }
-
-                            const amountValue = Number(result.amount || 0).toFixed(2);
-                            const detailLine = buildOrderDetailLine(result);
-                            let statusIcon = buildOrderStatus(result);
-                            if (result.is_train_merged_entry) {
-                                statusIcon += '<span class="train-merged-badge">整合条目</span>';
-                            }
-
-                            fileItem.innerHTML = `
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <div>
-                                        <strong>订单 ${result.order_id}</strong> ${statusIcon}<br>
-                                        <small class="text-muted">金额: ¥${amountValue}</small><br>
-                                        <small class="text-muted">${detailLine}</small>
-                                    </div>
-                                    <div>
-                                        <button class="btn btn-sm btn-outline-primary preview-btn" data-order='${safeOrderData}'>预览</button>
-                                        <button class="btn btn-sm btn-outline-success print-btn" data-file="${result.output_file}">打印</button>
-                                    </div>
-                                </div>
-                            `;
-                            section.appendChild(fileItem);
-                        });
-
-                        newOrdersGroup.appendChild(section);
-                    });
-                    
-                    // 将当前累计订单组添加到订单结果区域
-                    ordersDiv.appendChild(newOrdersGroup);
-                    
-                    // 添加打印按钮事件
-                    document.querySelectorAll('.print-btn').forEach(function(btn) {
-                        btn.addEventListener('click', function() {
-                            const filename = this.getAttribute('data-file');
-                            printFile(filename);
-                        });
-                    });
-                    
-                    // 添加重新打印按钮事件
-                    document.querySelectorAll('.reprint-btn').forEach(function(btn) {
-                        btn.addEventListener('click', function() {
-                            const fileHash = this.getAttribute('data-hash');
-                            const filename = this.getAttribute('data-filename');
-                            reprintFile(fileHash, filename);
-                        });
-                    });
+                    renderOrdersSection(newFilesCount);
                     
                 } else {
                     resultList.innerHTML = '<div class="alert alert-danger">处理文件时出错</div>';
