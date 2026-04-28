@@ -197,7 +197,7 @@ cat <<EOF
 
 [HINT] 运行前置：宿主机已配置 CUPS 队列 (lpstat -p 可见)，且 /run/cups/cups.sock 存在。
 [HINT] 运行示例:
-       docker run --rm -p 12345:12345 \\
+       docker run --rm -p 12306:12306 \\
          --env-file .env \\
          -v /run/cups/cups.sock:/run/cups/cups.sock \\
          -e CUPS_SERVER=/run/cups/cups.sock \\

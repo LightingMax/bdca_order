@@ -180,6 +180,36 @@ def extract_amount_from_xml(xml_path):
 def extract_amount_from_pdf(pdf_path):
     """从PDF文件中提取金额（轻量级方法）"""
     logger = current_app.logger
+
+    def _extract_amount_from_text(full_text):
+        # 部分电子发票使用 UniGB 编码，PyPDF2 兜底提取时数字间可能夹杂 \x00。
+        full_text = (full_text or "").replace("\x00", "")
+        amount_patterns = [
+            r'[¥￥]\s*(\d+\.\d{1,2})',
+            r'价税合计[（(]小写[）)]\s*[¥￥]?\s*(\d+\.\d{1,2})',
+            r'价税合计[：:\s]*[¥￥]?\s*(\d+\.\d{1,2})',
+            r'合计金额[：:\s]*[¥￥]?\s*(\d+\.\d{1,2})',
+            r'总金额[：:\s]*[¥￥]?\s*(\d+\.\d{1,2})',
+            r'金额[：:\s]*[¥￥]?\s*(\d+\.\d{1,2})',
+            r'(\d+\.\d{2})元?',
+            r'(\d+\.\d{1,2})',
+        ]
+        for pattern in amount_patterns:
+            matches = re.findall(pattern, full_text)
+            valid_amounts = []
+            for match in matches:
+                try:
+                    amount = float(match)
+                except (TypeError, ValueError):
+                    continue
+                if 1.0 <= amount <= 10000.0:
+                    valid_amounts.append(amount)
+            if valid_amounts:
+                amount = max(valid_amounts)
+                logger.info(f"从PDF文本中使用模式'{pattern}'提取到金额: {amount}")
+                return amount
+        return 0
+
     try:
         logger.info(f"正在从PDF文件提取金额: {pdf_path}")
         
@@ -225,41 +255,9 @@ def extract_amount_from_pdf(pdf_path):
             
             logger.info(f"成功提取PDF文本，长度: {len(full_text)} 字符")
             
-            # 使用正则表达式匹配金额
-            # 酒店发票常见的金额模式
-            amount_patterns = [
-                # 标准金额格式：123.45元、123.45
-                r'(\d+\.\d{2})元?',
-                # 发票金额：价税合计、合计金额等
-                r'价税合计[：:]\s*(\d+\.\d{2})',
-                r'合计金额[：:]\s*(\d+\.\d{2})',
-                r'总金额[：:]\s*(\d+\.\d{2})',
-                r'金额[：:]\s*(\d+\.\d{2})',
-                # 发票号码后的金额
-                r'发票号码[：:].*?(\d+\.\d{2})',
-                # 大写金额后的数字金额
-                r'[壹贰叁肆伍陆柒捌玖拾佰仟万亿圆角分]+.*?(\d+\.\d{2})',
-                # 简单的数字.数字格式（更宽松的匹配）
-                r'(\d+\.\d{1,2})',
-            ]
-            
-            # 按优先级尝试匹配
-            for pattern in amount_patterns:
-                matches = re.findall(pattern, full_text)
-                if matches:
-                    # 过滤掉明显不是金额的数字（如日期、发票号码等）
-                    valid_amounts = []
-                    for match in matches:
-                        amount = float(match)
-                        # 过滤条件：金额应该在合理范围内（1-10000元）
-                        if 1.0 <= amount <= 10000.0:
-                            valid_amounts.append(amount)
-                    
-                    if valid_amounts:
-                        # 如果有多个匹配，选择最大的（通常是总金额）
-                        amount = max(valid_amounts)
-                        logger.info(f"从PDF文本中使用模式'{pattern}'提取到金额: {amount}")
-                        return amount
+            amount = _extract_amount_from_text(full_text)
+            if amount > 0:
+                return amount
             
             # 如果正则匹配失败，尝试查找包含"元"的数字
             yuan_matches = re.findall(r'(\d+\.\d{2})元', full_text)
@@ -274,7 +272,16 @@ def extract_amount_from_pdf(pdf_path):
             return 0
             
         except Exception as e:
-            logger.error(f"使用PyMuPDF提取PDF文本失败: {e}")
+            logger.warning(f"使用PyMuPDF(fitz)提取PDF文本失败，尝试PyPDF2兜底: {e}")
+            try:
+                reader = PdfReader(pdf_path)
+                full_text = "\n".join((page.extract_text() or "") for page in reader.pages)
+                amount = _extract_amount_from_text(full_text)
+                if amount > 0:
+                    logger.info(f"使用PyPDF2兜底提取到金额: {amount}")
+                    return amount
+            except Exception as fallback_e:
+                logger.error(f"使用PyPDF2兜底提取PDF文本失败: {fallback_e}")
             return 0
             
     except Exception as e:
@@ -555,6 +562,14 @@ def match_files_by_order(pdf_files, xml_files):
     """将PDF和XML文件按订单匹配"""
     logger = current_app.logger
     logger.info(f"开始匹配文件，PDF文件数: {len(pdf_files)}，XML文件数: {len(xml_files)}")
+
+    def _is_gaode_taxi_order(order_id, order_data):
+        haystack = [str(order_id or '')]
+        for pdf_path in (order_data.get('pdfs') or {}).values():
+            if pdf_path:
+                haystack.append(Path(pdf_path).name)
+        text = ' '.join(haystack).lower()
+        return any(keyword in text for keyword in ['高德', 'gaode', 'amap'])
     
     orders = {}
     
@@ -615,7 +630,7 @@ def match_files_by_order(pdf_files, xml_files):
                             logger.info(f"✅ 从行程单文件名成功提取金额: {itinerary_amount}元")
             
             # 如果仍然没有提取到金额，记录警告
-            if order_data['amount'] == 0:
+            if order_data['amount'] == 0 and _is_gaode_taxi_order(order_id, order_data):
                 xml_missing_warnings.append({
                     'order_id': order_id,
                     'reason': 'XML文件缺失且无法从PDF文件名提取金额',
@@ -625,7 +640,7 @@ def match_files_by_order(pdf_files, xml_files):
                 logger.warning(f"⚠️ 网约车订单 {order_id} 缺少XML文件且无法从PDF文件名提取金额")
             else:
                 logger.info(f"✅ 网约车订单 {order_id} 从PDF文件名成功提取金额: {order_data['amount']}元")
-        elif order_data['amount'] == 0:
+        elif order_data['amount'] == 0 and _is_gaode_taxi_order(order_id, order_data):
             xml_missing_warnings.append({
                 'order_id': order_id,
                 'reason': 'XML中未找到金额信息',
@@ -1083,10 +1098,10 @@ def create_smart_combined_multi_page(itinerary_path: str, invoice_path: str, out
 
 
 def create_hotel_combined_pdf(invoice_path: str, hotel_bill_path: str, output_path: str) -> bool:
-    """创建住宿发票+结账单的拼接页面（结账单上部50%），使用图像拼接方式确保1页输出"""
+    """创建住宿发票+结账单的拼接页面：发票完整占上半页，结账单上部占下半页。"""
     logger = current_app.logger
     try:
-        logger.info(f"🏨 开始创建住宿拼接页面：发票 + 结账单上部50%")
+        logger.info(f"🏨 开始创建住宿拼接页面：发票完整上半页 + 结账单上部下半页")
         logger.info(f"   发票文件: {Path(invoice_path).name}")
         logger.info(f"   结账单文件: {Path(hotel_bill_path).name}")
         
@@ -1120,9 +1135,9 @@ def create_hotel_combined_pdf(invoice_path: str, hotel_bill_path: str, output_pa
             top_half = bill_image.crop((0, 0, w, h // 2))
             logger.info(f"✂️ 结账单裁剪区域: 顶部0px, 底部{h//2}px")
             
-            # 3. 调整结账单尺寸（占下半部分，约60%高度）
+            # 3. 调整结账单尺寸（占下半部分，50%高度）
             ratio = USABLE_WIDTH / top_half.width
-            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.6))
+            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.5))
             top_half = top_half.resize(new_size, Image.Resampling.LANCZOS)
             
             # 4. 转换发票为图片
@@ -1130,9 +1145,9 @@ def create_hotel_combined_pdf(invoice_path: str, hotel_bill_path: str, output_pa
             invoice_images = convert_from_path(invoice_path, dpi=300)
             invoice_image = invoice_images[0]
             
-            # 5. 调整发票尺寸（占上半部分，约40%高度）
-            ratio = 0.9 * USABLE_WIDTH / invoice_image.width
-            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.4))
+            # 5. 调整发票尺寸（完整占上半部分，50%高度），保持与网约车发票相同的半页标准。
+            ratio = USABLE_WIDTH / invoice_image.width
+            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.5))
             invoice_image = invoice_image.resize(new_size, Image.Resampling.LANCZOS)
             
             # 6. 创建新的空白图片
@@ -1161,7 +1176,7 @@ def create_hotel_combined_pdf(invoice_path: str, hotel_bill_path: str, output_pa
                     logger.error("❌ 拼接文件过小，可能拼接失败")
                     return False
                 
-                logger.info("✅ 住宿拼接成功（发票+结账单上部50%拼接到一页）")
+                logger.info("✅ 住宿拼接成功（发票完整上半页 + 结账单上部下半页）")
                 logger.info(f"   文件路径: {output_path}")
                 logger.info(f"   文件大小: {file_size} bytes")
                 return True
@@ -1743,7 +1758,7 @@ def process_pdf_files(extract_dir, zip_filename=None):
         'hotel_warnings': hotel_warnings
     }
     
-    return results, xml_missing_warnings, classification_info
+    return results, taxi_warnings, classification_info
 
 
 def merge_processed_pdfs(processed_files, output_path):

@@ -1154,11 +1154,15 @@
                 if (isTrainResult(result)) {
                     return 'train';
                 }
+                if (result.has_hotel_bill || (result.combined_type || '') === 'hotel_accommodation') {
+                    return 'hotel';
+                }
                 return 'taxi';
             }
 
             function categoryTitle(category) {
                 if (category === 'train') return '🚆✈️ 火车票/机票订单处理结果';
+                if (category === 'hotel') return '🏨 酒店订单处理结果';
                 return '🚗 网约车订单处理结果';
             }
 
@@ -1167,6 +1171,9 @@
                     if (result.has_train_ticket && result.has_flight_ticket) return '<span class="text-success">✓ 火车票/机票</span>';
                     if (result.has_flight_ticket) return '<span class="text-success">✓ 机票</span>';
                     return '<span class="text-success">✓ 火车票</span>';
+                }
+                if (result.has_hotel_bill || result.combined_type === 'hotel_accommodation') {
+                    return '<span class="text-success">✓ 酒店</span>';
                 }
                 if (result.has_itinerary && result.has_invoice) return '<span class="text-success">✓ 完整</span>';
                 if (result.has_itinerary || result.has_invoice) return '<span class="text-warning">⚠ 部分</span>';
@@ -1212,14 +1219,14 @@
                 groupTitle.innerHTML = `<small>📁 当前累计 (${processedFiles.length} 个条目，本次新增 ${newFilesCount} 个)</small>`;
                 newOrdersGroup.appendChild(groupTitle);
 
-                const grouped = { taxi: [], train: [] };
+                const grouped = { taxi: [], hotel: [], train: [] };
                 processedFiles.forEach((result) => {
                     const category = getOrderCategory(result);
                     grouped[category].push(result);
                 });
 
                 let globalIndex = 0;
-                ['taxi', 'train'].forEach((category) => {
+                ['taxi', 'hotel', 'train'].forEach((category) => {
                     let list = grouped[category];
                     if (!list || list.length === 0) return;
 

@@ -39,6 +39,6 @@ LABEL order.build.version="${BUILD_VERSION}" \
       order.build.mode="full" \
       order.req.sha256="${REQ_SHA256}"
 
-EXPOSE 12345
+EXPOSE 12306
 
 CMD ["python", "run.py"]

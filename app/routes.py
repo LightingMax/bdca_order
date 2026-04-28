@@ -22,6 +22,13 @@ def _looks_like_flight_upload(filename):
     name = (filename or '').lower()
     return any(keyword in name for keyword in ['机票', '航班', '飞机票', '航空', '飞猪', 'flight', 'air ticket'])
 
+
+def _should_reprocess_upload(filename):
+    """对近期修正过识别逻辑的类型跳过旧缓存，避免历史结果污染。"""
+    name = (filename or '').lower()
+    hotel_keywords = ['华住', '酒店', '住宿', '结账单', '账单', 'hotel', 'accommodation', 'bill']
+    return _looks_like_flight_upload(filename) or any(keyword in name for keyword in hotel_keywords)
+
 @main_bp.route('/')
 def index():
     """渲染主页"""
@@ -97,7 +104,7 @@ def upload_file():
             session_processed_hashes = session.get('processed_file_hashes', [])
             
             # 检查文件是否在当前会话中已上传过
-            if file_hash in session_processed_hashes and not _looks_like_flight_upload(original_filename):
+            if file_hash in session_processed_hashes and not _should_reprocess_upload(original_filename):
                 # 从全局存储中获取文件信息
                 existing_file = check_file_exists(file_hash)
                 if existing_file and 'results' in existing_file:
@@ -176,7 +183,7 @@ def upload_file():
                     logger.warning(f"文件 {filename} 在全局存储中不存在或处理结果无效，将重新处理")
             else:
                 if file_hash in session_processed_hashes:
-                    logger.info(f"文件 {filename} 疑似机票，跳过旧缓存并按最新交通票据逻辑重新处理")
+                    logger.info(f"文件 {filename} 属于需重新识别类型，跳过旧缓存并按最新逻辑重新处理")
                 else:
                     logger.info(f"文件 {filename} 在当前会话中首次上传，将进行处理")
             
