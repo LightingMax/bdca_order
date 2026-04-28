@@ -1036,7 +1036,12 @@
 
             function isTrainResult(result) {
                 const combinedType = result.combined_type || '';
-                return result.has_train_ticket === true || combinedType.startsWith('train_');
+                return result.has_train_ticket === true
+                    || result.has_flight_ticket === true
+                    || result.has_transport_ticket === true
+                    || combinedType.startsWith('train_')
+                    || combinedType.startsWith('flight_')
+                    || combinedType.startsWith('ticket_');
             }
 
             function getNonMergedTrainFiles() {
@@ -1149,32 +1154,38 @@
                 if (isTrainResult(result)) {
                     return 'train';
                 }
-                if (result.has_flight_ticket || (result.combined_type || '').startsWith('flight_')) {
-                    return 'flight';
-                }
                 return 'taxi';
             }
 
             function categoryTitle(category) {
-                if (category === 'train') return '🚆 火车票订单处理结果';
-                if (category === 'flight') return '✈️ 机票订单处理结果';
+                if (category === 'train') return '🚆✈️ 火车票/机票订单处理结果';
                 return '🚗 网约车订单处理结果';
             }
 
             function buildOrderStatus(result) {
-                if (result.has_train_ticket) return '<span class="text-success">✓ 火车票</span>';
+                if (isTrainResult(result)) {
+                    if (result.has_train_ticket && result.has_flight_ticket) return '<span class="text-success">✓ 火车票/机票</span>';
+                    if (result.has_flight_ticket) return '<span class="text-success">✓ 机票</span>';
+                    return '<span class="text-success">✓ 火车票</span>';
+                }
                 if (result.has_itinerary && result.has_invoice) return '<span class="text-success">✓ 完整</span>';
                 if (result.has_itinerary || result.has_invoice) return '<span class="text-warning">⚠ 部分</span>';
                 return '<span class="text-danger">✗ 无文件</span>';
             }
 
             function buildOrderDetailLine(result) {
-                if (result.has_train_ticket) {
+                if (isTrainResult(result)) {
                     const ticketCount = result.train_ticket_count || 0;
+                    const railCount = result.rail_ticket_count || (result.has_train_ticket && !result.has_flight_ticket ? ticketCount : 0);
+                    const flightCount = result.flight_ticket_count || 0;
+                    const countParts = [];
+                    if (railCount > 0) countParts.push(`火车票: ${railCount} 张`);
+                    if (flightCount > 0) countParts.push(`机票: ${flightCount} 张`);
+                    if (countParts.length === 0) countParts.push(`票据: ${ticketCount} 张`);
                     const routeText = (result.train_routes && result.train_routes.length > 0)
                         ? result.train_routes.join('；')
                         : '行程信息待识别';
-                    return `车票: ${ticketCount} 张 | 布局: ${result.combined_type || 'train_single'} | 行程: ${routeText}`;
+                    return `${countParts.join(' | ')} | 布局: ${result.combined_type || 'ticket_single'} | 行程: ${routeText}`;
                 }
                 const itineraryLabel = result.has_hotel_bill ? '结账单' : '行程单';
                 const itineraryValue = result.has_hotel_bill ? '有' : (result.has_itinerary ? '有' : '无');
@@ -1201,14 +1212,14 @@
                 groupTitle.innerHTML = `<small>📁 当前累计 (${processedFiles.length} 个条目，本次新增 ${newFilesCount} 个)</small>`;
                 newOrdersGroup.appendChild(groupTitle);
 
-                const grouped = { taxi: [], train: [], flight: [] };
+                const grouped = { taxi: [], train: [] };
                 processedFiles.forEach((result) => {
                     const category = getOrderCategory(result);
                     grouped[category].push(result);
                 });
 
                 let globalIndex = 0;
-                ['taxi', 'train', 'flight'].forEach((category) => {
+                ['taxi', 'train'].forEach((category) => {
                     let list = grouped[category];
                     if (!list || list.length === 0) return;
 
@@ -2514,23 +2525,31 @@
                     const classificationInfo = response.classification_info || {};
                     const currentTaxiAmount = classificationInfo.taxi_amount || 0;
                     const currentHotelAmount = classificationInfo.hotel_amount || 0;
+                    const currentTrainAmount = classificationInfo.train_amount || 0;
+                    const currentFlightAmount = classificationInfo.flight_amount || 0;
                     const currentTotalAmount = classificationInfo.total_amount || 0;
                     
                     // 维护会话级别的累计变量（前端维护）
                     if (typeof window.sessionTaxiAmount === 'undefined') {
                         window.sessionTaxiAmount = 0;
                         window.sessionHotelAmount = 0;
+                        window.sessionTrainAmount = 0;
+                        window.sessionFlightAmount = 0;
                         window.sessionTotalAmount = 0;
                     }
                     
                     // 累加本次新增的金额
                     window.sessionTaxiAmount += currentTaxiAmount;
                     window.sessionHotelAmount += currentHotelAmount;
+                    window.sessionTrainAmount += currentTrainAmount;
+                    window.sessionFlightAmount += currentFlightAmount;
                     window.sessionTotalAmount += currentTotalAmount;
                     
                     // 使用累计金额
                     const taxiAmount = window.sessionTaxiAmount;
                     const hotelAmount = window.sessionHotelAmount;
+                    const trainAmount = window.sessionTrainAmount;
+                    const flightAmount = window.sessionFlightAmount;
                     const totalClassificationAmount = window.sessionTotalAmount;
                     
                     console.log('📊 统计信息 - 本次:', newFilesCount, '累计:', totalFiles, '总金额:', totalAmount);
@@ -2604,18 +2623,14 @@
                     summaryText += `<br><small>累计处理 <strong>${totalFiles}</strong> 个订单，总金额: <strong>¥${totalClassificationAmount.toFixed(2)}</strong></small>`;
                     
                     // 添加分类统计信息 - 根据金额情况动态显示（显示累计数据）
-                    if (taxiAmount > 0 || hotelAmount > 0) {
+                    if (taxiAmount > 0 || hotelAmount > 0 || trainAmount > 0 || flightAmount > 0) {
                         summaryText += `<br><small class="text-info">`;
-                        if (taxiAmount > 0 && hotelAmount > 0) {
-                            // 两个都有，同时显示
-                            summaryText += `🚗 网约车: ¥${taxiAmount.toFixed(2)} | 🏨 酒店: ¥${hotelAmount.toFixed(2)}`;
-                        } else if (taxiAmount > 0) {
-                            // 只有网约车
-                            summaryText += `🚗 网约车: ¥${taxiAmount.toFixed(2)}`;
-                        } else if (hotelAmount > 0) {
-                            // 只有酒店
-                            summaryText += `🏨 酒店: ¥${hotelAmount.toFixed(2)}`;
-                        }
+                        const amountParts = [];
+                        if (taxiAmount > 0) amountParts.push(`🚗 网约车: ¥${taxiAmount.toFixed(2)}`);
+                        if (hotelAmount > 0) amountParts.push(`🏨 酒店: ¥${hotelAmount.toFixed(2)}`);
+                        if (trainAmount > 0) amountParts.push(`🚆 火车票: ¥${trainAmount.toFixed(2)}`);
+                        if (flightAmount > 0) amountParts.push(`✈️ 机票: ¥${flightAmount.toFixed(2)}`);
+                        summaryText += amountParts.join(' | ');
                         summaryText += `</small>`;
                     }
                     
@@ -2890,6 +2905,11 @@
                         
                         // 重置处理文件数组
                         processedFiles = [];
+                        window.sessionTaxiAmount = 0;
+                        window.sessionHotelAmount = 0;
+                        window.sessionTrainAmount = 0;
+                        window.sessionFlightAmount = 0;
+                        window.sessionTotalAmount = 0;
                         // 清除缓存的行程记录和文件哈希
                         cachedTripRecords = null;
                         cachedFileHashes = null;
@@ -2932,13 +2952,18 @@
                     const trainMergedEntry = processedFiles.find(file => file.is_train_merged_entry === true);
                     const nonTrainFiles = processedFiles.filter(file => {
                         const combinedType = file.combined_type || '';
-                        return !file.has_train_ticket && !combinedType.startsWith('train_');
+                        return !file.has_train_ticket
+                            && !file.has_flight_ticket
+                            && !file.has_transport_ticket
+                            && !combinedType.startsWith('train_')
+                            && !combinedType.startsWith('flight_')
+                            && !combinedType.startsWith('ticket_');
                     });
                     const filesToPrint = useIntegratedTrainPrint && trainMergedEntry
                         ? [...nonTrainFiles, trainMergedEntry]
                         : processedFiles.filter(file => !file.is_train_merged_entry);
                     const confirmMessage = useIntegratedTrainPrint
-                        ? `检测到 ${trainTicketCount} 张火车票，打印全部时火车票只会打印整合条目。\n\n是否继续打印 ${filesToPrint.length} 个实际打印任务？`
+                        ? `检测到 ${trainTicketCount} 张火车票/机票，打印全部时交通票据只会打印整合条目。\n\n是否继续打印 ${filesToPrint.length} 个实际打印任务？`
                         : `确定要打印全部 ${filesToPrint.length} 个文件吗？`;
 
                     if (confirm(confirmMessage)) {
@@ -2954,7 +2979,7 @@
                         if (useIntegratedTrainPrint && !trainMergedEntry) {
                             printAllBtnEl.innerHTML = originalText;
                             printAllBtnEl.disabled = false;
-                            showNotification('未找到火车票整合条目，请重新上传或刷新结果后再打印全部', 'error');
+                            showNotification('未找到火车票/机票整合条目，请重新上传或刷新结果后再打印全部', 'error');
                             return;
                         }
 

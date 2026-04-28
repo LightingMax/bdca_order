@@ -16,6 +16,12 @@ from app.services.user_service import get_user_mac, save_user_data, get_all_user
 
 main_bp = Blueprint('main', __name__)
 
+
+def _looks_like_flight_upload(filename):
+    """判断上传文件是否疑似机票，避免旧缓存把机票当普通发票复用。"""
+    name = (filename or '').lower()
+    return any(keyword in name for keyword in ['机票', '航班', '飞机票', '航空', '飞猪', 'flight', 'air ticket'])
+
 @main_bp.route('/')
 def index():
     """渲染主页"""
@@ -91,7 +97,7 @@ def upload_file():
             session_processed_hashes = session.get('processed_file_hashes', [])
             
             # 检查文件是否在当前会话中已上传过
-            if file_hash in session_processed_hashes:
+            if file_hash in session_processed_hashes and not _looks_like_flight_upload(original_filename):
                 # 从全局存储中获取文件信息
                 existing_file = check_file_exists(file_hash)
                 if existing_file and 'results' in existing_file:
@@ -110,7 +116,14 @@ def upload_file():
                     
                     # 重新解压并分析文件
                     try:
-                        extract_zip(zip_path, file_extract_dir)
+                        if filename.lower().endswith('.zip'):
+                            extract_zip(zip_path, file_extract_dir)
+                        elif filename.lower().endswith('.pdf'):
+                            import shutil
+                            shutil.copy2(zip_path, os.path.join(file_extract_dir, filename))
+                        else:
+                            logger.warning(f"不支持的文件类型，跳过重新分析: {filename}")
+                            raise ValueError(f"不支持的文件类型: {filename}")
                         
                         # 重新分析PDF文件，获取最新的XML缺失警告和分类统计（使用原始文件名）
                         original_filename = existing_file.get('original_filename', filename)
@@ -147,10 +160,12 @@ def upload_file():
                                 'taxi_amount': 0,
                                 'hotel_amount': 0,
                                 'train_amount': 0,
+                                'flight_amount': 0,
                                 'total_amount': 0,
                                 'taxi_orders': 0,
                                 'hotel_orders': 0,
                                 'train_tickets': 0,
+                                'flight_tickets': 0,
                                 'train_groups': 0,
                                 'taxi_warnings': [],
                                 'hotel_warnings': []
@@ -160,7 +175,10 @@ def upload_file():
                 else:
                     logger.warning(f"文件 {filename} 在全局存储中不存在或处理结果无效，将重新处理")
             else:
-                logger.info(f"文件 {filename} 在当前会话中首次上传，将进行处理")
+                if file_hash in session_processed_hashes:
+                    logger.info(f"文件 {filename} 疑似机票，跳过旧缓存并按最新交通票据逻辑重新处理")
+                else:
+                    logger.info(f"文件 {filename} 在当前会话中首次上传，将进行处理")
             
             # 为每个上传文件创建单独的提取目录
             file_extract_dir = os.path.join(extract_dir, os.path.splitext(filename)[0])
@@ -253,9 +271,11 @@ def upload_file():
         current_taxi_amount = 0
         current_hotel_amount = 0
         current_train_amount = 0
+        current_flight_amount = 0
         current_taxi_orders = 0
         current_hotel_orders = 0
         current_train_tickets = 0
+        current_flight_tickets = 0
         current_train_groups = 0
         current_taxi_warnings = []
         current_hotel_warnings = []
@@ -267,9 +287,11 @@ def upload_file():
                 current_taxi_amount += info.get('taxi_amount', 0)
                 current_hotel_amount += info.get('hotel_amount', 0)
                 current_train_amount += info.get('train_amount', 0)
+                current_flight_amount += info.get('flight_amount', 0)
                 current_taxi_orders += info.get('taxi_orders', 0)
                 current_hotel_orders += info.get('hotel_orders', 0)
                 current_train_tickets += info.get('train_tickets', 0)
+                current_flight_tickets += info.get('flight_tickets', 0)
                 current_train_groups += info.get('train_groups', 0)
                 current_taxi_warnings.extend(info.get('taxi_warnings', []))
                 current_hotel_warnings.extend(info.get('hotel_warnings', []))
@@ -279,10 +301,12 @@ def upload_file():
             'taxi_amount': current_taxi_amount,
             'hotel_amount': current_hotel_amount,
             'train_amount': current_train_amount,
-            'total_amount': current_taxi_amount + current_hotel_amount + current_train_amount,
+            'flight_amount': current_flight_amount,
+            'total_amount': current_taxi_amount + current_hotel_amount + current_train_amount + current_flight_amount,
             'taxi_orders': current_taxi_orders,
             'hotel_orders': current_hotel_orders,
             'train_tickets': current_train_tickets,
+            'flight_tickets': current_flight_tickets,
             'train_groups': current_train_groups,
             'taxi_warnings': current_taxi_warnings,
             'hotel_warnings': current_hotel_warnings
@@ -301,7 +325,9 @@ def upload_file():
             f"📊 分类统计: 网约车 {all_classification_info['taxi_amount']:.2f}元, "
             f"酒店 {all_classification_info['hotel_amount']:.2f}元, "
             f"火车票 {all_classification_info['train_tickets']} 张({all_classification_info['train_groups']} 组), "
-            f"火车金额 {all_classification_info['train_amount']:.2f}元"
+            f"火车金额 {all_classification_info['train_amount']:.2f}元, "
+            f"机票 {all_classification_info['flight_tickets']} 张, "
+            f"机票金额 {all_classification_info['flight_amount']:.2f}元"
         )
         
         # 计算本次处理的金额（只计算新处理的订单，不包括重用的）
@@ -309,14 +335,18 @@ def upload_file():
         current_session_taxi_amount = 0
         current_session_hotel_amount = 0
         current_session_train_amount = 0
+        current_session_flight_amount = 0
         
         # 方法1：从 new_results 直接计算（最准确）
         for result in new_results:
             amount = result.get('amount', 0)
             order_id = result.get('order_id', '')
             # 判断是网约车还是酒店（根据order_id前缀或文件类型）
-            if result.get('is_train_merged_entry') or result.get('has_train_ticket'):
-                current_session_train_amount += amount
+            if result.get('has_flight_ticket'):
+                current_session_flight_amount += result.get('flight_amount', amount)
+                current_session_train_amount += result.get('train_amount', 0)
+            elif result.get('is_train_merged_entry') or result.get('has_train_ticket'):
+                current_session_train_amount += result.get('train_amount', amount)
             elif order_id.startswith('hotel_'):
                 current_session_hotel_amount += amount
             else:
@@ -331,14 +361,16 @@ def upload_file():
                     current_session_taxi_amount += info.get('taxi_amount', 0)
                     current_session_hotel_amount += info.get('hotel_amount', 0)
                     current_session_train_amount += info.get('train_amount', 0)
+                    current_session_flight_amount += info.get('flight_amount', 0)
         
-        current_session_total = current_session_taxi_amount + current_session_hotel_amount + current_session_train_amount
+        current_session_total = current_session_taxi_amount + current_session_hotel_amount + current_session_train_amount + current_session_flight_amount
         
         logger.info(
             f"📊 本次处理金额计算: 新订单数={len(new_results)}, "
             f"网约车={current_session_taxi_amount:.2f}元, "
             f"酒店={current_session_hotel_amount:.2f}元, "
             f"火车={current_session_train_amount:.2f}元, "
+            f"机票={current_session_flight_amount:.2f}元, "
             f"总计={current_session_total:.2f}元"
         )
         
@@ -350,11 +382,11 @@ def upload_file():
             """构建稳定去重键，避免火车票增量上传时重复计数。"""
             if item.get('is_train_merged_entry'):
                 return 'train_merged_all'
-            if item.get('has_train_ticket') or str(item.get('combined_type', '')).startswith('train_'):
+            if item.get('has_train_ticket') or item.get('has_flight_ticket') or str(item.get('combined_type', '')).startswith(('train_', 'flight_', 'ticket_')):
                 order_id = item.get('order_id', '')
                 pages = item.get('train_ticket_pages') or []
                 page_sig = ','.join(str(p) for p in pages) if pages else 'p1'
-                return f"train::{order_id}::{page_sig}"
+                return f"ticket::{order_id}::{page_sig}"
             order_id = item.get('order_id')
             if order_id:
                 return f"order::{order_id}"
@@ -394,6 +426,7 @@ def upload_file():
                 'taxi_amount': current_session_taxi_amount,
                 'hotel_amount': current_session_hotel_amount,
                 'train_amount': current_session_train_amount,
+                'flight_amount': current_session_flight_amount,
                 'total_amount': current_session_total,
                 'orders': len(new_results)
             }
@@ -1076,12 +1109,17 @@ def print_merged_collection():
         if only_train:
             selected_files = [
                 f for f in selected_files
-                if f.get('has_train_ticket') or str(f.get('combined_type', '')).startswith('train_')
+                if (
+                    f.get('has_train_ticket')
+                    or f.get('has_flight_ticket')
+                    or f.get('has_transport_ticket')
+                    or str(f.get('combined_type', '')).startswith(('train_', 'flight_', 'ticket_'))
+                )
             ]
-            logger.info(f"整合打印(train-only)筛选结果: {len(selected_files)}/{len(processed_files)}")
+            logger.info(f"整合打印(transport-only)筛选结果: {len(selected_files)}/{len(processed_files)}")
 
         if not selected_files:
-            return jsonify({'success': False, 'message': '未找到可整合的火车票文件'}), 400
+            return jsonify({'success': False, 'message': '未找到可整合的火车票/机票文件'}), 400
 
         # 优先复用“按火车票布局规则重排”的整合条目，确保跨ZIP不是简单拼接
         from app.services.pdf_service import create_train_merged_entry, create_download_collection
