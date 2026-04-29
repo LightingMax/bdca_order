@@ -10,8 +10,7 @@ from app.services.file_service import (
     get_processed_orders, update_file_print_status
 )
 from app.services.pdf_service import process_pdf_files
-from app.services.print_service import print_pdf
-from app.config import Config
+from app.services.print_service import print_pdf, prepare_raw_pdf_for_a4_print
 from app.services.user_service import get_user_mac, save_user_data, get_all_user_stats, save_global_stats
 
 main_bp = Blueprint('main', __name__)
@@ -615,13 +614,14 @@ def print_raw_file():
         
         logger.info(f"找到文件: {file_path}")
         
-        printer_name = (data.get('printer_name') or Config.DEFAULT_PRINTER_NAME or '').strip() or None
+        printer_name = (data.get('printer_name') or '').strip() or None
         copies = int(data.get('copies', 1))
-        tray = (data.get('tray') or os.environ.get('DEFAULT_MEDIA_SOURCE') or 'auto').strip()
+        tray = (data.get('tray') or '').strip() or None
 
-        logger.info(f"开始提交原始打印: {file_path}, printer={printer_name}, copies={copies}, tray={tray}")
+        print_path = prepare_raw_pdf_for_a4_print(file_path)
+        logger.info(f"开始提交原始打印: {print_path}, printer={printer_name}, copies={copies}, tray={tray}")
         print_result = print_pdf(
-            file_path,
+            print_path,
             printer_name=printer_name,
             copies=copies,
             media_source=tray,
@@ -657,9 +657,9 @@ def print_raw_files_batch():
         logger.info(f"批量打印请求: {len(filenames)} 个文件")
         logger.info(f"文件列表: {filenames}")
         
-        printer_name = (data.get('printer_name') or Config.DEFAULT_PRINTER_NAME or '').strip() or None
+        printer_name = (data.get('printer_name') or '').strip() or None
         copies = int(data.get('copies', 1))
-        tray = (data.get('tray') or os.environ.get('DEFAULT_MEDIA_SOURCE') or 'auto').strip()
+        tray = (data.get('tray') or '').strip() or None
         
         # 在临时目录中查找所有文件
         temp_folder = current_app.config['TEMP_FOLDER']
@@ -695,8 +695,9 @@ def print_raw_files_batch():
             logger.info(f"找到文件: {file_path}，开始打印")
             
             try:
+                print_path = prepare_raw_pdf_for_a4_print(file_path)
                 print_result = print_pdf(
-                    file_path,
+                    print_path,
                     printer_name=printer_name,
                     copies=copies,
                     media_source=tray,

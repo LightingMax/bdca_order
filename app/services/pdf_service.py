@@ -857,6 +857,57 @@ def create_smart_combined_pdf(itinerary_path: str, invoice_path: str, output_pat
         return False
 
 
+def _box_size_and_origin(box):
+    """返回 PDF 页面盒子的尺寸和原点，兼容 PyPDF2 的 RectangleObject。"""
+    left = float(box.left)
+    bottom = float(box.bottom)
+    right = float(box.right)
+    top = float(box.top)
+    return right - left, top - bottom, left, bottom
+
+
+def _should_render_invoice_with_cropbox(invoice_path: str) -> bool:
+    """判断发票是否需要按 CropBox 渲染，避免把不可见空白外框拼进结果。"""
+    logger = current_app.logger
+    try:
+        reader = PdfReader(invoice_path)
+        if not reader.pages:
+            return False
+
+        page = reader.pages[0]
+        media_w, media_h, media_left, media_bottom = _box_size_and_origin(page.mediabox)
+        crop_w, crop_h, crop_left, crop_bottom = _box_size_and_origin(page.cropbox)
+        if media_w <= 0 or media_h <= 0 or crop_w <= 0 or crop_h <= 0:
+            return False
+
+        media_area = media_w * media_h
+        crop_area = crop_w * crop_h
+        area_ratio = crop_area / media_area
+        dimension_delta = max(abs(media_w - crop_w) / media_w, abs(media_h - crop_h) / media_h)
+        origin_delta = max(abs(media_left - crop_left), abs(media_bottom - crop_bottom))
+        use_cropbox = area_ratio < 0.98 or dimension_delta > 0.02 or origin_delta > 1.0
+
+        logger.info(
+            "发票页面盒检测: media=(%.2f x %.2f @ %.2f,%.2f), "
+            "crop=(%.2f x %.2f @ %.2f,%.2f), area_ratio=%.3f, use_cropbox=%s",
+            media_w, media_h, media_left, media_bottom,
+            crop_w, crop_h, crop_left, crop_bottom,
+            area_ratio, use_cropbox,
+        )
+        return use_cropbox
+    except Exception as e:
+        logger.warning(f"发票页面盒检测失败，使用默认渲染: {e}")
+        return False
+
+
+def _render_invoice_images(invoice_path: str, dpi: int = 300):
+    """渲染发票图片；当 PDF 有有效 CropBox 时使用可见区域，保持普通发票兼容。"""
+    from pdf2image import convert_from_path
+
+    use_cropbox = _should_render_invoice_with_cropbox(invoice_path)
+    return convert_from_path(invoice_path, dpi=dpi, use_cropbox=use_cropbox)
+
+
 def create_smart_combined_single_page(itinerary_path: str, invoice_path: str, output_path: str) -> bool:
     """
     创建单页智能拼接：发票在上（占50%高度），行程单在下（占50%高度），压缩到一页
@@ -926,7 +977,7 @@ def create_smart_combined_single_page(itinerary_path: str, invoice_path: str, ou
             
             # 转换发票为图片
             logger.info("🧾 转换发票为图片")
-            invoice_images = convert_from_path(invoice_path, dpi=300)
+            invoice_images = _render_invoice_images(invoice_path, dpi=300)
             invoice_image = invoice_images[0]
             
             # 调整发票尺寸（占上半部分，50%高度）
@@ -1142,7 +1193,7 @@ def create_hotel_combined_pdf(invoice_path: str, hotel_bill_path: str, output_pa
             
             # 4. 转换发票为图片
             logger.info("🧾 转换发票为图片")
-            invoice_images = convert_from_path(invoice_path, dpi=300)
+            invoice_images = _render_invoice_images(invoice_path, dpi=300)
             invoice_image = invoice_images[0]
             
             # 5. 调整发票尺寸（完整占上半部分，50%高度），保持与网约车发票相同的半页标准。
