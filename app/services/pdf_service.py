@@ -1181,7 +1181,7 @@ def _render_invoice_images(invoice_path: str, dpi: int = 300):
 
 
 def _find_itinerary_table_crop_box(itinerary_path, image_size):
-    """根据行程单表格边界返回图片裁剪框，保留完整表格并去掉页眉。"""
+    """根据行程单抬头和表格边界返回图片裁剪框，保留汇总信息和完整表格。"""
     logger = current_app.logger
     try:
         import pdfplumber
@@ -1207,16 +1207,27 @@ def _find_itinerary_table_crop_box(itinerary_path, image_size):
             scale_x = img_w / float(page.width)
             scale_y = img_h / float(page.height)
 
-            pad_x = 16 * scale_x
-            pad_top = 18 * scale_y
+            words = page.extract_words() or []
+            header_tops = [
+                word["top"]
+                for word in words
+                if any(keyword in word.get("text", "") for keyword in ("滴滴出行", "申请日期", "行程起止日期", "行程人手机号", "合计"))
+            ]
+            header_top = min(header_tops) if header_tops else max(0, top - 160)
+            # 留出一点页眉空白，避免“滴滴出行-行程单”等抬头被贴边裁掉。
+            crop_top = max(0, int(header_top * scale_y - 18 * scale_y))
+
             pad_bottom = 24 * scale_y
             crop_box = (
-                max(0, int(x0 * scale_x - pad_x)),
-                max(0, int(top * scale_y - pad_top)),
-                min(img_w, int(x1 * scale_x + pad_x)),
+                0,
+                crop_top,
+                img_w,
                 min(img_h, int(bottom * scale_y + pad_bottom)),
             )
-            logger.info(f"✂️ 基于表格边界裁剪行程单: pdf_bbox={table.bbox}, image_crop={crop_box}")
+            logger.info(
+                f"✂️ 基于抬头+表格边界裁剪行程单: header_top={header_top:.2f}, "
+                f"pdf_table_bbox={table.bbox}, image_crop={crop_box}"
+            )
             return crop_box
     except Exception as e:
         logger.warning(f"基于表格边界计算行程单裁剪区域失败: {e}")
