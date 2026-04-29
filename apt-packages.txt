@@ -1,0 +1,6 @@
+bash
+ca-certificates
+libcups2
+cups-client
+poppler-utils
+pdftk

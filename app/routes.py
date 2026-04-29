@@ -26,7 +26,14 @@ def _should_reprocess_upload(filename):
     """对近期修正过识别逻辑的类型跳过旧缓存，避免历史结果污染。"""
     name = (filename or '').lower()
     hotel_keywords = ['华住', '酒店', '住宿', '结账单', '账单', 'hotel', 'accommodation', 'bill']
-    return _looks_like_flight_upload(filename) or any(keyword in name for keyword in hotel_keywords)
+    didi_keywords = ['滴滴', 'didi']
+    qq_invoice_keywords = ['qq邮箱发票', 'qq_', '总金额']
+    return (
+        _looks_like_flight_upload(filename)
+        or any(keyword in name for keyword in hotel_keywords)
+        or any(keyword in name for keyword in didi_keywords)
+        or any(keyword in name for keyword in qq_invoice_keywords)
+    )
 
 @main_bp.route('/')
 def index():
@@ -388,17 +395,27 @@ def upload_file():
             """构建稳定去重键，避免火车票增量上传时重复计数。"""
             if item.get('is_train_merged_entry'):
                 return 'train_merged_all'
+            order_id = item.get('order_id', '')
+            if str(order_id).startswith('滴滴出行'):
+                invoice_number = item.get('didi_invoice_number')
+                if invoice_number:
+                    return f"taxi::didi::{invoice_number}"
+                group_key = item.get('didi_group_key')
+                if group_key:
+                    return f"taxi::didi::{group_key}"
+                return 'taxi::didi::legacy'
             if item.get('has_train_ticket') or item.get('has_flight_ticket') or str(item.get('combined_type', '')).startswith(('train_', 'flight_', 'ticket_')):
-                order_id = item.get('order_id', '')
                 pages = item.get('train_ticket_pages') or []
                 page_sig = ','.join(str(p) for p in pages) if pages else 'p1'
                 return f"ticket::{order_id}::{page_sig}"
-            order_id = item.get('order_id')
             if order_id:
                 return f"order::{order_id}"
             return item.get('output_file') or str(uuid.uuid4())
 
+        has_new_didi_results = any(str(item.get('order_id', '')).startswith('滴滴出行') for item in all_results)
         for item in session_existing_results:
+            if has_new_didi_results and str(item.get('order_id', '')).startswith('滴滴出行'):
+                continue
             merged_results_map[_result_dedup_key(item)] = item
         for item in all_results:
             merged_results_map[_result_dedup_key(item)] = item

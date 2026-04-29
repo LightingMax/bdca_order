@@ -5,9 +5,20 @@ ARG INSTALL_DEPS=0
 ARG BUILD_VERSION=unknown
 ARG BUILD_TIME=unknown
 ARG REQ_SHA256=unknown
+ARG APT_SHA256=unknown
 ARG BUILD_MODE=code
 
 WORKDIR /workspace/order
+
+COPY apt-packages.txt /workspace/order/apt-packages.txt
+RUN if [ "$INSTALL_DEPS" = "1" ]; then \
+      echo "[incremental] apt-get install apt-packages.txt" && \
+      apt-get update && \
+      apt-get install -y --no-install-recommends $(grep -vE '^\s*(#|$)' /workspace/order/apt-packages.txt) && \
+      rm -rf /var/lib/apt/lists/* ; \
+    else \
+      echo "[incremental] skip apt install (deps unchanged)" ; \
+    fi
 
 COPY requirements.txt /workspace/order/requirements.txt
 RUN if [ "$INSTALL_DEPS" = "1" ]; then \
@@ -21,6 +32,7 @@ COPY . /workspace/order
 
 RUN mkdir -p /workspace/order/.build_meta \
     && echo "${REQ_SHA256}"    > /workspace/order/.build_meta/requirements.sha256 \
+    && echo "${APT_SHA256}"    > /workspace/order/.build_meta/apt-packages.sha256 \
     && echo "${BUILD_VERSION}" > /workspace/order/.build_meta/version \
     && echo "${BUILD_TIME}"    > /workspace/order/.build_meta/build_time \
     && echo "${BUILD_MODE}"    > /workspace/order/.build_meta/build_mode
@@ -28,4 +40,5 @@ RUN mkdir -p /workspace/order/.build_meta \
 LABEL order.build.version="${BUILD_VERSION}" \
       order.build.time="${BUILD_TIME}" \
       order.build.mode="${BUILD_MODE}" \
-      order.req.sha256="${REQ_SHA256}"
+      order.req.sha256="${REQ_SHA256}" \
+      order.apt.sha256="${APT_SHA256}"

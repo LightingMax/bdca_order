@@ -653,6 +653,278 @@ def match_files_by_order(pdf_files, xml_files):
     return orders, xml_missing_warnings
 
 
+def _is_didi_taxi_file(file_path):
+    """判断文件是否属于滴滴出行无 XML 网约车票据。"""
+    name = Path(file_path).name.lower()
+    if '滴滴' in name or 'didi' in name:
+        return True
+    try:
+        reader = PdfReader(file_path)
+        text = "\n".join((page.extract_text() or "") for page in reader.pages[:1]).lower()
+        return '滴滴' in text or 'didi' in text
+    except Exception:
+        return False
+
+
+def _extract_pdf_text_for_didi_amount(pdf_path):
+    """提取滴滴票据文本，供滴滴专属金额识别使用。"""
+    logger = current_app.logger
+    try:
+        import fitz  # PyMuPDF
+        doc = fitz.open(pdf_path)
+        text = "\n".join(page.get_text() for page in doc)
+        doc.close()
+        return (text or "").replace("\x00", "")
+    except Exception as e:
+        logger.warning(f"使用PyMuPDF提取滴滴票据文本失败，尝试PyPDF2兜底: {e}")
+
+    try:
+        reader = PdfReader(pdf_path)
+        return "\n".join((page.extract_text() or "") for page in reader.pages).replace("\x00", "")
+    except Exception as e:
+        logger.warning(f"使用PyPDF2提取滴滴票据文本失败: {e}")
+        return ""
+
+
+def _parse_chinese_money_amount(chinese_amount):
+    """解析发票中文大写金额，例如：玖佰伍拾柒圆玖角整 -> 957.90。"""
+    if not chinese_amount:
+        return 0
+
+    digit_map = {
+        '零': 0, '〇': 0,
+        '一': 1, '壹': 1,
+        '二': 2, '贰': 2, '两': 2,
+        '三': 3, '叁': 3,
+        '四': 4, '肆': 4,
+        '五': 5, '伍': 5,
+        '六': 6, '陆': 6,
+        '七': 7, '柒': 7,
+        '八': 8, '捌': 8,
+        '九': 9, '玖': 9,
+    }
+    unit_map = {
+        '十': 10, '拾': 10,
+        '百': 100, '佰': 100,
+        '千': 1000, '仟': 1000,
+    }
+
+    def parse_integer_part(part):
+        total = 0
+        section = 0
+        number = 0
+        for char in part:
+            if char in digit_map:
+                number = digit_map[char]
+            elif char in unit_map:
+                if number == 0:
+                    number = 1
+                section += number * unit_map[char]
+                number = 0
+            elif char in ('万', '亿'):
+                section += number
+                total += section * (10000 if char == '万' else 100000000)
+                section = 0
+                number = 0
+        return total + section + number
+
+    normalized = chinese_amount.replace('圆', '元')
+    integer_part, _, fraction_part = normalized.partition('元')
+    amount = parse_integer_part(integer_part)
+
+    jiao_match = re.search(r'([零〇一二两三四五六七八九壹贰叁肆伍陆柒捌玖])角', fraction_part)
+    fen_match = re.search(r'([零〇一二两三四五六七八九壹贰叁肆伍陆柒捌玖])分', fraction_part)
+    if jiao_match:
+        amount += digit_map[jiao_match.group(1)] / 10
+    if fen_match:
+        amount += digit_map[fen_match.group(1)] / 100
+
+    return round(amount, 2)
+
+
+def _extract_didi_invoice_total_amount(invoice_path):
+    """滴滴电子发票专属金额识别：优先取价税合计，而不是未税金额。"""
+    logger = current_app.logger
+    text = _extract_pdf_text_for_didi_amount(invoice_path)
+    compact_text = re.sub(r'\s+', '', text or '')
+
+    amount_patterns = [
+        r'价税合计[（(]大写[）)][（(]小写[）)][¥￥]?(\d+\.\d{1,2})[¥￥]?',
+        r'价税合计.*?[（(]小写[）)].*?[¥￥]?\s*(\d+\.\d{1,2})\s*[¥￥]?',
+    ]
+    for pattern in amount_patterns:
+        source_text = compact_text if '\\s' not in pattern and '.*?' not in pattern else text
+        match = re.search(pattern, source_text, re.DOTALL)
+        if match:
+            amount = round(float(match.group(1)), 2)
+            logger.info(f"从滴滴电子发票价税合计提取到金额: {amount}")
+            return amount
+
+    chinese_match = re.search(
+        r'价税合计.*?([零〇一二两三四五六七八九壹贰叁肆伍陆柒捌玖十拾百佰千仟万亿]+[圆元][零〇一二两三四五六七八九壹贰叁肆伍陆柒捌玖角分整]+)',
+        compact_text,
+        re.DOTALL
+    )
+    if chinese_match:
+        amount = _parse_chinese_money_amount(chinese_match.group(1))
+        if amount > 0:
+            logger.info(f"从滴滴电子发票中文大写金额提取到金额: {amount}")
+            return amount
+
+    logger.warning(f"未能从滴滴电子发票价税合计提取金额: {invoice_path}")
+    return 0
+
+
+def _extract_didi_itinerary_total_amount(itinerary_path):
+    """滴滴行程单专属金额识别：读取“共N笔行程，合计X元”。"""
+    logger = current_app.logger
+    text = _extract_pdf_text_for_didi_amount(itinerary_path)
+    amount_patterns = [
+        r'共\s*\d+\s*笔行程[，,]\s*合计\s*(\d+\.\d{1,2})\s*元',
+        r'合计\s*(\d+\.\d{1,2})\s*元',
+    ]
+    for pattern in amount_patterns:
+        match = re.search(pattern, text, re.DOTALL)
+        if match:
+            amount = round(float(match.group(1)), 2)
+            logger.info(f"从滴滴行程单合计提取到金额: {amount}")
+            return amount
+    return 0
+
+
+def extract_didi_taxi_amount(invoice_path, itinerary_path):
+    """滴滴无 XML 两 PDF 包金额识别，限定在滴滴细分类内使用。"""
+    amount = _extract_didi_invoice_total_amount(invoice_path) if invoice_path else 0
+    if amount > 0:
+        return amount
+
+    amount = _extract_didi_itinerary_total_amount(itinerary_path) if itinerary_path else 0
+    if amount > 0:
+        return amount
+
+    # 最后才走通用逻辑，并优先用行程单，避免发票未税金额大于价税合计时被误选。
+    if itinerary_path:
+        amount = extract_amount_from_pdf(itinerary_path)
+        if amount > 0:
+            return amount
+    if invoice_path:
+        return extract_amount_from_pdf(invoice_path)
+    return 0
+
+
+def _extract_didi_pair_key(pdf_path):
+    """提取滴滴批量包内的 A/B/C 分组后缀。没有后缀时返回 default。"""
+    stem = Path(pdf_path).stem.strip()
+    match = re.search(r'([A-Za-z])$', stem)
+    return match.group(1).upper() if match else 'default'
+
+
+def _extract_didi_invoice_number(invoice_path):
+    """从滴滴电子发票中提取发票号码，用于前端/session 稳定去重。"""
+    text = _extract_pdf_text_for_didi_amount(invoice_path)
+    match = re.search(r'发票号码[:：]\s*(\d+)', text)
+    return match.group(1) if match else ''
+
+
+def _pair_didi_files_by_amount(invoices, itineraries):
+    """无 A/B 后缀时按金额配对滴滴发票与行程单。"""
+    paired = []
+    used_itinerary_indexes = set()
+    itinerary_amounts = [
+        (idx, _extract_didi_itinerary_total_amount(path), path)
+        for idx, path in enumerate(itineraries)
+    ]
+
+    for invoice_path in invoices:
+        invoice_amount = _extract_didi_invoice_total_amount(invoice_path)
+        match_item = None
+        for idx, itinerary_amount, itinerary_path in itinerary_amounts:
+            if idx in used_itinerary_indexes:
+                continue
+            if invoice_amount > 0 and abs(invoice_amount - itinerary_amount) < 0.01:
+                match_item = (idx, itinerary_path)
+                break
+        if match_item is None:
+            for idx, _, itinerary_path in itinerary_amounts:
+                if idx not in used_itinerary_indexes:
+                    match_item = (idx, itinerary_path)
+                    break
+        if match_item is not None:
+            used_itinerary_indexes.add(match_item[0])
+            paired.append((invoice_path, match_item[1]))
+
+    return paired
+
+
+def match_didi_files_without_xml(pdf_files):
+    """匹配滴滴出行的无 XML PDF 包：支持单组，也支持 A/B 多组。"""
+    logger = current_app.logger
+    didi_pdfs = [pdf_path for pdf_path in pdf_files if _is_didi_taxi_file(pdf_path)]
+    if len(didi_pdfs) < 2:
+        return {}, []
+
+    invoices_by_key = {}
+    itineraries_by_key = {}
+    for pdf_path in didi_pdfs:
+        pdf_type = identify_pdf_type(pdf_path)
+        pair_key = _extract_didi_pair_key(pdf_path)
+        if pdf_type == 'invoice':
+            invoices_by_key.setdefault(pair_key, []).append(pdf_path)
+        elif pdf_type == 'itinerary':
+            itineraries_by_key.setdefault(pair_key, []).append(pdf_path)
+
+    pair_keys = sorted(set(invoices_by_key) & set(itineraries_by_key))
+    if not pair_keys:
+        logger.info(
+            f"滴滴无XML匹配条件不满足: invoices={len(invoices_by_key)}, itineraries={len(itineraries_by_key)}"
+        )
+        return {}, []
+
+    orders = {}
+    for pair_key in pair_keys:
+        invoices = invoices_by_key[pair_key]
+        itineraries = itineraries_by_key[pair_key]
+        if pair_key == 'default' and (len(invoices) > 1 or len(itineraries) > 1):
+            pairs = _pair_didi_files_by_amount(invoices, itineraries)
+        else:
+            pairs = list(zip(invoices, itineraries))
+
+        if len(invoices) != len(itineraries):
+            logger.warning(
+                f"滴滴分组 {pair_key} 发票/行程单数量不一致: invoices={len(invoices)}, itineraries={len(itineraries)}"
+            )
+
+        for idx, (invoice_path, itinerary_path) in enumerate(pairs, start=1):
+            amount = extract_didi_taxi_amount(invoice_path, itinerary_path)
+            invoice_number = _extract_didi_invoice_number(invoice_path)
+            if pair_key != 'default':
+                order_id = f"滴滴出行-{pair_key}-{amount:.2f}元"
+                stable_group_key = pair_key
+            elif len(pairs) > 1:
+                order_id = f"滴滴出行-{idx}-{amount:.2f}元"
+                stable_group_key = str(idx)
+            else:
+                order_id = f"滴滴出行-{amount:.2f}元"
+                stable_group_key = 'default'
+
+            orders[order_id] = {
+                'xml': None,
+                'amount': amount,
+                'didi_group_key': stable_group_key,
+                'didi_invoice_number': invoice_number,
+                'pdfs': {
+                    'invoice': invoice_path,
+                    'itinerary': itinerary_path,
+                    'hotel_bill': None,
+                }
+            }
+            logger.info(
+                f"✅ 滴滴无XML票据匹配成功: order_id={order_id}, amount={amount}, group={stable_group_key}, "
+                f"invoice={Path(invoice_path).name}, itinerary={Path(itinerary_path).name}"
+            )
+    return orders, []
+
+
 def smart_match_hotel_files(orders, extract_dir):
     """智能匹配华住酒店文件"""
     logger = current_app.logger
@@ -908,6 +1180,65 @@ def _render_invoice_images(invoice_path: str, dpi: int = 300):
     return convert_from_path(invoice_path, dpi=dpi, use_cropbox=use_cropbox)
 
 
+def _find_itinerary_table_crop_box(itinerary_path, image_size):
+    """根据行程单表格边界返回图片裁剪框，保留完整表格并去掉页眉。"""
+    logger = current_app.logger
+    try:
+        import pdfplumber
+    except ImportError:
+        logger.warning("未安装 pdfplumber，行程单裁剪使用旧逻辑")
+        return None
+
+    try:
+        with pdfplumber.open(itinerary_path) as pdf:
+            if not pdf.pages:
+                return None
+            page = pdf.pages[0]
+            tables = page.find_tables(table_settings={
+                "vertical_strategy": "lines",
+                "horizontal_strategy": "lines",
+            })
+            if not tables:
+                return None
+
+            table = max(tables, key=lambda t: (t.bbox[2] - t.bbox[0]) * (t.bbox[3] - t.bbox[1]))
+            x0, top, x1, bottom = table.bbox
+            img_w, img_h = image_size
+            scale_x = img_w / float(page.width)
+            scale_y = img_h / float(page.height)
+
+            pad_x = 16 * scale_x
+            pad_top = 18 * scale_y
+            pad_bottom = 24 * scale_y
+            crop_box = (
+                max(0, int(x0 * scale_x - pad_x)),
+                max(0, int(top * scale_y - pad_top)),
+                min(img_w, int(x1 * scale_x + pad_x)),
+                min(img_h, int(bottom * scale_y + pad_bottom)),
+            )
+            logger.info(f"✂️ 基于表格边界裁剪行程单: pdf_bbox={table.bbox}, image_crop={crop_box}")
+            return crop_box
+    except Exception as e:
+        logger.warning(f"基于表格边界计算行程单裁剪区域失败: {e}")
+        return None
+
+
+def _fit_image_to_box(image, box_width, box_height):
+    """等比缩放图片到指定区域内，避免裁剪内容。"""
+    from PIL import Image
+
+    ratio = min(box_width / image.width, box_height / image.height)
+    resized = image.resize(
+        (max(1, int(image.width * ratio)), max(1, int(image.height * ratio))),
+        Image.Resampling.LANCZOS,
+    )
+    canvas = Image.new("RGB", (box_width, box_height), (255, 255, 255))
+    paste_x = (box_width - resized.width) // 2
+    paste_y = (box_height - resized.height) // 2
+    canvas.paste(resized, (paste_x, paste_y))
+    return canvas
+
+
 def create_smart_combined_single_page(itinerary_path: str, invoice_path: str, output_path: str) -> bool:
     """
     创建单页智能拼接：发票在上（占50%高度），行程单在下（占50%高度），压缩到一页
@@ -961,19 +1292,22 @@ def create_smart_combined_single_page(itinerary_path: str, invoice_path: str, ou
             itinerary_images = convert_from_path(itinerary_path, dpi=300)
             itinerary_image = itinerary_images[0]
             w, h = itinerary_image.size
-            
-            # 计算需要裁剪的区域，去除部分顶部无关内容
-            # 根据行程数量动态调整裁剪区域
-            crop_top = int(4 * per_count_height)
-            crop_bottom = int(h // 2 + per_count_height * (itinerary_count - 1))
-            top_half = itinerary_image.crop((0, crop_top, w, crop_bottom))
-            
-            logger.info(f"✂️ 行程单裁剪区域: 顶部{crop_top}px, 底部{crop_bottom}px")
-            
-            # 调整行程单尺寸（占下半部分，50%高度）
-            ratio = USABLE_WIDTH / top_half.width
-            new_size = (USABLE_WIDTH, int(USABLE_HEIGHT * 0.5))
-            top_half = top_half.resize(new_size, Image.Resampling.LANCZOS)
+
+            crop_box = _find_itinerary_table_crop_box(itinerary_path, (w, h))
+            if crop_box:
+                itinerary_part = itinerary_image.crop(crop_box)
+            else:
+                # 兜底：去掉页眉后保留到页尾，再缩印到下半页，避免多行程被截断。
+                crop_top = int(4 * per_count_height)
+                crop_bottom = h
+                itinerary_part = itinerary_image.crop((0, crop_top, w, crop_bottom))
+                logger.info(f"✂️ 行程单兜底裁剪区域: 顶部{crop_top}px, 底部{crop_bottom}px")
+
+            itinerary_part = _fit_image_to_box(
+                itinerary_part.convert("RGB"),
+                USABLE_WIDTH,
+                int(USABLE_HEIGHT * 0.5),
+            )
             
             # 转换发票为图片
             logger.info("🧾 转换发票为图片")
@@ -992,7 +1326,7 @@ def create_smart_combined_single_page(itinerary_path: str, invoice_path: str, ou
             combined.paste(invoice_image, (MARGIN, MARGIN))
             
             # 粘贴行程单到下半部分（考虑页边距）
-            combined.paste(top_half, (MARGIN, MARGIN + invoice_image.height))
+            combined.paste(itinerary_part, (MARGIN, MARGIN + invoice_image.height))
             
             # 最后再缩放到A4纸
             combined = combined.resize((A4_WIDTH, A4_HEIGHT), Image.Resampling.LANCZOS)
@@ -1045,8 +1379,8 @@ def create_smart_combined_multi_page(itinerary_path: str, invoice_path: str, out
         import subprocess
         import shutil
         if not shutil.which('pdftk'):
-            logger.warning("未找到pdftk工具，无法合并PDF")
-            return False
+            logger.warning("未找到pdftk工具，改用图片方式生成多页拼接PDF")
+            return create_smart_combined_multi_page_image(itinerary_path, invoice_path, output_path, page_count)
         
         # 创建临时文件
         import tempfile
@@ -1146,6 +1480,94 @@ def create_smart_combined_multi_page(itinerary_path: str, invoice_path: str, out
         return False
 
 
+
+
+def create_smart_combined_multi_page_image(itinerary_path: str, invoice_path: str, output_path: str, page_count: int) -> bool:
+    """不依赖 pdftk 的多页网约车拼接兜底：第一页发票+行程单，后续页保留行程单。"""
+    logger = current_app.logger
+    try:
+        from pdf2image import convert_from_path
+        from PIL import Image
+    except ImportError as e:
+        logger.error(f"❌ 缺少多页图片拼接依赖: {e}")
+        return False
+
+    try:
+        A4_WIDTH, A4_HEIGHT = 2480, 3508
+        MARGIN = 100
+        USABLE_WIDTH = A4_WIDTH - 2 * MARGIN
+        USABLE_HEIGHT = A4_HEIGHT - 2 * MARGIN
+        per_count_height = USABLE_HEIGHT / 21
+
+        itinerary_name = Path(itinerary_path).name
+        invoice_name = Path(invoice_path).name
+        itinerary_match = re.search(r'-(\d+)个行程', itinerary_name)
+        invoice_match = re.search(r'-(\d+)个行程', invoice_name)
+        itinerary_count = int(itinerary_match.group(1)) if itinerary_match else 1
+        if invoice_match:
+            itinerary_count = max(itinerary_count, int(invoice_match.group(1)))
+
+        logger.info("📄 图片方式转换多页行程单")
+        itinerary_images = convert_from_path(itinerary_path, dpi=300)
+        if not itinerary_images:
+            logger.error("❌ 多页行程单渲染为空")
+            return False
+
+        first_itinerary = itinerary_images[0].convert("RGB")
+        w, h = first_itinerary.size
+        crop_top = int(4 * per_count_height)
+        crop_bottom = int(h // 2 + per_count_height * (itinerary_count - 1))
+        first_itinerary_part = first_itinerary.crop((0, crop_top, w, min(h, crop_bottom)))
+        first_itinerary_part = first_itinerary_part.resize(
+            (USABLE_WIDTH, int(USABLE_HEIGHT * 0.5)),
+            Image.Resampling.LANCZOS,
+        )
+
+        logger.info("🧾 图片方式转换发票")
+        invoice_images = _render_invoice_images(invoice_path, dpi=300)
+        if not invoice_images:
+            logger.error("❌ 发票渲染为空")
+            return False
+        invoice_image = invoice_images[0].convert("RGB").resize(
+            (USABLE_WIDTH, int(USABLE_HEIGHT * 0.5)),
+            Image.Resampling.LANCZOS,
+        )
+
+        pages = []
+        first_page = Image.new("RGB", (A4_WIDTH, A4_HEIGHT), (255, 255, 255))
+        first_page.paste(invoice_image, (MARGIN, MARGIN))
+        first_page.paste(first_itinerary_part, (MARGIN, MARGIN + invoice_image.height))
+        pages.append(first_page)
+
+        for page_image in itinerary_images[1:]:
+            page_image = page_image.convert("RGB")
+            ratio = min(USABLE_WIDTH / page_image.width, USABLE_HEIGHT / page_image.height)
+            resized = page_image.resize(
+                (max(1, int(page_image.width * ratio)), max(1, int(page_image.height * ratio))),
+                Image.Resampling.LANCZOS,
+            )
+            page = Image.new("RGB", (A4_WIDTH, A4_HEIGHT), (255, 255, 255))
+            x = (A4_WIDTH - resized.width) // 2
+            y = (A4_HEIGHT - resized.height) // 2
+            page.paste(resized, (x, y))
+            pages.append(page)
+
+        pages[0].save(
+            output_path,
+            "PDF",
+            resolution=300.0,
+            save_all=len(pages) > 1,
+            append_images=pages[1:],
+        )
+        if not Path(output_path).exists() or Path(output_path).stat().st_size < 1000:
+            logger.error(f"❌ 图片方式多页拼接输出异常: {output_path}")
+            return False
+
+        logger.info(f"✅ 图片方式多页拼接成功: {output_path}, pages={len(pages)}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ 图片方式多页拼接失败: {e}", exc_info=True)
+        return False
 
 
 def create_hotel_combined_pdf(invoice_path: str, hotel_bill_path: str, output_path: str) -> bool:
@@ -1553,8 +1975,13 @@ def process_pdf_files(extract_dir, zip_filename=None):
         # 住宿记录：使用hash前缀关联文件
         orders, xml_missing_warnings = match_hotel_files_by_hash(non_train_grouped['pdf'], non_train_grouped['xml'], extract_dir)
     else:
-        # 打车行程单：使用原有的订单匹配逻辑
-        orders, xml_missing_warnings = match_files_by_order(non_train_grouped['pdf'], non_train_grouped['xml'])
+        # 打车行程单：滴滴无XML两PDF包优先按同一订单匹配，否则使用通用订单匹配逻辑
+        if zip_type == 'taxi' and not non_train_grouped['xml']:
+            orders, xml_missing_warnings = match_didi_files_without_xml(non_train_grouped['pdf'])
+            if not orders:
+                orders, xml_missing_warnings = match_files_by_order(non_train_grouped['pdf'], non_train_grouped['xml'])
+        else:
+            orders, xml_missing_warnings = match_files_by_order(non_train_grouped['pdf'], non_train_grouped['xml'])
         # 特殊处理：如果发现华住酒店文件，尝试智能匹配
         orders = smart_match_hotel_files(orders, extract_dir)
         
@@ -1657,6 +2084,10 @@ def process_pdf_files(extract_dir, zip_filename=None):
                         'raw_table_data': raw_table_data,  # 缓存原始表格数据
                         'itinerary_file': itinerary_path  # 保存原始行程单文件路径
                     }
+                    if order_data.get('didi_group_key'):
+                        result['didi_group_key'] = order_data.get('didi_group_key')
+                    if order_data.get('didi_invoice_number'):
+                        result['didi_invoice_number'] = order_data.get('didi_invoice_number')
                     results.append(result)
                     logger.info(f"订单 {order_id} 处理成功，包含原始表格数据行数: {len(raw_table_data) if raw_table_data else 0}")
                 else:

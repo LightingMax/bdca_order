@@ -6,7 +6,7 @@ set -euo pipefail
 #
 # 支持三种模式（默认 auto 自动判定）:
 #   full  : 全量构建（重新 conda pack + 从 ubuntu 起层）
-#   deps  : 增量构建，基于 order-app:latest，在容器内 pip install 新依赖
+#   deps  : 增量构建，基于 order-app:latest，安装 apt-packages.txt / requirements.txt 新依赖
 #   code  : 增量构建，基于 order-app:latest，仅更新代码
 #
 # 使用:
@@ -22,6 +22,7 @@ IMAGE_NAME="${IMAGE_NAME:-order-app}"
 ENV_ARCHIVE_DIR="${PROJECT_ROOT}/.docker"
 ENV_ARCHIVE_PATH="${ENV_ARCHIVE_DIR}/order-env.tar.gz"
 REQ_FILE="${PROJECT_ROOT}/requirements.txt"
+APT_FILE="${PROJECT_ROOT}/apt-packages.txt"
 
 MODE="auto"
 for arg in "$@"; do
@@ -47,22 +48,30 @@ require_cmd() {
 
 require_cmd docker
 
-# ---- 计算 requirements.txt 当前哈希 ----
+# ---- 计算依赖清单当前哈希 ----
 REQ_SHA256="$(sha256sum "${REQ_FILE}" | awk '{print $1}')"
+APT_SHA256="$(sha256sum "${APT_FILE}" | awk '{print $1}')"
 log "当前 requirements.txt sha256: ${REQ_SHA256}"
+log "当前 apt-packages.txt sha256: ${APT_SHA256}"
 
 # ---- 查找现有镜像与已记录的哈希 ----
 get_latest_req_sha() {
   docker image inspect "${IMAGE_NAME}:latest" \
     --format '{{ index .Config.Labels "order.req.sha256" }}' 2>/dev/null || true
 }
+get_latest_apt_sha() {
+  docker image inspect "${IMAGE_NAME}:latest" \
+    --format '{{ index .Config.Labels "order.apt.sha256" }}' 2>/dev/null || true
+}
 
 HAS_LATEST=0
 OLD_REQ_SHA=""
+OLD_APT_SHA=""
 if docker image inspect "${IMAGE_NAME}:latest" >/dev/null 2>&1; then
   HAS_LATEST=1
   OLD_REQ_SHA="$(get_latest_req_sha)"
-  log "检测到已有镜像 ${IMAGE_NAME}:latest (上次 req sha256: ${OLD_REQ_SHA:-unknown})"
+  OLD_APT_SHA="$(get_latest_apt_sha)"
+  log "检测到已有镜像 ${IMAGE_NAME}:latest (上次 req sha256: ${OLD_REQ_SHA:-unknown}, apt sha256: ${OLD_APT_SHA:-unknown})"
 else
   log "未检测到 ${IMAGE_NAME}:latest，将走全量构建"
 fi
@@ -72,7 +81,7 @@ case "${MODE}" in
   auto)
     if [ "${HAS_LATEST}" = "0" ]; then
       MODE="full"
-    elif [ "${OLD_REQ_SHA}" = "${REQ_SHA256}" ]; then
+    elif [ "${OLD_REQ_SHA}" = "${REQ_SHA256}" ] && [ "${OLD_APT_SHA}" = "${APT_SHA256}" ]; then
       MODE="code"
     else
       MODE="deps"
@@ -82,7 +91,7 @@ case "${MODE}" in
     if [ "${HAS_LATEST}" = "0" ]; then
       warn "指定了增量模式但无 ${IMAGE_NAME}:latest，自动退回 full"
       MODE="full"
-    elif [ "${OLD_REQ_SHA}" = "${REQ_SHA256}" ]; then
+    elif [ "${OLD_REQ_SHA}" = "${REQ_SHA256}" ] && [ "${OLD_APT_SHA}" = "${APT_SHA256}" ]; then
       MODE="code"
     else
       MODE="deps"
@@ -148,6 +157,7 @@ build_full() {
     --build-arg "BUILD_VERSION=${IMAGE_TAG}" \
     --build-arg "BUILD_TIME=${BUILD_TIME}" \
     --build-arg "REQ_SHA256=${REQ_SHA256}" \
+    --build-arg "APT_SHA256=${APT_SHA256}" \
     "${PROJECT_ROOT}"
 }
 
@@ -166,6 +176,7 @@ build_incremental() {
     --build-arg "BUILD_VERSION=${IMAGE_TAG}" \
     --build-arg "BUILD_TIME=${BUILD_TIME}" \
     --build-arg "REQ_SHA256=${REQ_SHA256}" \
+    --build-arg "APT_SHA256=${APT_SHA256}" \
     --build-arg "BUILD_MODE=${build_mode}" \
     "${PROJECT_ROOT}"
 }
@@ -194,6 +205,7 @@ cat <<EOF
        模式: ${MODE}
        时间: ${BUILD_TIME}
        req-hash: ${REQ_SHA256}
+       apt-hash: ${APT_SHA256}
 
 [HINT] 运行前置：宿主机已配置 CUPS 队列 (lpstat -p 可见)，且 /run/cups/cups.sock 存在。
 [HINT] 运行示例:

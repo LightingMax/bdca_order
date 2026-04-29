@@ -4,13 +4,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV ENV_PATH=/opt/conda/envs/order
 ENV CUPS_SERVER=/run/cups/cups.sock
 
+COPY apt-packages.txt /tmp/apt-packages.txt
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       bash \
-       ca-certificates \
-       libcups2 \
-       cups-client \
-       poppler-utils \
+    && apt-get install -y --no-install-recommends $(grep -vE '^\s*(#|$)' /tmp/apt-packages.txt) \
+    && rm -f /tmp/apt-packages.txt \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace/order
@@ -28,8 +25,10 @@ COPY . /workspace/order
 ARG BUILD_VERSION=unknown
 ARG BUILD_TIME=unknown
 ARG REQ_SHA256=unknown
+ARG APT_SHA256=unknown
 RUN mkdir -p /workspace/order/.build_meta \
     && echo "${REQ_SHA256}" > /workspace/order/.build_meta/requirements.sha256 \
+    && echo "${APT_SHA256}" > /workspace/order/.build_meta/apt-packages.sha256 \
     && echo "${BUILD_VERSION}" > /workspace/order/.build_meta/version \
     && echo "${BUILD_TIME}"    > /workspace/order/.build_meta/build_time \
     && echo "full"             > /workspace/order/.build_meta/build_mode
@@ -37,7 +36,8 @@ RUN mkdir -p /workspace/order/.build_meta \
 LABEL order.build.version="${BUILD_VERSION}" \
       order.build.time="${BUILD_TIME}" \
       order.build.mode="full" \
-      order.req.sha256="${REQ_SHA256}"
+      order.req.sha256="${REQ_SHA256}" \
+      order.apt.sha256="${APT_SHA256}"
 
 EXPOSE 12306
 
