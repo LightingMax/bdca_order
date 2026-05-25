@@ -4,3 +4,5 @@ libcups2
 cups-client
 poppler-utils
 pdftk
+libreoffice-writer
+fonts-noto-cjk

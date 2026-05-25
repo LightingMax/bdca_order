@@ -6,6 +6,9 @@ import uuid
 from flask import current_app
 from app.config import Config
 
+WORD_EXTENSIONS = {".doc", ".docx"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+
 def get_available_printers():
     """通过 CUPS 客户端命令获取可用打印机列表。"""
     logger = current_app.logger
@@ -71,51 +74,136 @@ def _lp_output_indicates_success(output):
     )
 
 
-def prepare_raw_pdf_for_a4_print(pdf_path, dpi=220):
-    """将原始PDF按原尺寸放到A4白纸上，仅供原始打印路径使用。"""
+def _convert_word_to_pdf(file_path):
+    """将 Word 文档转换为 PDF，供 CUPS 稳定打印。"""
     logger = current_app.logger
-    if not str(pdf_path).lower().endswith(".pdf"):
+    converter = shutil.which("libreoffice") or shutil.which("soffice")
+    if converter is None:
+        raise RuntimeError("系统未安装 LibreOffice，无法打印 Word 文档（.doc/.docx）")
+
+    output_dir = os.path.join(
+        current_app.config["TEMP_FOLDER"],
+        "raw_print_converted",
+        uuid.uuid4().hex[:8],
+    )
+    os.makedirs(output_dir, exist_ok=True)
+
+    cmd = [
+        converter,
+        "--headless",
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        output_dir,
+        file_path,
+    ]
+    logger.info(f"转换Word文档为PDF: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=120)
+    stdout = (result.stdout or "").strip()
+    stderr = (result.stderr or "").strip()
+
+    if result.returncode != 0:
+        detail = "\n".join(part for part in [stdout, stderr] if part).strip() or "未知错误"
+        raise RuntimeError(f"Word文档转换PDF失败: {detail}")
+
+    base_name = os.path.splitext(os.path.basename(file_path))[0]
+    converted_path = os.path.join(output_dir, f"{base_name}.pdf")
+    if not os.path.exists(converted_path):
+        candidates = [
+            os.path.join(output_dir, name)
+            for name in os.listdir(output_dir)
+            if name.lower().endswith(".pdf")
+        ]
+        if candidates:
+            converted_path = max(candidates, key=os.path.getmtime)
+
+    if not os.path.exists(converted_path):
+        detail = "\n".join(part for part in [stdout, stderr] if part).strip()
+        raise RuntimeError(f"Word文档转换PDF后未找到输出文件: {detail}")
+
+    logger.info(f"Word文档已转换为PDF: {converted_path}")
+    return converted_path
+
+
+def _save_images_on_a4_pdf(images, base_name, dpi=220):
+    """把图片按比例放进A4页面并保存为PDF。"""
+    from PIL import Image
+
+    a4_width = int(8.27 * dpi)
+    a4_height = int(11.69 * dpi)
+    pages = []
+
+    for image in images:
+        image = image.convert("RGB")
+        scale = min(1.0, a4_width / image.width, a4_height / image.height)
+        if scale < 1.0:
+            image = image.resize(
+                (max(1, int(image.width * scale)), max(1, int(image.height * scale))),
+                Image.Resampling.LANCZOS,
+            )
+
+        canvas = Image.new("RGB", (a4_width, a4_height), "white")
+        x = (a4_width - image.width) // 2
+        y = (a4_height - image.height) // 2
+        canvas.paste(image, (x, y))
+        pages.append(canvas)
+
+    output_dir = os.path.join(current_app.config["TEMP_FOLDER"], "raw_print_a4")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f"{base_name}_on_a4_{uuid.uuid4().hex[:8]}.pdf")
+    pages[0].save(
+        output_path,
+        "PDF",
+        resolution=float(dpi),
+        save_all=len(pages) > 1,
+        append_images=pages[1:],
+    )
+    return output_path
+
+
+def _convert_image_to_pdf(image_path, dpi=220):
+    """将图片放到A4页面上保存为PDF，避免依赖CUPS图片过滤器。"""
+    logger = current_app.logger
+    from PIL import Image
+
+    with Image.open(image_path) as image:
+        base_name = os.path.splitext(os.path.basename(image_path))[0]
+        output_path = _save_images_on_a4_pdf([image], base_name, dpi=dpi)
+
+    logger.info(f"图片已转换为A4 PDF: {output_path}")
+    return output_path
+
+
+def prepare_raw_preview_pdf(file_path):
+    """为原始文件预览准备可直接打开的PDF；Word文档会在这里转换一次并复用。"""
+    ext = os.path.splitext(str(file_path))[1].lower()
+    if ext in WORD_EXTENSIONS:
+        return _convert_word_to_pdf(file_path)
+    return file_path
+
+
+def prepare_raw_pdf_for_a4_print(pdf_path, dpi=220):
+    """准备原始打印文件；Word 先转 PDF，PDF 再按原尺寸放到 A4 白纸上。"""
+    logger = current_app.logger
+    ext = os.path.splitext(str(pdf_path))[1].lower()
+    if ext in WORD_EXTENSIONS:
+        pdf_path = _convert_word_to_pdf(pdf_path)
+        ext = ".pdf"
+
+    if ext in IMAGE_EXTENSIONS:
+        return _convert_image_to_pdf(pdf_path, dpi=dpi)
+
+    if ext != ".pdf":
         return pdf_path
 
     try:
         from pdf2image import convert_from_path
-        from PIL import Image
-
         images = convert_from_path(pdf_path, dpi=dpi)
         if not images:
             return pdf_path
 
-        a4_width = int(8.27 * dpi)
-        a4_height = int(11.69 * dpi)
-        pages = []
-
-        for image in images:
-            image = image.convert("RGB")
-            # 保持原物理尺寸；只有当原页超过A4时才缩小以避免裁切。
-            scale = min(1.0, a4_width / image.width, a4_height / image.height)
-            if scale < 1.0:
-                image = image.resize(
-                    (max(1, int(image.width * scale)), max(1, int(image.height * scale))),
-                    Image.Resampling.LANCZOS,
-                )
-
-            canvas = Image.new("RGB", (a4_width, a4_height), "white")
-            x = (a4_width - image.width) // 2
-            y = (a4_height - image.height) // 2
-            canvas.paste(image, (x, y))
-            pages.append(canvas)
-
-        output_dir = os.path.join(current_app.config["TEMP_FOLDER"], "raw_print_a4")
-        os.makedirs(output_dir, exist_ok=True)
         base_name = os.path.splitext(os.path.basename(pdf_path))[0]
-        output_path = os.path.join(output_dir, f"{base_name}_on_a4_{uuid.uuid4().hex[:8]}.pdf")
-        pages[0].save(
-            output_path,
-            "PDF",
-            resolution=float(dpi),
-            save_all=len(pages) > 1,
-            append_images=pages[1:],
-        )
+        output_path = _save_images_on_a4_pdf(images, base_name, dpi=dpi)
         logger.info(f"原始PDF已按原尺寸放置到A4页面: {output_path}")
         return output_path
     except Exception as e:

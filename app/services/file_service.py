@@ -212,6 +212,9 @@ def extract_zip_for_raw_print(zip_path, extract_dir):
         
         for file_path in extract_path.rglob('*'):
             if file_path.is_file():
+                if not is_printable_file(file_path.name):
+                    logger.info(f"跳过ZIP中不可直接打印的文件: {file_path.relative_to(extract_path)}")
+                    continue
                 # 获取文件信息
                 file_info = {
                     'name': file_path.name,  # 显示名称使用原始文件名

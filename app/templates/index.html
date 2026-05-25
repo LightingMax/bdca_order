@@ -1600,6 +1600,16 @@
             function showPrintOptions(files) {
                 console.log('🖨️ 显示打印选项，文件数量:', files.length);
                 console.log('📋 当前已有文件数量:', rawProcessedFiles.length);
+                const printableFiles = Array.from(files).filter(file => file.is_printable !== false);
+                const skippedCount = files.length - printableFiles.length;
+                if (skippedCount > 0) {
+                    showNotification(`已跳过 ${skippedCount} 个暂不支持直接打印的文件`, 'warning');
+                    console.log(`⚠️ 跳过不可打印文件数量: ${skippedCount}`);
+                }
+                if (printableFiles.length === 0) {
+                    showNotification('没有识别到可打印文件', 'warning');
+                    return;
+                }
                 
                 // 首先显示整个结果区域
                 const rawResultArea = document.getElementById('rawResultArea');
@@ -1628,7 +1638,7 @@
                 
                 // 先添加新文件到rawProcessedFiles，然后重新渲染所有文件
                 const newFiles = [];
-                Array.from(files).forEach((file) => {
+                printableFiles.forEach((file) => {
                     // 处理文件信息，兼容后端返回的格式
                     const fileName = file.name || file.filename || `文件${rawProcessedFiles.length + 1}`;
                     const fileSize = file.size || file.file_size || 0;
@@ -1677,42 +1687,37 @@
                     else if (fileName.toLowerCase().endsWith('.txt')) fileIcon = 'bi-file-text';
                     
                     const resultDiv = document.createElement('div');
-                    resultDiv.className = 'alert alert-success mb-3 animate-fade-in';
+                    resultDiv.className = 'file-item animate-slide-in';
                     resultDiv.style.animationDelay = (index * 0.1) + 's';
                     
                     resultDiv.innerHTML = `
-                        <div class="d-flex align-items-start">
-                            <div class="flex-shrink-0 me-3">
-                                <i class="bi ${fileIcon}" style="font-size: 2rem; color: #007bff;"></i>
-                            </div>
-                            <div class="flex-grow-1">
-                                <h5 class="mb-2">
-                                    <i class="bi ${fileIcon} me-2"></i>
-                                    文件 ${index + 1}: ${fileName}
-                                </h5>
-                                <p class="mb-2 text-muted">
-                                    <i class="bi bi-info-circle me-1"></i>
-                                    状态: 已准备打印
-                                    ${fileSize > 0 ? `<span class="ms-2 badge bg-secondary">${formatFileSize(fileSize)}</span>` : ''}
-                                    ${fileType !== 'unknown' ? `<span class="ms-2 badge bg-info">${fileType}</span>` : ''}
-                                </p>
-                                <div class="action-buttons-row">
-                                    <div class="btn-group main-actions" role="group">
-                                        <button class="btn btn-sm btn-outline-primary modern-btn" onclick="previewRawFile('${fileInfo.storageName || fileName}')">
-                                            <i class="bi bi-eye"></i> 预览
-                                        </button>
-                                        <button class="btn btn-sm btn-primary modern-btn" onclick="printRawFile('${fileInfo.storageName || fileName}')">
-                                            <i class="bi bi-printer"></i> 立即打印
-                                        </button>
-                                    </div>
-                                    <button class="btn btn-sm modern-remove-btn" 
-                                            onclick="removeRawFile('${fileInfo.storageName || fileName}', ${index})"
-                                            title="从打印列表中移除此文件">
-                                        <i class="bi bi-trash3"></i>
-                                        <span class="ms-1">移除</span>
-                                    </button>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div class="d-flex align-items-start">
+                                <div class="flex-shrink-0 me-3">
+                                    <i class="bi ${fileIcon}" style="font-size: 2rem; color: #007bff;"></i>
+                                </div>
+                                <div>
+                                    <strong>文件 ${index + 1}: ${fileName}</strong><br>
+                                    <small class="text-muted">
+                                        状态: 已准备打印
+                                        ${fileSize > 0 ? `<span class="ms-2 badge bg-secondary">${formatFileSize(fileSize)}</span>` : ''}
+                                        ${fileType !== 'unknown' ? `<span class="ms-2 badge bg-info">${fileType}</span>` : ''}
+                                    </small>
                                 </div>
                             </div>
+                            <div class="btn-group raw-file-actions" role="group">
+                                <button class="btn btn-sm btn-outline-primary preview-raw-btn" onclick="previewRawFile('${fileInfo.storageName || fileName}')">
+                                    预览
+                                </button>
+                                <button class="btn btn-sm btn-outline-success print-raw-btn" onclick="printRawFile('${fileInfo.storageName || fileName}')">
+                                    打印
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger remove-raw-btn" 
+                                        onclick="removeRawFile('${fileInfo.storageName || fileName}', ${index})"
+                                        title="从打印列表中移除此文件">
+                                    移除
+                                </button>
+                                </div>
                         </div>
                     `;
                     
@@ -1831,6 +1836,12 @@
             // 全局预览函数
             window.previewRawFile = function(filename) {
                 showNotification(`正在预览文件: ${filename}`, 'info');
+                const previewWindow = window.open('about:blank', '_blank');
+                if (!previewWindow) {
+                    showNotification('预览窗口被阻止，请允许弹出窗口', 'warning');
+                    return;
+                }
+                previewWindow.document.write('<p style="font-family: sans-serif; padding: 16px;">正在生成预览...</p>');
                 
                 // 调用后端API获取文件预览链接
                 fetch('/api/get-raw-file', {
@@ -1846,22 +1857,17 @@
                 .then(data => {
                     if (data.success && data.preview_url) {
                         console.log(`✅ 获取到预览链接: ${data.preview_url}`);
-                        
-                        // 新窗口打开预览链接
-                        const previewWindow = window.open(data.preview_url, '_blank');
-                        
-                        if (previewWindow) {
-                            showNotification(`文件 ${filename} 预览窗口已打开`, 'success');
-                        } else {
-                            showNotification('预览窗口被阻止，请允许弹出窗口', 'warning');
-                        }
+                        previewWindow.location.href = data.preview_url;
+                        showNotification(`文件 ${filename} 预览窗口已打开`, 'success');
                     } else {
                         console.error('预览失败:', data.message);
+                        previewWindow.close();
                         showNotification(`预览失败: ${data.message || '未知错误'}`, 'error');
                     }
                 })
                 .catch(error => {
                     console.error('获取文件预览链接出错:', error);
+                    previewWindow.close();
                     showNotification('获取文件预览链接失败', 'error');
                 });
             };
@@ -1922,7 +1928,7 @@
                 }
                 
                 // 从DOM中移除对应的文件项
-                const fileItems = document.querySelectorAll('#rawResultList .alert');
+                const fileItems = document.querySelectorAll('#rawResultList .file-item');
                 if (index < fileItems.length) {
                     const fileItem = fileItems[index];
                     fileItem.style.animation = 'fadeOut 0.3s ease-out';
@@ -1931,9 +1937,9 @@
                         fileItem.remove();
                         
                         // 重新编号剩余的文件
-                        const remainingItems = document.querySelectorAll('#rawResultList .alert');
+                        const remainingItems = document.querySelectorAll('#rawResultList .file-item');
                         remainingItems.forEach((item, newIndex) => {
-                            const titleElement = item.querySelector('h5');
+                            const titleElement = item.querySelector('strong');
                             if (titleElement) {
                                 titleElement.innerHTML = titleElement.innerHTML.replace(
                                     /文件 \d+:/, 
@@ -1942,9 +1948,11 @@
                             }
                             
                             // 更新移除按钮的onclick事件
-                            const removeBtn = item.querySelector('.modern-remove-btn');
+                            const removeBtn = item.querySelector('.remove-raw-btn');
                             if (removeBtn) {
-                                removeBtn.setAttribute('onclick', `removeRawFile('${filename}', ${newIndex})`);
+                                const currentFile = rawProcessedFiles[newIndex] || {};
+                                const currentFilename = currentFile.storageName || currentFile.name || filename;
+                                removeBtn.setAttribute('onclick', `removeRawFile('${currentFilename}', ${newIndex})`);
                             }
                         });
                         

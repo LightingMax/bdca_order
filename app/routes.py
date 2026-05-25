@@ -1,19 +1,105 @@
 import os
 import uuid
 import datetime
-from flask import Blueprint, render_template, request, jsonify, current_app, session, send_from_directory
+from flask import Blueprint, render_template, request, jsonify, current_app, session, send_from_directory, send_file
 from werkzeug.utils import secure_filename
 
 from app.services.file_service import (
     allowed_file, extract_zip, extract_zip_for_raw_print, calculate_file_hash, 
     check_file_exists, save_file_hash, check_order_processed,
-    get_processed_orders, update_file_print_status
+    get_processed_orders, update_file_print_status, is_printable_file
 )
 from app.services.pdf_service import process_pdf_files
-from app.services.print_service import print_pdf, prepare_raw_pdf_for_a4_print
+from app.services.print_service import print_pdf, prepare_raw_pdf_for_a4_print, prepare_raw_preview_pdf
 from app.services.user_service import get_user_mac, save_user_data, get_all_user_stats, save_global_stats
 
 main_bp = Blueprint('main', __name__)
+
+
+def _secure_upload_filename(original_filename, fallback_stem='uploaded_file'):
+    """生成安全文件名，同时保留中文文件名被清洗掉的原始扩展名。"""
+    original_filename = original_filename or ''
+    safe_name = secure_filename(original_filename)
+    original_ext = os.path.splitext(original_filename)[1].lower()
+    safe_stem, safe_ext = os.path.splitext(safe_name)
+    unique_suffix = uuid.uuid4().hex[:8]
+
+    if safe_ext:
+        return f"{safe_stem or fallback_stem}_{unique_suffix}{safe_ext.lower()}"
+    if original_ext:
+        # 中文名如“滴滴.zip”会被 secure_filename 清洗成“zip”，这里还原成可识别的扩展名。
+        if safe_name.lower() == original_ext.lstrip('.').lower():
+            safe_stem = fallback_stem
+        else:
+            safe_stem = safe_name or fallback_stem
+        return f"{safe_stem}_{unique_suffix}{original_ext}"
+    return f"{safe_name or fallback_stem}_{unique_suffix}"
+
+
+def _unique_upload_path(folder, filename):
+    """避免同一会话内清洗后的文件名冲突。"""
+    base, ext = os.path.splitext(filename)
+    candidate = filename
+    index = 2
+    while os.path.exists(os.path.join(folder, candidate)):
+        candidate = f"{base}_{index}{ext}"
+        index += 1
+    return candidate, os.path.join(folder, candidate)
+
+
+def _raw_file_registry():
+    """原始打印文件的临时索引，避免每次按文件名全局搜索并缓存预转换结果。"""
+    if not hasattr(current_app, 'raw_file_registry'):
+        current_app.raw_file_registry = {}
+    return current_app.raw_file_registry
+
+
+def _register_raw_file(file_info):
+    filename = file_info.get('filename')
+    file_path = file_info.get('file_path')
+    if filename and file_path:
+        _raw_file_registry()[filename] = {
+            'file_path': file_path,
+            'preview_path': file_info.get('preview_path'),
+            'preview_error': file_info.get('preview_error')
+        }
+
+
+def _find_raw_file(filename):
+    registry_entry = _raw_file_registry().get(filename)
+    if registry_entry and os.path.exists(registry_entry.get('file_path', '')):
+        return registry_entry
+
+    temp_folder = current_app.config['TEMP_FOLDER']
+    for root, dirs, files in os.walk(temp_folder):
+        if filename in files:
+            file_path = os.path.join(root, filename)
+            registry_entry = {'file_path': file_path}
+            _raw_file_registry()[filename] = registry_entry
+            return registry_entry
+    return None
+
+
+def _prepare_raw_file_info(file_info):
+    """为原始打印文件补充预览缓存信息，并登记到临时索引。"""
+    file_path = file_info.get('file_path')
+    ext = (file_info.get('extension') or os.path.splitext(file_path or '')[1]).lower()
+    if file_info.get('is_printable') and ext in {'.doc', '.docx'}:
+        try:
+            preview_path = prepare_raw_preview_pdf(file_path)
+            file_info['preview_path'] = preview_path
+            file_info['preview_filename'] = os.path.basename(preview_path)
+            file_info['preview_ready'] = True
+            current_app.logger.info(f"原始文件已预生成PDF预览: {file_path} -> {preview_path}")
+        except Exception as e:
+            file_info['preview_ready'] = False
+            file_info['preview_error'] = str(e)
+            current_app.logger.warning(f"原始文件预生成PDF失败: {file_path}, error={e}")
+    else:
+        file_info['preview_ready'] = True
+
+    _register_raw_file(file_info)
+    return file_info
 
 
 def _looks_like_flight_upload(filename):
@@ -96,8 +182,8 @@ def upload_file():
             # 保存原始文件名用于显示
             original_filename = file.filename
             # 保存文件
-            filename = secure_filename(file.filename)
-            zip_path = os.path.join(temp_folder, filename)
+            filename = _secure_upload_filename(original_filename)
+            filename, zip_path = _unique_upload_path(temp_folder, filename)
             file.save(zip_path)
             logger.info(f"文件已保存到: {zip_path}")
             logger.info(f"原始文件名: {original_filename}, 安全文件名: {filename}")
@@ -491,8 +577,8 @@ def upload_raw_file():
         for file in files:
             # 保存文件
             original_filename = file.filename
-            filename = secure_filename(file.filename)
-            file_path = os.path.join(temp_folder, filename)
+            filename = _secure_upload_filename(original_filename)
+            filename, file_path = _unique_upload_path(temp_folder, filename)
             file.save(file_path)
             logger.info(f"原始打印文件已保存到: {file_path}")
             logger.info(f"原始文件名: {original_filename}, 安全文件名: {filename}")
@@ -509,14 +595,14 @@ def upload_raw_file():
                     from app.services.file_service import extract_zip_for_raw_print
                     extracted_file_list = extract_zip_for_raw_print(file_path, extract_dir)
                     
-                    # 将解压后的文件添加到结果中
-                    extracted_files.extend(extracted_file_list)
+                    # 将解压后的文件添加到结果中，并提前为Word文档生成预览PDF。
+                    extracted_files.extend(_prepare_raw_file_info(item) for item in extracted_file_list)
                     logger.info(f"ZIP文件 {filename} 解压完成，解压出 {len(extracted_file_list)} 个文件")
                     
                 except Exception as e:
                     logger.error(f"解压ZIP文件 {filename} 时出错: {str(e)}")
-                    # 解压失败时，仍然将ZIP文件本身作为可打印文件
-                    uploaded_files.append({
+                    # 解压失败时仅保留原始ZIP用于展示，不把压缩包本身当作可打印文件。
+                    uploaded_files.append(_prepare_raw_file_info({
                         'name': filename,
                         'filename': filename,
                         'file_path': file_path,
@@ -524,12 +610,12 @@ def upload_raw_file():
                         'type': 'archive',
                         'file_type': 'archive',
                         'extension': '.zip',
-                        'is_printable': True
-                    })
-                    logger.info(f"ZIP文件解压失败，将ZIP文件本身添加到可打印文件列表")
+                        'is_printable': False
+                    }))
+                    logger.info(f"ZIP文件解压失败，将ZIP文件本身添加到不可打印文件列表")
             else:
                 # 普通文件直接添加
-                uploaded_files.append({
+                uploaded_files.append(_prepare_raw_file_info({
                     'name': original_filename,  # 使用原始文件名显示
                     'filename': filename,       # 使用安全文件名存储
                     'file_path': file_path,
@@ -537,8 +623,8 @@ def upload_raw_file():
                     'type': get_file_type(filename),
                     'file_type': get_file_type(filename),
                     'extension': os.path.splitext(filename)[1].lower(),
-                    'is_printable': True
-                })
+                    'is_printable': is_printable_file(filename)
+                }))
         
         # 合并所有文件（解压后的文件优先）
         all_files = extracted_files + uploaded_files
@@ -613,21 +699,14 @@ def print_raw_file():
         
         logger.info(f"原始打印文件: {filename}, 操作: {action}")
         
-        # 在临时目录中查找文件
-        temp_folder = current_app.config['TEMP_FOLDER']
-        file_found = False
-        file_path = None
-        
-        # 递归搜索临时目录中的文件
-        for root, dirs, files in os.walk(temp_folder):
-            if filename in files:
-                file_path = os.path.join(root, filename)
-                file_found = True
-                break
-        
-        if not file_found or not os.path.exists(file_path):
+        registry_entry = _find_raw_file(filename)
+        file_path = registry_entry.get('file_path') if registry_entry else None
+        if not file_path or not os.path.exists(file_path):
             logger.error(f"文件未找到: {filename}")
             return jsonify({'success': False, 'message': f'文件 {filename} 未找到，可能已被清理或移动'}), 404
+        if not is_printable_file(file_path):
+            logger.warning(f"文件类型不支持原始打印: {filename}")
+            return jsonify({'success': False, 'message': f'文件 {filename} 的格式暂不支持打印'}), 400
         
         logger.info(f"找到文件: {file_path}")
         
@@ -635,7 +714,10 @@ def print_raw_file():
         copies = int(data.get('copies', 1))
         tray = (data.get('tray') or '').strip() or None
 
-        print_path = prepare_raw_pdf_for_a4_print(file_path)
+        source_path = registry_entry.get('preview_path') if registry_entry else None
+        if source_path and not os.path.exists(source_path):
+            source_path = None
+        print_path = prepare_raw_pdf_for_a4_print(source_path or file_path)
         logger.info(f"开始提交原始打印: {print_path}, printer={printer_name}, copies={copies}, tray={tray}")
         print_result = print_pdf(
             print_path,
@@ -678,26 +760,15 @@ def print_raw_files_batch():
         copies = int(data.get('copies', 1))
         tray = (data.get('tray') or '').strip() or None
         
-        # 在临时目录中查找所有文件
-        temp_folder = current_app.config['TEMP_FOLDER']
-        
         # 批量处理结果
         print_results = []
         success_count = 0
         failed_count = 0
         
         for filename in filenames:
-            file_found = False
-            file_path = None
-            
-            # 递归搜索临时目录中的文件
-            for root, dirs, files in os.walk(temp_folder):
-                if filename in files:
-                    file_path = os.path.join(root, filename)
-                    file_found = True
-                    break
-            
-            if not file_found or not os.path.exists(file_path):
+            registry_entry = _find_raw_file(filename)
+            file_path = registry_entry.get('file_path') if registry_entry else None
+            if not file_path or not os.path.exists(file_path):
                 logger.warning(f"文件未找到: {filename}")
                 print_results.append({
                     'filename': filename,
@@ -708,11 +779,25 @@ def print_raw_files_batch():
                 })
                 failed_count += 1
                 continue
+            if not is_printable_file(file_path):
+                logger.warning(f"文件类型不支持原始打印: {filename}")
+                print_results.append({
+                    'filename': filename,
+                    'success': False,
+                    'message': f'文件 {filename} 的格式暂不支持打印',
+                    'printer': printer_name,
+                    'job_id': None
+                })
+                failed_count += 1
+                continue
             
             logger.info(f"找到文件: {file_path}，开始打印")
             
             try:
-                print_path = prepare_raw_pdf_for_a4_print(file_path)
+                source_path = registry_entry.get('preview_path') if registry_entry else None
+                if source_path and not os.path.exists(source_path):
+                    source_path = None
+                print_path = prepare_raw_pdf_for_a4_print(source_path or file_path)
                 print_result = print_pdf(
                     print_path,
                     printer_name=printer_name,
@@ -782,19 +867,10 @@ def get_raw_file():
         filename = data.get('filename')
         logger.info(f"请求预览文件: {filename}")
         
-        # 在临时目录中查找文件
-        temp_folder = current_app.config['TEMP_FOLDER']
-        file_found = False
-        file_path = None
+        registry_entry = _find_raw_file(filename)
+        file_path = registry_entry.get('file_path') if registry_entry else None
         
-        # 递归搜索临时目录中的文件
-        for root, dirs, files in os.walk(temp_folder):
-            if filename in files:
-                file_path = os.path.join(root, filename)
-                file_found = True
-                break
-        
-        if file_found and os.path.exists(file_path):
+        if file_path and os.path.exists(file_path):
             logger.info(f"找到文件: {file_path}")
             
             # 生成一个安全的访问令牌
@@ -806,7 +882,11 @@ def get_raw_file():
             # 在实际生产环境中，应该使用Redis等缓存系统
             if not hasattr(current_app, 'file_tokens'):
                 current_app.file_tokens = {}
-            current_app.file_tokens[token] = file_path
+            current_app.file_tokens[token] = {
+                'file_path': file_path,
+                'preview_path': registry_entry.get('preview_path'),
+                'preview_error': registry_entry.get('preview_error')
+            }
             
             # 返回文件访问URL
             preview_url = f"/api/preview-file/{token}"
@@ -898,9 +978,17 @@ def preview_file(token):
             logger.warning(f"无效的预览令牌: {token}")
             return jsonify({'error': '无效的预览令牌'}), 404
         
-        file_path = current_app.file_tokens[token]
+        token_value = current_app.file_tokens[token]
+        if isinstance(token_value, dict):
+            file_path = token_value.get('file_path')
+            preview_path = token_value.get('preview_path')
+            preview_error = token_value.get('preview_error')
+        else:
+            file_path = token_value
+            preview_path = None
+            preview_error = None
         
-        if not os.path.exists(file_path):
+        if not file_path or not os.path.exists(file_path):
             logger.warning(f"文件不存在: {file_path}")
             return jsonify({'error': '文件不存在'}), 404
         
@@ -911,10 +999,32 @@ def preview_file(token):
         # 检查文件类型
         file_ext = os.path.splitext(filename)[1].lower()
         
-        # 对于图片和PDF文件，直接返回文件内容
+        # 对于图片和PDF文件，内联返回；Word文档先转PDF，避免浏览器直接下载。
         if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.pdf']:
-            logger.info(f"直接预览文件: {filename}")
-            return send_from_directory(os.path.dirname(file_path), filename)
+            logger.info(f"内联预览文件: {filename}")
+            response = send_from_directory(os.path.dirname(file_path), filename, as_attachment=False)
+            response.headers['Content-Disposition'] = 'inline'
+            return response
+        if file_ext in ['.doc', '.docx']:
+            if preview_error:
+                logger.warning(f"Word文件预览PDF不可用: {filename}, error={preview_error}")
+                return jsonify({'error': f'Word文件预览PDF生成失败: {preview_error}'}), 500
+            if preview_path and os.path.exists(preview_path):
+                logger.info(f"使用已预生成的Word预览PDF: {preview_path}")
+                return send_file(
+                    preview_path,
+                    mimetype='application/pdf',
+                    as_attachment=False,
+                    download_name=f"{os.path.splitext(filename)[0]}.pdf"
+                )
+            logger.info(f"Word文件转换为PDF后预览: {filename}")
+            preview_pdf_path = prepare_raw_pdf_for_a4_print(file_path)
+            return send_file(
+                preview_pdf_path,
+                mimetype='application/pdf',
+                as_attachment=False,
+                download_name=f"{os.path.splitext(filename)[0]}.pdf"
+            )
         
         # 对于其他文件类型，返回下载链接
         else:
@@ -943,16 +1053,24 @@ def print_file(filename):
             return jsonify({'success': False, 'message': '文件不存在', 'error': '文件不存在'}), 404
         
         print_result = print_pdf(file_path)
-        logger.info(f"文件已发送至打印机: {file_path}")
+        ok = bool(print_result.get('success'))
+        if ok:
+            logger.info(f"文件已发送至打印机: {file_path}")
+        else:
+            logger.error(f"文件提交打印失败: {file_path}, reason={print_result.get('message', '未知错误')}")
         
         # 返回打印结果的详细信息
-        return jsonify({
-            'success': print_result.get('success', False),
-            'message': f"文件已发送至打印机: {print_result.get('message', '未知打印机')}",
+        response = jsonify({
+            'success': ok,
+            'message': (
+                f"文件已发送至打印机: {print_result.get('message', '未知打印机')}"
+                if ok else print_result.get('message', '打印失败')
+            ),
             'printer': print_result.get('printer', '未知打印机'),
             'job_id': print_result.get('job_id', ''),
             'debug': print_result.get('debug', False)
         })
+        return response if ok else (response, 500)
     except Exception as e:
         logger.error(f"打印文件时出错: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'message': f'打印文件时出错: {str(e)}', 'error': str(e)}), 500
