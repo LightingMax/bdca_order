@@ -197,8 +197,9 @@ def prepare_raw_pdf_for_a4_print(pdf_path, dpi=220):
         return pdf_path
 
     try:
-        from pdf2image import convert_from_path
-        images = convert_from_path(pdf_path, dpi=dpi)
+        from app.services.pdf_service import _render_pdf_pages_to_pil
+
+        images = _render_pdf_pages_to_pil(pdf_path, dpi=dpi)
         if not images:
             return pdf_path
 

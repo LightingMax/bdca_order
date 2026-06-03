@@ -20,6 +20,7 @@ class Config:
     
     # 用户数据文件
     USER_DATA_FILE = os.path.join(DATA_FOLDER, 'user_data.json')
+    GLOBAL_STATS_FILE = os.environ.get('GLOBAL_STATS_FILE') or os.path.join(DATA_FOLDER, 'global_stats.json')
     
     # 允许上传的文件类型（智能处理）
     ALLOWED_EXTENSIONS = {'zip', 'pdf'}

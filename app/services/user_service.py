@@ -113,46 +113,172 @@ def load_global_stats():
     logger = current_app.logger
     global_stats_file = current_app.config.get('GLOBAL_STATS_FILE', 'global_stats.json')
     logger.debug(f"尝试加载全局统计数据文件: {global_stats_file}")
+
+    legacy_global_stats_file = os.path.join(current_app.config.get('PROJECT_ROOT', os.getcwd()), 'global_stats.json')
     
     if os.path.exists(global_stats_file):
         try:
             with open(global_stats_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 logger.info(f"成功加载全局统计数据，总行程单数: {data.get('total_itineraries', 0)}")
-                return data
+                return _normalize_global_stats(data)
         except Exception as e:
             logger.error(f"读取全局统计数据文件出错: {str(e)}", exc_info=True)
+    elif os.path.exists(legacy_global_stats_file):
+        try:
+            with open(legacy_global_stats_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            logger.info(f"从旧路径迁移全局统计数据: {legacy_global_stats_file}")
+            return _normalize_global_stats(data)
+        except Exception as e:
+            logger.error(f"读取旧全局统计数据文件出错: {str(e)}", exc_info=True)
     else:
         logger.warning(f"全局统计数据文件不存在: {global_stats_file}")
     
     # 如果文件不存在或读取出错，返回初始结构
     logger.info("返回空的全局数据结构")
-    return {
+    return _normalize_global_stats({
         "total_itineraries": 0,
         "total_amount": 0.0,
         "first_run": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         "last_update": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         "run_count": 0
+    })
+
+
+def _normalize_global_stats(data):
+    """补齐旧版本全局统计字段。"""
+    data = data or {}
+    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    total_itineraries = int(data.get("total_itineraries", 0) or 0)
+    total_processed_files = int(data.get("total_processed_files", total_itineraries) or 0)
+    has_recorded_pages = "total_pages" in data
+    total_pages = int(data.get("total_pages", total_processed_files) or 0)
+    pages_estimated = bool(
+        data.get(
+            "pages_estimated",
+            (not has_recorded_pages) or total_pages == total_processed_files
+        )
+    )
+
+    data.setdefault("total_itineraries", total_itineraries)
+    data.setdefault("total_amount", 0.0)
+    data.setdefault("first_run", now)
+    data.setdefault("last_update", now)
+    data.setdefault("run_count", 0)
+    data["total_processed_files"] = total_processed_files
+    data["total_pages"] = total_pages
+    data["pages_estimated"] = pages_estimated
+    data["saved_minutes"] = total_processed_files * 3
+    data["saved_hours"] = round(data["saved_minutes"] / 60, 1)
+    data["saved_workdays"] = round(data["saved_minutes"] / 480, 2)
+    paper_meters = round(total_pages * 0.297, 1)
+    data["paper_meters"] = paper_meters
+    data["paper_lap"] = _build_paper_lap_stats(paper_meters, total_pages)
+    data["slogan"] = _build_reimbursement_slogan(data)
+    data.pop("achievement_title", None)
+    data.pop("achievement_message", None)
+    return data
+
+
+def _build_paper_lap_stats(paper_meters, total_pages):
+    """把A4纸长度换算成更有画面感的绕圈类比。"""
+    if total_pages <= 0:
+        return {
+            "target": "公司",
+            "laps": 0,
+            "text": "打印的文件还没开始绕。"
+        }
+
+    targets = [
+        ("办公桌", 3),
+        ("会议室", 20),
+        ("篮球场", 86),
+        ("公司", 2 * (12 * 3 + 7 * 3)),
+        ("足球场", 346),
+        ("故宫", 3428),
+        ("西湖", 15000),
+        ("地球", 40075000),
+    ]
+
+    reached_target, reached_circumference = targets[0]
+    for target, circumference in targets:
+        if paper_meters >= circumference:
+            reached_target, reached_circumference = target, circumference
+        else:
+            break
+
+    laps = paper_meters / reached_circumference
+    if reached_target == "地球":
+        lap_text = f"能绕地球 {laps:.4f} 圈"
+    elif laps >= 1:
+        lap_text = f"能绕{reached_target}约 {laps:.1f} 圈"
+    else:
+        lap_text = f"能绕{reached_target}约 {laps:.1f} 圈"
+
+    return {
+        "target": reached_target,
+        "laps": round(laps, 4 if reached_target == "地球" else 2),
+        "text": f"打印的文件约 {_format_number(paper_meters)} 米，{lap_text}。"
     }
 
-def save_global_stats(itinerary_count, total_amount):
+
+def _format_number(value):
+    """用千分位格式化数字，保留必要的小数。"""
+    if isinstance(value, float) and not value.is_integer():
+        return f"{value:,.1f}"
+    return f"{int(value):,}"
+
+
+def _build_reimbursement_slogan(data):
+    """生成标题下方的香飘飘式战报文案。"""
+    total_files = int(data.get("total_processed_files", 0) or 0)
+    saved_minutes = int(data.get("saved_minutes", 0) or 0)
+    lap_text = data.get("paper_lap", {}).get("text", "")
+    if total_files <= 0:
+        return "累计 0 份报销文件，节省了 0 分钟注意力，打印的文件还没开始绕。"
+    return (
+        f"累计 {_format_number(total_files)} 份报销文件，"
+        f"节省了 {_format_number(saved_minutes)} 分钟注意力，{lap_text}"
+    )
+
+
+def save_global_stats(itinerary_count, total_amount, processed_file_count=None, processed_page_count=None):
     """保存全局统计数据"""
     logger = current_app.logger
-    logger.info(f"保存全局统计数据: 行程单数={itinerary_count}, 总金额={total_amount}")
+    processed_file_count = itinerary_count if processed_file_count is None else processed_file_count
+    processed_page_count = processed_file_count if processed_page_count is None else processed_page_count
+    logger.info(
+        f"保存全局统计数据: 行程单数={itinerary_count}, 文件数={processed_file_count}, "
+        f"页数={processed_page_count}, 总金额={total_amount}"
+    )
     
     data = load_global_stats()
     
     # 更新统计数据
     data["total_itineraries"] += itinerary_count
+    data["total_processed_files"] = data.get("total_processed_files", 0) + processed_file_count
+    data["total_pages"] = data.get("total_pages", 0) + processed_page_count
+    # 如果历史数据是估算，之后的累计值就是“历史估算 + 新增实算”的混合值。
+    data["pages_estimated"] = bool(data.get("pages_estimated", False))
     data["total_amount"] += total_amount
     data["last_update"] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     data["run_count"] += 1
+    data = _normalize_global_stats(data)
     
-    logger.info(f"全局统计更新: 累计行程单数={data['total_itineraries']}, 累计金额={data['total_amount']}, 运行次数={data['run_count']}")
+    logger.info(
+        f"全局统计更新: 累计行程单数={data['total_itineraries']}, "
+        f"累计文件数={data['total_processed_files']}, 累计页数={data['total_pages']}, "
+        f"累计节省={data['saved_minutes']}分钟, "
+        f"累计金额={data['total_amount']}, 运行次数={data['run_count']}"
+    )
     
     # 保存到文件
     global_stats_file = current_app.config.get('GLOBAL_STATS_FILE', 'global_stats.json')
     try:
+        global_stats_dir = os.path.dirname(global_stats_file)
+        if global_stats_dir:
+            os.makedirs(global_stats_dir, exist_ok=True)
         with open(global_stats_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         logger.info("全局统计数据保存成功")
@@ -167,6 +293,7 @@ def get_global_stats():
     logger.info("获取全局统计数据")
     
     data = load_global_stats()
+    data = _normalize_global_stats(data)
     
     # 计算运行时长
     if data.get('first_run'):

@@ -102,6 +102,26 @@ def _prepare_raw_file_info(file_info):
     return file_info
 
 
+def _count_pdf_pages_in_directory(directory):
+    """统计目录下所有PDF的实际页数，用于全局纸张长度战报。"""
+    logger = current_app.logger
+    total_pages = 0
+    for root, dirs, files in os.walk(directory):
+        for name in files:
+            if not name.lower().endswith('.pdf'):
+                continue
+            pdf_path = os.path.join(root, name)
+            try:
+                from PyPDF2 import PdfReader
+                reader = PdfReader(pdf_path)
+                page_count = len(reader.pages)
+                total_pages += max(1, page_count)
+            except Exception as e:
+                logger.warning(f"统计PDF页数失败，按1页兜底: {pdf_path}, error={e}")
+                total_pages += 1
+    return total_pages
+
+
 def _looks_like_flight_upload(filename):
     """判断上传文件是否疑似机票，避免旧缓存把机票当普通发票复用。"""
     name = (filename or '').lower()
@@ -120,6 +140,133 @@ def _should_reprocess_upload(filename):
         or any(keyword in name for keyword in didi_keywords)
         or any(keyword in name for keyword in qq_invoice_keywords)
     )
+
+
+def _result_dedup_key(item):
+    """构建稳定去重键，避免火车票/机票增量上传或整合条目重复计数。"""
+    if item.get('is_train_merged_entry'):
+        return 'train_merged_all'
+    order_id = item.get('order_id', '')
+    if str(order_id).startswith('滴滴出行'):
+        invoice_number = item.get('didi_invoice_number')
+        if invoice_number:
+            return f"taxi::didi::{invoice_number}"
+        group_key = item.get('didi_group_key')
+        if group_key:
+            return f"taxi::didi::{group_key}"
+        return 'taxi::didi::legacy'
+    if item.get('has_train_ticket') or item.get('has_flight_ticket') or str(item.get('combined_type', '')).startswith(('train_', 'flight_', 'ticket_')):
+        pages = item.get('train_ticket_pages') or []
+        page_sig = ','.join(str(p) for p in pages) if pages else 'p1'
+        return f"ticket::{order_id}::{page_sig}"
+    if order_id:
+        return f"order::{order_id}"
+    return item.get('output_file') or str(uuid.uuid4())
+
+
+def _extract_result_amounts(result):
+    """从单条处理结果提取分类金额；整合条目不参与统计。"""
+    if not result or result.get('is_train_merged_entry'):
+        return 0.0, 0.0, 0.0, 0.0
+
+    order_id = str(result.get('order_id', '') or '')
+    is_transport = (
+        result.get('has_train_ticket')
+        or result.get('has_flight_ticket')
+        or result.get('has_transport_ticket')
+        or str(result.get('combined_type', '')).startswith(('train_', 'flight_', 'ticket_'))
+    )
+    if is_transport:
+        train_amount = float(result.get('train_amount', 0) or 0)
+        flight_amount = float(result.get('flight_amount', 0) or 0)
+        amount = float(result.get('amount', 0) or 0)
+        if train_amount == 0 and flight_amount == 0:
+            if result.get('has_flight_ticket') and not result.get('has_train_ticket'):
+                flight_amount = amount
+            else:
+                train_amount = amount
+        return 0.0, 0.0, train_amount, flight_amount
+
+    amount = float(result.get('amount', 0) or 0)
+    if order_id.startswith('hotel_') or result.get('has_hotel_bill'):
+        return 0.0, amount, 0.0, 0.0
+    return amount, 0.0, 0.0, 0.0
+
+
+def _aggregate_result_amounts(results):
+    """按结果去重后汇总分类金额，排除火车票/机票整合条目。"""
+    taxi_amount = 0.0
+    hotel_amount = 0.0
+    train_amount = 0.0
+    flight_amount = 0.0
+    seen_keys = set()
+
+    for result in results or []:
+        if result.get('is_train_merged_entry'):
+            continue
+        dedup_key = _result_dedup_key(result)
+        if dedup_key in seen_keys:
+            continue
+        seen_keys.add(dedup_key)
+
+        taxi_part, hotel_part, train_part, flight_part = _extract_result_amounts(result)
+        taxi_amount += taxi_part
+        hotel_amount += hotel_part
+        train_amount += train_part
+        flight_amount += flight_part
+
+    return {
+        'taxi_amount': round(taxi_amount, 2),
+        'hotel_amount': round(hotel_amount, 2),
+        'train_amount': round(train_amount, 2),
+        'flight_amount': round(flight_amount, 2),
+        'total_amount': round(taxi_amount + hotel_amount + train_amount + flight_amount, 2),
+        'order_count': len(seen_keys),
+    }
+
+
+def _aggregate_classification_info(file_results):
+    """汇总上传文件的分类统计；仅统计本次新处理文件，不含复用文件。"""
+    current_taxi_amount = 0.0
+    current_hotel_amount = 0.0
+    current_train_amount = 0.0
+    current_flight_amount = 0.0
+    current_taxi_orders = 0
+    current_hotel_orders = 0
+    current_train_tickets = 0
+    current_flight_tickets = 0
+    current_train_groups = 0
+    current_taxi_warnings = []
+    current_hotel_warnings = []
+
+    for file_result in file_results or []:
+        info = file_result.get('classification_info') or {}
+        current_taxi_amount += info.get('taxi_amount', 0)
+        current_hotel_amount += info.get('hotel_amount', 0)
+        current_train_amount += info.get('train_amount', 0)
+        current_flight_amount += info.get('flight_amount', 0)
+        current_taxi_orders += info.get('taxi_orders', 0)
+        current_hotel_orders += info.get('hotel_orders', 0)
+        current_train_tickets += info.get('train_tickets', 0)
+        current_flight_tickets += info.get('flight_tickets', 0)
+        current_train_groups += info.get('train_groups', 0)
+        current_taxi_warnings.extend(info.get('taxi_warnings', []))
+        current_hotel_warnings.extend(info.get('hotel_warnings', []))
+
+    return {
+        'taxi_amount': round(current_taxi_amount, 2),
+        'hotel_amount': round(current_hotel_amount, 2),
+        'train_amount': round(current_train_amount, 2),
+        'flight_amount': round(current_flight_amount, 2),
+        'total_amount': round(current_taxi_amount + current_hotel_amount + current_train_amount + current_flight_amount, 2),
+        'taxi_orders': current_taxi_orders,
+        'hotel_orders': current_hotel_orders,
+        'train_tickets': current_train_tickets,
+        'flight_tickets': current_flight_tickets,
+        'train_groups': current_train_groups,
+        'taxi_warnings': current_taxi_warnings,
+        'hotel_warnings': current_hotel_warnings,
+    }
 
 @main_bp.route('/')
 def index():
@@ -169,6 +316,7 @@ def upload_file():
     new_results = []       # 只包含新处理的结果
     processed_files = []
     reused_files = []
+    uploaded_pdf_page_total = 0
     
     try:
         logger.info(f"开始处理 {len(files)} 个上传的ZIP文件")
@@ -201,12 +349,8 @@ def upload_file():
                 existing_file = check_file_exists(file_hash)
                 if existing_file and 'results' in existing_file:
                     logger.info(f"文件 {filename} 在当前会话中已上传过，重用之前的处理结果")
-                    # 将已有结果添加到总结果中
+                    # 将已有结果添加到总结果中（供前端展示），但不计入 new_results 避免重复统计
                     all_results.extend(existing_file['results'])
-                    
-                    # 将重用结果也添加到新结果中，确保前端能正确显示
-                    reused_results = existing_file['results']
-                    new_results.extend(reused_results)
                     
                     # 重新分析XML缺失情况，而不是直接重用之前的警告
                     # 为每个ZIP文件创建单独的提取目录
@@ -297,6 +441,8 @@ def upload_file():
                 
                 # 处理PDF文件（使用原始文件名进行类型识别）
                 results, xml_missing_warnings, classification_info = process_pdf_files(file_extract_dir, original_filename)
+                file_pdf_page_count = _count_pdf_pages_in_directory(file_extract_dir)
+                uploaded_pdf_page_total += file_pdf_page_count
                 
                 # 过滤结果，找出新的订单
                 file_new_results = []
@@ -331,6 +477,7 @@ def upload_file():
                     'hash': file_hash,
                     'result_count': len(results),
                     'new_result_count': len(file_new_results),
+                    'page_count': file_pdf_page_count,
                     'xml_missing_warnings': xml_missing_warnings,  # 保存XML缺失警告
                     'classification_info': classification_info  # 保存分类统计信息
                 })
@@ -351,11 +498,19 @@ def upload_file():
         mac_address = get_user_mac()
         logger.info(f"用户MAC地址: {mac_address}")
         
-        # 保存用户数据（只记录新处理的订单）
+        # 保存用户数据（只记录新处理的订单，排除整合条目）
         if new_results:
-            total_new_amount = sum(result.get('amount', 0) for result in new_results)
-            save_user_data(mac_address, len(new_results), total_new_amount, [result.get('order_id') for result in new_results])
-            logger.info(f"用户数据已保存，新订单数: {len(new_results)}, 新增金额: {total_new_amount}")
+            new_amount_stats = _aggregate_result_amounts(new_results)
+            save_user_data(
+                mac_address,
+                new_amount_stats['order_count'],
+                new_amount_stats['total_amount'],
+                [result.get('order_id') for result in new_results if not result.get('is_train_merged_entry')],
+            )
+            logger.info(
+                f"用户数据已保存，新订单数: {new_amount_stats['order_count']}, "
+                f"新增金额: {new_amount_stats['total_amount']:.2f}"
+            )
         else:
             logger.info("没有新处理的订单，不更新用户统计数据")
         
@@ -366,57 +521,27 @@ def upload_file():
             if 'xml_missing_warnings' in file_result:
                 all_xml_warnings.extend(file_result['xml_missing_warnings'])
         
-        # 计算本次新增的分类统计（包括新处理和重用的文件）
-        current_taxi_amount = 0
-        current_hotel_amount = 0
-        current_train_amount = 0
-        current_flight_amount = 0
-        current_taxi_orders = 0
-        current_hotel_orders = 0
-        current_train_tickets = 0
-        current_flight_tickets = 0
-        current_train_groups = 0
-        current_taxi_warnings = []
-        current_hotel_warnings = []
-        
-        # 聚合所有文件的分类统计信息（包括新处理和重用的文件）
-        for file_result in all_files:
-            if 'classification_info' in file_result:
-                info = file_result['classification_info']
-                current_taxi_amount += info.get('taxi_amount', 0)
-                current_hotel_amount += info.get('hotel_amount', 0)
-                current_train_amount += info.get('train_amount', 0)
-                current_flight_amount += info.get('flight_amount', 0)
-                current_taxi_orders += info.get('taxi_orders', 0)
-                current_hotel_orders += info.get('hotel_orders', 0)
-                current_train_tickets += info.get('train_tickets', 0)
-                current_flight_tickets += info.get('flight_tickets', 0)
-                current_train_groups += info.get('train_groups', 0)
-                current_taxi_warnings.extend(info.get('taxi_warnings', []))
-                current_hotel_warnings.extend(info.get('hotel_warnings', []))
-        
-        # 构建分类统计信息（只返回本次处理的数据，累计由前端维护）
-        all_classification_info = {
-            'taxi_amount': current_taxi_amount,
-            'hotel_amount': current_hotel_amount,
-            'train_amount': current_train_amount,
-            'flight_amount': current_flight_amount,
-            'total_amount': current_taxi_amount + current_hotel_amount + current_train_amount + current_flight_amount,
-            'taxi_orders': current_taxi_orders,
-            'hotel_orders': current_hotel_orders,
-            'train_tickets': current_train_tickets,
-            'flight_tickets': current_flight_tickets,
-            'train_groups': current_train_groups,
-            'taxi_warnings': current_taxi_warnings,
-            'hotel_warnings': current_hotel_warnings
-        }
+        # 计算本次上传新处理文件的分类统计（复用文件不参与金额累计）
+        all_classification_info = _aggregate_classification_info(processed_files)
         
         total_amount = all_classification_info['total_amount']
         
-        # 🎉 彩蛋：更新全局统计数据（包括新处理和重用的订单）
-        total_itineraries = len(all_results)  # 所有订单数量
-        save_global_stats(total_itineraries, total_amount)
-        logger.info(f"🎉 全局统计已更新！累计行程单数: {total_itineraries}")
+        # 🎉 彩蛋：更新全局统计数据（仅统计本次新处理的结果，排除整合条目）
+        new_amount_stats = _aggregate_result_amounts(new_results)
+        total_itineraries = new_amount_stats['order_count']
+        stats_amount = new_amount_stats['total_amount']
+        total_pages = uploaded_pdf_page_total or total_itineraries
+        global_stats = save_global_stats(
+            total_itineraries,
+            stats_amount,
+            processed_file_count=total_itineraries,
+            processed_page_count=total_pages
+        )
+        logger.info(
+            f"🎉 全局统计已更新！本次新订单: {total_itineraries}, "
+            f"本次页数: {total_pages}, 本次金额: {stats_amount:.2f}, "
+            f"累计节省: {global_stats.get('saved_minutes', 0)}分钟"
+        )
         
         # 返回处理结果
         logger.info(f"文件处理完成，成功处理 {len(all_results)} 个订单，其中新处理 {len(new_results)} 个")
@@ -429,43 +554,16 @@ def upload_file():
             f"机票金额 {all_classification_info['flight_amount']:.2f}元"
         )
         
-        # 计算本次处理的金额（只计算新处理的订单，不包括重用的）
-        # 从 new_results 中计算金额，而不是从 processed_files
-        current_session_taxi_amount = 0
-        current_session_hotel_amount = 0
-        current_session_train_amount = 0
-        current_session_flight_amount = 0
-        
-        # 方法1：从 new_results 直接计算（最准确）
-        for result in new_results:
-            amount = result.get('amount', 0)
-            order_id = result.get('order_id', '')
-            # 判断是网约车还是酒店（根据order_id前缀或文件类型）
-            if result.get('has_flight_ticket'):
-                current_session_flight_amount += result.get('flight_amount', amount)
-                current_session_train_amount += result.get('train_amount', 0)
-            elif result.get('is_train_merged_entry') or result.get('has_train_ticket'):
-                current_session_train_amount += result.get('train_amount', amount)
-            elif order_id.startswith('hotel_'):
-                current_session_hotel_amount += amount
-            else:
-                current_session_taxi_amount += amount
-        
-        # 方法2：如果方法1没有金额，尝试从 processed_files 的 classification_info 计算
-        # 但只计算新处理的文件，不包括重用的文件
-        if current_session_taxi_amount == 0 and current_session_hotel_amount == 0 and current_session_train_amount == 0:
-            for file_result in processed_files:
-                if 'classification_info' in file_result:
-                    info = file_result['classification_info']
-                    current_session_taxi_amount += info.get('taxi_amount', 0)
-                    current_session_hotel_amount += info.get('hotel_amount', 0)
-                    current_session_train_amount += info.get('train_amount', 0)
-                    current_session_flight_amount += info.get('flight_amount', 0)
-        
-        current_session_total = current_session_taxi_amount + current_session_hotel_amount + current_session_train_amount + current_session_flight_amount
+        # 计算本次新处理订单的金额（排除复用结果与整合条目）
+        current_session_stats = _aggregate_result_amounts(new_results)
+        current_session_taxi_amount = current_session_stats['taxi_amount']
+        current_session_hotel_amount = current_session_stats['hotel_amount']
+        current_session_train_amount = current_session_stats['train_amount']
+        current_session_flight_amount = current_session_stats['flight_amount']
+        current_session_total = current_session_stats['total_amount']
         
         logger.info(
-            f"📊 本次处理金额计算: 新订单数={len(new_results)}, "
+            f"📊 本次处理金额计算: 新订单数={current_session_stats['order_count']}, "
             f"网约车={current_session_taxi_amount:.2f}元, "
             f"酒店={current_session_hotel_amount:.2f}元, "
             f"火车={current_session_train_amount:.2f}元, "
@@ -476,27 +574,6 @@ def upload_file():
         # 将处理结果增量保存到session中（用于会话内记录与查看）
         session_existing_results = session.get('processed_files', [])
         merged_results_map = {}
-
-        def _result_dedup_key(item):
-            """构建稳定去重键，避免火车票增量上传时重复计数。"""
-            if item.get('is_train_merged_entry'):
-                return 'train_merged_all'
-            order_id = item.get('order_id', '')
-            if str(order_id).startswith('滴滴出行'):
-                invoice_number = item.get('didi_invoice_number')
-                if invoice_number:
-                    return f"taxi::didi::{invoice_number}"
-                group_key = item.get('didi_group_key')
-                if group_key:
-                    return f"taxi::didi::{group_key}"
-                return 'taxi::didi::legacy'
-            if item.get('has_train_ticket') or item.get('has_flight_ticket') or str(item.get('combined_type', '')).startswith(('train_', 'flight_', 'ticket_')):
-                pages = item.get('train_ticket_pages') or []
-                page_sig = ','.join(str(p) for p in pages) if pages else 'p1'
-                return f"ticket::{order_id}::{page_sig}"
-            if order_id:
-                return f"order::{order_id}"
-            return item.get('output_file') or str(uuid.uuid4())
 
         has_new_didi_results = any(str(item.get('order_id', '')).startswith('滴滴出行') for item in all_results)
         for item in session_existing_results:
@@ -526,6 +603,7 @@ def upload_file():
             'total_amount': total_amount,
             'xml_missing_warnings': all_xml_warnings,  # 添加XML缺失警告
             'classification_info': all_classification_info,  # 添加分类统计信息
+            'global_stats': global_stats,
             'file_details': {
                 'processed': processed_files,
                 'reused': reused_files
@@ -537,7 +615,7 @@ def upload_file():
                 'train_amount': current_session_train_amount,
                 'flight_amount': current_session_flight_amount,
                 'total_amount': current_session_total,
-                'orders': len(new_results)
+                'orders': current_session_stats['order_count']
             }
         })
         

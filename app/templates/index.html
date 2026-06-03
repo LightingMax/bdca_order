@@ -709,11 +709,27 @@
         .notification.info {
             background-color: #17a2b8;
         }
+
+        .hero-slogan {
+            max-width: 920px;
+            margin: -10px auto 24px;
+            color: #6c757d;
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+
+        .hero-slogan strong {
+            color: #0d6efd;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1 class="text-center mb-4">打车行程单和发票文件处理系统</h1>
+        <div id="globalSlogan" class="hero-slogan text-center animate-fade-in">
+            报销战报加载中...
+        </div>
         
         <!-- 三块功能选择区域 -->
         <div class="function-blocks-container">
@@ -1022,6 +1038,7 @@
             const printAllBtn = document.getElementById('printAllBtn');
             const notification = document.getElementById('notification');
             const notificationMessage = document.getElementById('notificationMessage');
+            const globalSlogan = document.getElementById('globalSlogan');
             
             // ==================== 数据管理 ====================
             // 智能处理的数据
@@ -1057,6 +1074,66 @@
                 }, 0);
             }
 
+            function sumAmountsFromResults(results) {
+                let taxi = 0;
+                let hotel = 0;
+                let train = 0;
+                let flight = 0;
+
+                (results || []).forEach((result) => {
+                    if (!result || result.is_train_merged_entry) {
+                        return;
+                    }
+
+                    const combinedType = result.combined_type || '';
+                    const isTransport = isTrainResult(result);
+                    if (isTransport) {
+                        let trainPart = Number(result.train_amount || 0);
+                        let flightPart = Number(result.flight_amount || 0);
+                        const amount = Number(result.amount || 0);
+                        if (trainPart === 0 && flightPart === 0) {
+                            if (result.has_flight_ticket && !result.has_train_ticket) {
+                                flightPart = amount;
+                            } else {
+                                trainPart = amount;
+                            }
+                        }
+                        train += trainPart;
+                        flight += flightPart;
+                        return;
+                    }
+
+                    const amount = Number(result.amount || 0);
+                    if (result.has_hotel_bill || combinedType === 'hotel_accommodation' || String(result.order_id || '').startsWith('hotel_')) {
+                        hotel += amount;
+                    } else {
+                        taxi += amount;
+                    }
+                });
+
+                return {
+                    taxi,
+                    hotel,
+                    train,
+                    flight,
+                    total: taxi + hotel + train + flight,
+                };
+            }
+
+            function syncSessionAmountsFromProcessedFiles() {
+                const amounts = sumAmountsFromResults(processedFiles);
+                window.sessionTaxiAmount = amounts.taxi;
+                window.sessionHotelAmount = amounts.hotel;
+                window.sessionTrainAmount = amounts.train;
+                window.sessionFlightAmount = amounts.flight;
+                window.sessionTotalAmount = amounts.total;
+                return amounts;
+            }
+
+            function countBillableResults(results) {
+                return (results || []).filter(item => item && !item.is_train_merged_entry).length;
+            }
+
             function withTrainSortIndex(file, index) {
                 const sortedFile = { ...file, train_sort_index: index };
                 if (Array.isArray(file.train_ticket_items)) {
@@ -1090,6 +1167,7 @@
                 const refreshSeq = ++trainMergeRefreshSeq;
 
                 if (trainTicketCount <= 1) {
+                    syncSessionAmountsFromProcessedFiles();
                     if (renderAfter) {
                         renderOrdersSection(0);
                     }
@@ -1139,6 +1217,7 @@
                     }
                 } finally {
                     trainMergedRefreshing = false;
+                    syncSessionAmountsFromProcessedFiles();
                     if (renderAfter) {
                         renderOrdersSection(0);
                     }
@@ -2523,50 +2602,26 @@
 
                     // 仅按“当前页面结果”生成火车票整合条目，后续拖拽也复用同一刷新逻辑
                     await refreshTrainMergedEntry({ renderAfter: false, notify: false });
+                    syncSessionAmountsFromProcessedFiles();
                     
                     console.log('📤 添加新结果后，processedFiles 长度:', processedFiles.length);
                     console.log('📤 添加新结果后，processedFiles 内容:', JSON.stringify(processedFiles));
                     
                     // 显示本次处理结果统计
-                    const newFilesCount = newResults.length;
-                    const newAmount = response.total_amount || newResults.reduce((sum, result) => sum + (result.amount || 0), 0);
+                    const newFilesCount = response.new_results_count || 0;
+                    const currentSession = response.current_session || {};
+                    const currentSessionTotal = currentSession.total_amount || 0;
                     
-                    // 计算累计统计 - 使用分类统计信息
-                    const totalFiles = processedFiles.length;
-                    const totalAmount = response.total_amount || processedFiles.reduce((sum, result) => sum + (result.amount || 0), 0);
+                    // 累计统计：基于当前页面实际条目重算，排除整合条目避免重复计数
+                    const totalFiles = countBillableResults(processedFiles);
+                    const sessionAmounts = syncSessionAmountsFromProcessedFiles();
+                    const taxiAmount = sessionAmounts.taxi;
+                    const hotelAmount = sessionAmounts.hotel;
+                    const trainAmount = sessionAmounts.train;
+                    const flightAmount = sessionAmounts.flight;
+                    const totalClassificationAmount = sessionAmounts.total;
                     
-                    // 获取分类统计信息
-                    const classificationInfo = response.classification_info || {};
-                    const currentTaxiAmount = classificationInfo.taxi_amount || 0;
-                    const currentHotelAmount = classificationInfo.hotel_amount || 0;
-                    const currentTrainAmount = classificationInfo.train_amount || 0;
-                    const currentFlightAmount = classificationInfo.flight_amount || 0;
-                    const currentTotalAmount = classificationInfo.total_amount || 0;
-                    
-                    // 维护会话级别的累计变量（前端维护）
-                    if (typeof window.sessionTaxiAmount === 'undefined') {
-                        window.sessionTaxiAmount = 0;
-                        window.sessionHotelAmount = 0;
-                        window.sessionTrainAmount = 0;
-                        window.sessionFlightAmount = 0;
-                        window.sessionTotalAmount = 0;
-                    }
-                    
-                    // 累加本次新增的金额
-                    window.sessionTaxiAmount += currentTaxiAmount;
-                    window.sessionHotelAmount += currentHotelAmount;
-                    window.sessionTrainAmount += currentTrainAmount;
-                    window.sessionFlightAmount += currentFlightAmount;
-                    window.sessionTotalAmount += currentTotalAmount;
-                    
-                    // 使用累计金额
-                    const taxiAmount = window.sessionTaxiAmount;
-                    const hotelAmount = window.sessionHotelAmount;
-                    const trainAmount = window.sessionTrainAmount;
-                    const flightAmount = window.sessionFlightAmount;
-                    const totalClassificationAmount = window.sessionTotalAmount;
-                    
-                    console.log('📊 统计信息 - 本次:', newFilesCount, '累计:', totalFiles, '总金额:', totalAmount);
+                    console.log('📊 统计信息 - 本次:', newFilesCount, '累计:', totalFiles, '总金额:', totalClassificationAmount);
                     console.log('📊 详细统计 - 新结果:', newResults, '累计结果:', processedFiles);
                     
                                     // 检查是否已经有统计摘要，如果有则更新，没有则创建新的
@@ -2626,16 +2681,15 @@
                 }
                     
                     // 获取本次处理和累计处理的数据
-                    const currentSession = response.current_session || {};
                     const currentSessionTaxi = currentSession.taxi_amount || 0;
                     const currentSessionHotel = currentSession.hotel_amount || 0;
-                    const currentSessionTotal = currentSession.total_amount || 0;
                     const currentSessionOrders = currentSession.orders || 0;
+                    const globalStats = response.global_stats || {};
+                    renderGlobalSlogan(globalStats);
                     
                     // 添加重用文件信息和新处理订单信息
                     let summaryText = `本次处理 <strong>${currentSessionOrders}</strong> 个订单，金额: <strong>¥${currentSessionTotal.toFixed(2)}</strong>`;
                     summaryText += `<br><small>累计处理 <strong>${totalFiles}</strong> 个订单，总金额: <strong>¥${totalClassificationAmount.toFixed(2)}</strong></small>`;
-                    
                     // 添加分类统计信息 - 根据金额情况动态显示（显示累计数据）
                     if (taxiAmount > 0 || hotelAmount > 0 || trainAmount > 0 || flightAmount > 0) {
                         summaryText += `<br><small class="text-info">`;
@@ -3114,6 +3168,30 @@
             // 缓存行程记录和文件状态
             let cachedTripRecords = null;
             let cachedFileHashes = null;
+
+            function renderGlobalSlogan(stats) {
+                if (!globalSlogan || !stats) return;
+                const slogan = stats.slogan || '报销战报尚未开张：第一张发票，正在赶来的路上。';
+                globalSlogan.innerHTML = `
+                    <strong>🏆</strong>
+                    ${slogan}
+                `;
+            }
+
+            function loadGlobalSlogan() {
+                fetch('/api/global-stats')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data && !data.error) {
+                            renderGlobalSlogan(data);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('加载全局战报失败:', error);
+                    });
+            }
+
+            loadGlobalSlogan();
             
             // 使用事件委托绑定查看行程按钮
             document.addEventListener('click', function(e) {

@@ -1172,12 +1172,57 @@ def _should_render_invoice_with_cropbox(invoice_path: str) -> bool:
         return False
 
 
-def _render_invoice_images(invoice_path: str, dpi: int = 300):
-    """渲染发票图片；当 PDF 有有效 CropBox 时使用可见区域，保持普通发票兼容。"""
+def _render_pdf_pages_to_pil(pdf_path, dpi=220, first_page=1, last_page=None, use_cropbox=False):
+    """将 PDF 页面渲染为 PIL 图片；优先 PyMuPDF，兼容 GBK-EUC-H 等 Poppler 无法渲染的字体。"""
+    logger = current_app.logger
+    try:
+        import io
+
+        import fitz
+        from PIL import Image
+
+        doc = fitz.open(pdf_path)
+        total_pages = len(doc)
+        start_page = max(1, int(first_page or 1))
+        end_page = total_pages if last_page is None else min(int(last_page), total_pages)
+        if start_page > total_pages:
+            doc.close()
+            return []
+
+        zoom = float(dpi) / 72.0
+        matrix = fitz.Matrix(zoom, zoom)
+        images = []
+        for page_index in range(start_page - 1, end_page):
+            page = doc.load_page(page_index)
+            clip = page.cropbox if use_cropbox else None
+            if clip is not None and clip.width > 0 and clip.height > 0:
+                pix = page.get_pixmap(matrix=matrix, clip=clip, alpha=False)
+            else:
+                pix = page.get_pixmap(matrix=matrix, alpha=False)
+            images.append(Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB"))
+        doc.close()
+        if images:
+            logger.debug(f"PyMuPDF 渲染 PDF 成功: {pdf_path}, pages={len(images)}, dpi={dpi}")
+            return images
+    except Exception as e:
+        logger.warning(f"PyMuPDF 渲染 PDF 失败，回退 pdf2image: {pdf_path}, err={e}")
+
     from pdf2image import convert_from_path
 
+    kwargs = {"dpi": dpi}
+    if first_page is not None:
+        kwargs["first_page"] = first_page
+    if last_page is not None:
+        kwargs["last_page"] = last_page
+    if use_cropbox:
+        kwargs["use_cropbox"] = use_cropbox
+    return convert_from_path(pdf_path, **kwargs)
+
+
+def _render_invoice_images(invoice_path: str, dpi: int = 300):
+    """渲染发票图片；当 PDF 有有效 CropBox 时使用可见区域，保持普通发票兼容。"""
     use_cropbox = _should_render_invoice_with_cropbox(invoice_path)
-    return convert_from_path(invoice_path, dpi=dpi, use_cropbox=use_cropbox)
+    return _render_pdf_pages_to_pil(invoice_path, dpi=dpi, use_cropbox=use_cropbox)
 
 
 def _find_itinerary_table_crop_box(itinerary_path, image_size):
@@ -1875,11 +1920,10 @@ def create_train_ticket_layout_pdf(train_ticket_items, output_path):
         return False
 
     try:
-        from pdf2image import convert_from_path
         from PIL import Image
     except ImportError as e:
         logger.error(f"❌ 缺少火车票排版依赖: {e}")
-        logger.info("请安装: pip install pdf2image Pillow")
+        logger.info("请安装: pip install Pillow PyMuPDF")
         return False
 
     # A4 300DPI
@@ -1908,11 +1952,16 @@ def create_train_ticket_layout_pdf(train_ticket_items, output_path):
         try:
             ticket_path = ticket_item["pdf_path"]
             page_no = ticket_item["page_no"]
-            images = convert_from_path(ticket_path, dpi=220, first_page=page_no, last_page=page_no)
+            images = _render_pdf_pages_to_pil(
+                ticket_path,
+                dpi=220,
+                first_page=page_no,
+                last_page=page_no,
+            )
             if not images:
                 logger.warning(f"火车票渲染为空: {ticket_path}#p{page_no}")
                 continue
-            ticket_img = images[0].convert("RGB")
+            ticket_img = images[0]
         except Exception as e:
             logger.error(f"火车票渲染失败: {ticket_path}, err={e}")
             continue

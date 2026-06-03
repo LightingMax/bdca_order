@@ -208,16 +208,29 @@ cat <<EOF
        apt-hash: ${APT_SHA256}
 
 [HINT] 运行前置：宿主机已配置 CUPS 队列 (lpstat -p 可见)，且 /run/cups/cups.sock 存在。
+[HINT] 删除旧有服务:
+       docker rm -f ${IMAGE_NAME} 2>/dev/null || true
+
 [HINT] 运行示例:
-       docker run --rm -p 12306:12306 \\
+       mkdir -p data
+       docker rm -f ${IMAGE_NAME} 2>/dev/null || true
+
+       docker run -d \\
+         --name ${IMAGE_NAME} \\
+         --restart unless-stopped \\
+         -p 12306:12306 \\
          --env-file .env \\
-         -v /run/cups/cups.sock:/run/cups/cups.sock \\
+         -e APP_HOST=0.0.0.0 \\
+         -e APP_PORT=12306 \\
+         -e GLOBAL_STATS_FILE=/workspace/order/data/global_stats.json \\
          -e CUPS_SERVER=/run/cups/cups.sock \\
+         -v "\$(pwd)/data:/workspace/order/data" \\
+         -v /run/cups:/run/cups \\
          ${IMAGE_NAME}:latest
 
 [HINT] 容器内自检:
        docker run --rm --entrypoint lpstat \\
-         -v /run/cups/cups.sock:/run/cups/cups.sock \\
+         -v /run/cups:/run/cups \\
          -e CUPS_SERVER=/run/cups/cups.sock \\
          ${IMAGE_NAME}:latest -p
 
