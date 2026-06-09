@@ -1,5 +1,18 @@
 # 钉钉认证接入实践：第三方网站扫码登录与企业内用户身份转换
 
+## 版本说明
+
+当前项目实现的是钉钉旧版 SNS 扫码登录链路，也就是：
+
+```text
+oapi.dingtalk.com/connect/qrconnect
+oapi.dingtalk.com/sns/getuserinfo_bycode
+oapi.dingtalk.com/gettoken
+oapi.dingtalk.com/topapi/user/getbyunionid
+```
+
+这套链路和钉钉文档中的“扫码登录第三方网站”一致。后续如果迁移到新版 OAuth 登录，需要单独调整登录地址、code 换 token、用户信息获取、unionId/userId 转换等实现，不应和当前旧版 SNS 流程混用。
+
 ## 背景
 
 很多企业内部系统并不是直接运行在钉钉工作台里，而是一个独立 Web 网站。例如本项目是一个报销单据处理系统，用户在网页中上传发票、行程单，系统识别金额与明细后，再发起钉钉 OA 审批。
