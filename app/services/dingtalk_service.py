@@ -9,11 +9,11 @@ class DingTalkAuthError(RuntimeError):
 
 
 class DingTalkAuthService:
-    AUTH_URL = 'https://login.dingtalk.com/oauth2/auth'
-    USER_TOKEN_URL = 'https://api.dingtalk.com/v1.0/oauth2/userAccessToken'
-    USER_ME_URL = 'https://api.dingtalk.com/v1.0/contact/users/me'
+    AUTH_URL = 'https://oapi.dingtalk.com/connect/qrconnect'
+    SNS_USER_INFO_URL = 'https://oapi.dingtalk.com/sns/getuserinfo_bycode'
     APP_TOKEN_URL = 'https://api.dingtalk.com/v1.0/oauth2/accessToken'
     UNIONID_LOOKUP_URL = 'https://oapi.dingtalk.com/topapi/user/getbyunionid'
+    USER_DETAIL_URL = 'https://oapi.dingtalk.com/topapi/v2/user/get'
 
     def __init__(self, config, logger=None):
         self.config = config
@@ -25,45 +25,35 @@ class DingTalkAuthService:
         query = urlencode({
             'redirect_uri': self.config['DINGTALK_REDIRECT_URI'],
             'response_type': 'code',
-            'client_id': self.config['DINGTALK_CLIENT_ID'],
-            'scope': self.config['DINGTALK_SCOPE'],
+            'appid': self.config['DINGTALK_CLIENT_ID'],
+            'scope': self.config.get('DINGTALK_SCOPE') or 'snsapi_login',
             'state': state,
-            'prompt': 'consent',
         })
         return f'{self.AUTH_URL}?{query}'
 
     def exchange_code_for_user(self, code):
-        token_data = self._post_json(
-            self.USER_TOKEN_URL,
-            {
-                'clientId': self.config['DINGTALK_CLIENT_ID'],
-                'clientSecret': self.config['DINGTALK_CLIENT_SECRET'],
-                'code': code,
-                'grantType': 'authorization_code',
-            },
+        sns_data = self._post_json(
+            self.SNS_USER_INFO_URL,
+            {'tmp_auth_code': code},
+            auth=(self.config['DINGTALK_CLIENT_ID'], self.config['DINGTALK_CLIENT_SECRET']),
         )
-        user_access_token = token_data.get('accessToken')
-        if not user_access_token:
-            raise DingTalkAuthError(f'DingTalk user token response missing accessToken: {token_data}')
-
-        user_info = self._get_json(
-            self.USER_ME_URL,
-            headers={'x-acs-dingtalk-access-token': user_access_token},
-        )
+        user_info = sns_data.get('user_info') or sns_data.get('userInfo') or {}
         union_id = user_info.get('unionId') or user_info.get('unionid')
-        user_id = user_info.get('userId') or user_info.get('userid')
-        if not user_id and union_id:
-            user_id = self.get_user_id_by_union_id(union_id)
+        if not union_id:
+            raise DingTalkAuthError(f'DingTalk SNS response missing unionId: {sns_data}')
 
+        user_id = self.get_user_id_by_union_id(union_id)
         if not user_id:
-            raise DingTalkAuthError(f'DingTalk user info response missing userId: {user_info}')
+            raise DingTalkAuthError(f'DingTalk unionId lookup response missing userId, unionId={union_id}')
+
+        detail = self.get_user_detail(user_id)
 
         return {
             'user_id': user_id,
             'union_id': union_id,
-            'name': user_info.get('nick') or user_info.get('name') or user_info.get('mobile') or user_id,
-            'avatar': user_info.get('avatarUrl') or user_info.get('avatar'),
-            'raw': user_info,
+            'name': detail.get('name') or user_info.get('nick') or user_id,
+            'avatar': detail.get('avatar') or user_info.get('avatarUrl') or user_info.get('avatar'),
+            'raw': {'sns': user_info, 'detail': detail},
         }
 
     def get_user_id_by_union_id(self, union_id):
@@ -73,6 +63,13 @@ class DingTalkAuthService:
         )
         result = data.get('result') or {}
         return result.get('userid') or result.get('userId')
+
+    def get_user_detail(self, user_id):
+        data = self._post_json(
+            f'{self.USER_DETAIL_URL}?access_token={self.get_app_access_token()}',
+            {'userid': user_id, 'language': 'zh_CN'},
+        )
+        return data.get('result') or {}
 
     def get_app_access_token(self):
         if self._app_access_token and time.time() < self._app_token_expires_at - 300:
@@ -97,8 +94,8 @@ class DingTalkAuthService:
         response = requests.get(url, headers=headers or {}, timeout=15)
         return self._parse_response(response)
 
-    def _post_json(self, url, payload):
-        response = requests.post(url, json=payload, timeout=15)
+    def _post_json(self, url, payload, auth=None):
+        response = requests.post(url, json=payload, auth=auth, timeout=15)
         return self._parse_response(response)
 
     def _parse_response(self, response):

@@ -47,7 +47,7 @@ class Config:
     DINGTALK_CLIENT_ID = (os.environ.get('DINGTALK_CLIENT_ID') or '').strip()
     DINGTALK_CLIENT_SECRET = (os.environ.get('DINGTALK_CLIENT_SECRET') or '').strip()
     DINGTALK_REDIRECT_URI = (os.environ.get('DINGTALK_REDIRECT_URI') or '').strip()
-    DINGTALK_SCOPE = (os.environ.get('DINGTALK_SCOPE') or 'openid').strip()
+    DINGTALK_SCOPE = (os.environ.get('DINGTALK_SCOPE') or 'snsapi_login').strip()
 
     # Hosts that should always require DingTalk login, useful when public access comes through TCP stream.
     # Example: work.bdcatek.com:12306
