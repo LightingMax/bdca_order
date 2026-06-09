@@ -864,6 +864,9 @@
                     <button id="downloadCollectionBtn" class="btn btn-success me-2">
                         <i class="fas fa-download me-1"></i>下载合集
                     </button>
+                    <button id="dingtalkApprovalBtn" class="btn btn-info text-white me-2">
+                        <i class="fas fa-paper-plane me-1"></i>发起钉钉审批
+                    </button>
                     <button id="viewTripsBtn" class="btn btn-warning me-2" style="display: none;">
                         <i class="fas fa-route me-1"></i>查看行程
                     </button>
@@ -3163,6 +3166,63 @@
                         });
                     }
                 }
+            });
+
+            // 使用事件委托绑定发起钉钉审批按钮
+            document.addEventListener('click', function(e) {
+                const approvalBtnEl = e.target && e.target.closest ? e.target.closest('#dingtalkApprovalBtn') : null;
+                if (!approvalBtnEl) {
+                    return;
+                }
+
+                if (!processedFiles || processedFiles.length === 0) {
+                    showNotification('没有可提交审批的报销结果', 'warning');
+                    return;
+                }
+
+                const amounts = sumAmountsFromResults(processedFiles);
+                const billableCount = countBillableResults(processedFiles);
+                if (billableCount === 0 || amounts.total <= 0) {
+                    showNotification('没有可提交审批的有效金额', 'warning');
+                    return;
+                }
+
+                const confirmMessage = `确定要发起钉钉差旅报销审批吗？\n\n条目：${billableCount} 个\n总金额：¥${amounts.total.toFixed(2)}`;
+                if (!confirm(confirmMessage)) {
+                    return;
+                }
+
+                const originalText = approvalBtnEl.innerHTML;
+                approvalBtnEl.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 发起中...';
+                approvalBtnEl.disabled = true;
+
+                fetch('/api/dingtalk/travel-approval', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        processed_files: processedFiles
+                    })
+                })
+                .then(response => response.json().then(data => ({ ok: response.ok, data })))
+                .then(({ ok, data }) => {
+                    if (ok && data.success) {
+                        showNotification(`钉钉审批已发起，实例ID：${data.instance_id}`, 'success');
+                    } else if (data && data.login_url) {
+                        window.location.href = data.login_url;
+                    } else {
+                        showNotification(`发起审批失败: ${data.message || data.error || '未知错误'}`, 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('发起钉钉审批请求失败:', error);
+                    showNotification('发起钉钉审批请求失败', 'error');
+                })
+                .finally(() => {
+                    approvalBtnEl.innerHTML = originalText;
+                    approvalBtnEl.disabled = false;
+                });
             });
             
             // 缓存行程记录和文件状态

@@ -2,6 +2,7 @@ import os
 import uuid
 import datetime
 import ipaddress
+import json
 from flask import Blueprint, render_template, request, jsonify, current_app, session, send_from_directory, send_file, redirect
 from werkzeug.utils import secure_filename
 
@@ -338,6 +339,76 @@ def _aggregate_classification_info(file_results):
         'hotel_warnings': current_hotel_warnings,
     }
 
+
+def _approval_history_path():
+    return os.path.join(current_app.config['DATA_FOLDER'], 'dingtalk_approval_instances.json')
+
+
+def _append_approval_history(record):
+    path = _approval_history_path()
+    history = []
+    if os.path.exists(path):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                history = json.load(f)
+        except Exception as e:
+            current_app.logger.warning(f"读取钉钉审批历史失败，将重建文件: {e}")
+            history = []
+
+    history.append(record)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(history[-500:], f, ensure_ascii=False, indent=2)
+
+
+def _summarize_travel_reimbursement(processed_files):
+    billable = [item for item in processed_files or [] if item and not item.get('is_train_merged_entry')]
+    amounts = _aggregate_result_amounts(billable)
+    detail_lines = []
+
+    for item in billable:
+        order_id = item.get('order_id') or item.get('output_file') or '未知单据'
+        amount = float(item.get('amount', 0) or 0)
+        if item.get('has_hotel_bill') or str(order_id).startswith('hotel_'):
+            category = '酒店'
+        elif item.get('has_flight_ticket'):
+            category = '机票'
+            amount = float(item.get('flight_amount', 0) or amount)
+        elif item.get('has_train_ticket'):
+            category = '火车票'
+            amount = float(item.get('train_amount', 0) or amount)
+        else:
+            category = '网约车'
+        detail_lines.append(f"{category} {order_id} ¥{amount:.2f}")
+
+    return {
+        'order_count': amounts['order_count'],
+        'total_amount': f"{amounts['total_amount']:.2f}",
+        'taxi_amount': f"{amounts['taxi_amount']:.2f}",
+        'hotel_amount': f"{amounts['hotel_amount']:.2f}",
+        'train_amount': f"{amounts['train_amount']:.2f}",
+        'flight_amount': f"{amounts['flight_amount']:.2f}",
+        'details': '\n'.join(detail_lines[:80]),
+        'remark': f"系统自动识别 {amounts['order_count']} 个报销条目，总金额 ¥{amounts['total_amount']:.2f}",
+    }
+
+
+def _build_travel_form_values(summary, extra_values=None):
+    field_map = current_app.config.get('DINGTALK_TRAVEL_FIELD_MAP') or {}
+    if not field_map:
+        field_map = {
+            'total_amount': '报销金额',
+            'details': '报销明细',
+            'remark': '备注',
+        }
+
+    source_values = {**summary, **(extra_values or {})}
+    form_values = []
+    for source_key, component_name in field_map.items():
+        value = source_values.get(source_key)
+        if component_name and value not in (None, ''):
+            form_values.append({'name': component_name, 'value': str(value)})
+    return form_values
+
 @main_bp.route('/')
 def index():
     """渲染主页"""
@@ -435,6 +506,81 @@ def auth_status():
         'host': request.host,
         'public_entry_host': _is_public_entry_host(),
         'internal_ip': _is_internal_ip(client_ip),
+    })
+
+
+@main_bp.route('/api/dingtalk/travel-approval', methods=['POST'])
+def create_dingtalk_travel_approval():
+    """根据当前处理结果发起钉钉差旅报销审批。"""
+    data = request.get_json(silent=True) or {}
+    processed_files = data.get('processed_files') or session.get('processed_files') or []
+    summary = _summarize_travel_reimbursement(processed_files)
+
+    if summary['order_count'] <= 0:
+        return jsonify({'success': False, 'message': '没有可发起审批的报销条目'}), 400
+
+    process_code = data.get('process_code') or current_app.config.get('DINGTALK_TRAVEL_PROCESS_CODE')
+    if not process_code:
+        return jsonify({'success': False, 'message': '未配置 DINGTALK_TRAVEL_PROCESS_CODE'}), 400
+
+    originator_user_id = (
+        session.get('dingtalk_user_id')
+        or data.get('originator_user_id')
+        or current_app.config.get('DINGTALK_DEFAULT_ORIGINATOR_USER_ID')
+    )
+    if not originator_user_id:
+        return jsonify({
+            'success': False,
+            'message': '未获取到钉钉发起人 userId。请从公网入口扫码登录，或配置 DINGTALK_DEFAULT_ORIGINATOR_USER_ID。',
+        }), 400
+
+    agent_id = int(data.get('agent_id') or current_app.config.get('DINGTALK_AGENT_ID') or 0)
+    if not agent_id:
+        return jsonify({'success': False, 'message': '未配置 DINGTALK_AGENT_ID'}), 400
+
+    form_values = _build_travel_form_values(summary, data.get('form_values'))
+    if not form_values:
+        return jsonify({'success': False, 'message': '未生成审批表单字段，请配置 DINGTALK_TRAVEL_FIELD_MAP'}), 400
+
+    if data.get('dry_run'):
+        return jsonify({
+            'success': True,
+            'dry_run': True,
+            'summary': summary,
+            'form_component_values': form_values,
+            'originator_user_id': originator_user_id,
+            'process_code': process_code,
+            'agent_id': agent_id,
+        })
+
+    try:
+        instance_id, raw_response = _dingtalk_service().create_approval_instance(
+            originator_user_id=originator_user_id,
+            process_code=process_code,
+            dept_id=int(data.get('dept_id') or current_app.config.get('DINGTALK_TRAVEL_DEPT_ID') or -1),
+            agent_id=agent_id,
+            form_values=form_values,
+        )
+    except DingTalkAuthError as exc:
+        current_app.logger.exception("发起钉钉差旅报销审批失败")
+        return jsonify({'success': False, 'message': str(exc)}), 502
+
+    record = {
+        'instance_id': instance_id,
+        'created_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'originator_user_id': originator_user_id,
+        'process_code': process_code,
+        'summary': summary,
+        'form_component_values': form_values,
+        'raw_response': raw_response,
+    }
+    _append_approval_history(record)
+
+    return jsonify({
+        'success': True,
+        'message': '钉钉差旅报销审批已发起',
+        'instance_id': instance_id,
+        'summary': summary,
     })
 
 @main_bp.route('/statistics')

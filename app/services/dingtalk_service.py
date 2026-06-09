@@ -12,6 +12,7 @@ class DingTalkAuthService:
     AUTH_URL = 'https://oapi.dingtalk.com/connect/qrconnect'
     SNS_USER_INFO_URL = 'https://oapi.dingtalk.com/sns/getuserinfo_bycode'
     APP_TOKEN_URL = 'https://api.dingtalk.com/v1.0/oauth2/accessToken'
+    APPROVAL_CREATE_URL = 'https://api.dingtalk.com/v1.0/workflow/processInstances'
     UNIONID_LOOKUP_URL = 'https://oapi.dingtalk.com/topapi/user/getbyunionid'
     USER_DETAIL_URL = 'https://oapi.dingtalk.com/topapi/v2/user/get'
 
@@ -71,6 +72,24 @@ class DingTalkAuthService:
         )
         return data.get('result') or {}
 
+    def create_approval_instance(self, originator_user_id, process_code, dept_id, agent_id, form_values):
+        payload = {
+            'originatorUserId': originator_user_id,
+            'processCode': process_code,
+            'deptId': dept_id,
+            'microappAgentId': agent_id,
+            'formComponentValues': form_values,
+        }
+        data = self._post_json(
+            self.APPROVAL_CREATE_URL,
+            payload,
+            headers={'x-acs-dingtalk-access-token': self.get_app_access_token()},
+        )
+        instance_id = data.get('instanceId') or data.get('processInstanceId')
+        if not instance_id:
+            raise DingTalkAuthError(f'DingTalk approval response missing instanceId: {data}')
+        return instance_id, data
+
     def get_app_access_token(self):
         if self._app_access_token and time.time() < self._app_token_expires_at - 300:
             return self._app_access_token
@@ -94,8 +113,8 @@ class DingTalkAuthService:
         response = requests.get(url, headers=headers or {}, timeout=15)
         return self._parse_response(response)
 
-    def _post_json(self, url, payload, auth=None):
-        response = requests.post(url, json=payload, auth=auth, timeout=15)
+    def _post_json(self, url, payload, auth=None, headers=None):
+        response = requests.post(url, json=payload, auth=auth, headers=headers or {}, timeout=15)
         return self._parse_response(response)
 
     def _parse_response(self, response):

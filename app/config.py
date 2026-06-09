@@ -1,8 +1,20 @@
 import os
+import json
 from dotenv import load_dotenv
 
 # 加载.env文件中的环境变量（如果存在）
 load_dotenv()
+
+
+def _json_env(name, default):
+    value = os.environ.get(name)
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return default
+
 
 class Config:
     # Flask配置
@@ -48,6 +60,14 @@ class Config:
     DINGTALK_CLIENT_SECRET = (os.environ.get('DINGTALK_CLIENT_SECRET') or '').strip()
     DINGTALK_REDIRECT_URI = (os.environ.get('DINGTALK_REDIRECT_URI') or '').strip()
     DINGTALK_SCOPE = (os.environ.get('DINGTALK_SCOPE') or 'snsapi_login').strip()
+    DINGTALK_AGENT_ID = int(os.environ.get('DINGTALK_AGENT_ID') or '0')
+    DINGTALK_DEFAULT_ORIGINATOR_USER_ID = (os.environ.get('DINGTALK_DEFAULT_ORIGINATOR_USER_ID') or '').strip()
+
+    # Travel reimbursement approval template. The field map keys are internal summary keys,
+    # and values must match DingTalk approval component names exactly.
+    DINGTALK_TRAVEL_PROCESS_CODE = (os.environ.get('DINGTALK_TRAVEL_PROCESS_CODE') or '').strip()
+    DINGTALK_TRAVEL_DEPT_ID = int(os.environ.get('DINGTALK_TRAVEL_DEPT_ID') or '-1')
+    DINGTALK_TRAVEL_FIELD_MAP = _json_env('DINGTALK_TRAVEL_FIELD_MAP', {})
 
     # Hosts that should always require DingTalk login, useful when public access comes through TCP stream.
     # Example: work.bdcatek.com:12306
