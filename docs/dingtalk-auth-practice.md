@@ -10,6 +10,12 @@ api.dingtalk.com/v1.0/oauth2/userAccessToken
 api.dingtalk.com/v1.0/contact/users/me
 ```
 
+新版 OAuth2 调用 `contact/users/me` 时需要 `Contact.User.Read` 权限。这个权限既要在钉钉开放平台的应用权限管理里申请，也要在授权 URL 的 `scope` 中请求：
+
+```env
+DINGTALK_SCOPE=openid Contact.User.Read
+```
+
 旧版 SNS 扫码登录链路仍保留为可选实现，可以通过环境变量切回：
 
 ```env

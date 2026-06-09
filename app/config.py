@@ -60,7 +60,7 @@ class Config:
     DINGTALK_CLIENT_ID = (os.environ.get('DINGTALK_CLIENT_ID') or '').strip()
     DINGTALK_CLIENT_SECRET = (os.environ.get('DINGTALK_CLIENT_SECRET') or '').strip()
     DINGTALK_REDIRECT_URI = (os.environ.get('DINGTALK_REDIRECT_URI') or '').strip()
-    DINGTALK_SCOPE = (os.environ.get('DINGTALK_SCOPE') or 'openid').strip()
+    DINGTALK_SCOPE = (os.environ.get('DINGTALK_SCOPE') or 'openid Contact.User.Read').strip()
     DINGTALK_AGENT_ID = int(os.environ.get('DINGTALK_AGENT_ID') or '0')
     DINGTALK_DEFAULT_ORIGINATOR_USER_ID = (os.environ.get('DINGTALK_DEFAULT_ORIGINATOR_USER_ID') or '').strip()
 
