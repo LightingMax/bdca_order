@@ -40,4 +40,25 @@ class Config:
     QWEN_API_BASE_URL = os.environ.get('QWEN_API_BASE_URL') or 'https://dashscope.aliyuncs.com/compatible-mode/v1'
     QWEN_API_KEY = os.environ.get('QWEN_API_KEY') or 'sk-4b678a7de6d34b878356518397592170'
     QWEN_MODEL = os.environ.get('QWEN_MODEL') or 'qwen2.5-32b-instruct'
-    QWEN_API_TIMEOUT = int(os.environ.get('QWEN_API_TIMEOUT', 180)) 
+    QWEN_API_TIMEOUT = int(os.environ.get('QWEN_API_TIMEOUT', 180))
+
+    # DingTalk auth. Keep secrets in .env only.
+    DINGTALK_AUTH_ENABLED = os.environ.get('DINGTALK_AUTH_ENABLED', 'false').lower() in {'1', 'true', 'yes', 'on'}
+    DINGTALK_CLIENT_ID = (os.environ.get('DINGTALK_CLIENT_ID') or '').strip()
+    DINGTALK_CLIENT_SECRET = (os.environ.get('DINGTALK_CLIENT_SECRET') or '').strip()
+    DINGTALK_REDIRECT_URI = (os.environ.get('DINGTALK_REDIRECT_URI') or '').strip()
+    DINGTALK_SCOPE = (os.environ.get('DINGTALK_SCOPE') or 'openid').strip()
+
+    # Hosts that should always require DingTalk login, useful when public access comes through TCP stream.
+    # Example: work.bdcatek.com:12306
+    DINGTALK_AUTH_PUBLIC_HOSTS = {
+        host.strip().lower()
+        for host in (os.environ.get('DINGTALK_AUTH_PUBLIC_HOSTS') or '').split(',')
+        if host.strip()
+    }
+
+    INTERNAL_CIDRS = [
+        cidr.strip()
+        for cidr in (os.environ.get('INTERNAL_CIDRS') or '127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16').split(',')
+        if cidr.strip()
+    ]

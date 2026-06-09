@@ -1,7 +1,8 @@
 import os
 import uuid
 import datetime
-from flask import Blueprint, render_template, request, jsonify, current_app, session, send_from_directory, send_file
+import ipaddress
+from flask import Blueprint, render_template, request, jsonify, current_app, session, send_from_directory, send_file, redirect
 from werkzeug.utils import secure_filename
 
 from app.services.file_service import (
@@ -12,8 +13,77 @@ from app.services.file_service import (
 from app.services.pdf_service import process_pdf_files
 from app.services.print_service import print_pdf, prepare_raw_pdf_for_a4_print, prepare_raw_preview_pdf
 from app.services.user_service import get_user_mac, save_user_data, get_all_user_stats, save_global_stats
+from app.services.dingtalk_service import DingTalkAuthError, DingTalkAuthService
 
 main_bp = Blueprint('main', __name__)
+
+
+def _dingtalk_service():
+    return DingTalkAuthService(current_app.config, current_app.logger)
+
+
+def _normalize_host(host):
+    return (host or '').split(',')[0].strip().lower()
+
+
+def _request_client_ip():
+    forwarded_for = request.headers.get('X-Forwarded-For', '')
+    if forwarded_for:
+        return forwarded_for.split(',')[0].strip()
+    return request.headers.get('X-Real-IP') or request.remote_addr or ''
+
+
+def _is_internal_ip(ip_text):
+    try:
+        client_ip = ipaddress.ip_address(ip_text)
+    except ValueError:
+        return False
+
+    for cidr in current_app.config.get('INTERNAL_CIDRS', []):
+        try:
+            if client_ip in ipaddress.ip_network(cidr, strict=False):
+                return True
+        except ValueError:
+            current_app.logger.warning(f"忽略无效 INTERNAL_CIDRS 配置: {cidr}")
+    return False
+
+
+def _is_public_entry_host():
+    public_hosts = current_app.config.get('DINGTALK_AUTH_PUBLIC_HOSTS') or set()
+    if not public_hosts:
+        return False
+    return _normalize_host(request.host) in public_hosts
+
+
+def _requires_dingtalk_login():
+    if not current_app.config.get('DINGTALK_AUTH_ENABLED'):
+        return False
+    if request.endpoint in {
+        'main.login',
+        'main.dingtalk_auth_start',
+        'main.dingtalk_auth_callback',
+        'main.dingtalk_logout',
+        'main.auth_status',
+        'static',
+    }:
+        return False
+    if request.path.startswith('/static/'):
+        return False
+    if session.get('dingtalk_user_id'):
+        return False
+    if _is_public_entry_host():
+        return True
+    return not _is_internal_ip(_request_client_ip())
+
+
+@main_bp.before_request
+def require_dingtalk_auth_for_external_access():
+    if not _requires_dingtalk_login():
+        return None
+
+    if request.path.startswith('/api/'):
+        return jsonify({'error': '需要钉钉登录', 'login_url': '/auth/dingtalk/start'}), 401
+    return redirect('/auth/dingtalk/start')
 
 
 def _secure_upload_filename(original_filename, fallback_stem='uploaded_file'):
@@ -272,7 +342,100 @@ def _aggregate_classification_info(file_results):
 def index():
     """渲染主页"""
     current_app.logger.debug("访问主页")
-    return render_template('index.html')
+    return render_template('index.html', dingtalk_user=session.get('dingtalk_user'))
+
+
+@main_bp.route('/login')
+def login():
+    """登录页"""
+    if not current_app.config.get('DINGTALK_AUTH_ENABLED'):
+        return redirect('/')
+    return (
+        '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        '<title>钉钉登录</title>'
+        '<style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f7fb;margin:0;}'
+        '.box{max-width:420px;margin:12vh auto;background:#fff;padding:32px;border-radius:10px;'
+        'box-shadow:0 12px 35px rgba(20,30,60,.12);text-align:center;}'
+        'a{display:inline-block;background:#1677ff;color:#fff;text-decoration:none;padding:12px 22px;'
+        'border-radius:6px;font-weight:600;}p{color:#667085;line-height:1.6;}</style></head><body>'
+        '<div class="box"><h2>钉钉登录</h2><p>外网访问需要先通过钉钉确认身份。内网直连可免登录。</p>'
+        '<a href="/auth/dingtalk/start">使用钉钉登录</a></div></body></html>'
+    )
+
+
+@main_bp.route('/auth/dingtalk/start')
+def dingtalk_auth_start():
+    """跳转到钉钉 OAuth 授权。"""
+    if not current_app.config.get('DINGTALK_AUTH_ENABLED'):
+        return redirect('/')
+    if not current_app.config.get('DINGTALK_CLIENT_ID') or not current_app.config.get('DINGTALK_CLIENT_SECRET'):
+        return '钉钉登录未配置 DINGTALK_CLIENT_ID / DINGTALK_CLIENT_SECRET', 500
+    if not current_app.config.get('DINGTALK_REDIRECT_URI'):
+        return '钉钉登录未配置 DINGTALK_REDIRECT_URI', 500
+
+    state = uuid.uuid4().hex
+    session['dingtalk_oauth_state'] = state
+    session['dingtalk_next_url'] = request.args.get('next') or '/'
+    return redirect(_dingtalk_service().build_authorize_url(state))
+
+
+@main_bp.route('/auth/dingtalk/callback')
+def dingtalk_auth_callback():
+    """钉钉 OAuth 回调：code -> userId -> session。"""
+    error = request.args.get('error') or request.args.get('error_description')
+    if error and not request.args.get('code'):
+        current_app.logger.warning(f"钉钉登录回调失败: {request.args.to_dict()}")
+        return f'钉钉登录失败: {error}', 400
+
+    state = request.args.get('state')
+    expected_state = session.get('dingtalk_oauth_state')
+    if not state or state != expected_state:
+        return '钉钉登录状态校验失败，请重新登录', 400
+
+    code = request.args.get('code') or request.args.get('authCode')
+    if not code:
+        return '钉钉回调缺少 code', 400
+
+    try:
+        user = _dingtalk_service().exchange_code_for_user(code)
+    except DingTalkAuthError as exc:
+        current_app.logger.exception("钉钉登录失败")
+        return f'钉钉登录失败: {exc}', 502
+
+    session.pop('dingtalk_oauth_state', None)
+    session['dingtalk_user_id'] = user['user_id']
+    session['dingtalk_user'] = {
+        'user_id': user.get('user_id'),
+        'union_id': user.get('union_id'),
+        'name': user.get('name'),
+        'avatar': user.get('avatar'),
+    }
+    session.modified = True
+    current_app.logger.info(f"钉钉登录成功: user_id={user['user_id']}, name={user.get('name')}")
+    return redirect(session.pop('dingtalk_next_url', '/') or '/')
+
+
+@main_bp.route('/auth/logout')
+def dingtalk_logout():
+    session.pop('dingtalk_user_id', None)
+    session.pop('dingtalk_user', None)
+    session.pop('dingtalk_oauth_state', None)
+    return redirect('/login')
+
+
+@main_bp.route('/api/auth/status')
+def auth_status():
+    client_ip = _request_client_ip()
+    return jsonify({
+        'auth_enabled': current_app.config.get('DINGTALK_AUTH_ENABLED'),
+        'logged_in': bool(session.get('dingtalk_user_id')),
+        'user': session.get('dingtalk_user'),
+        'client_ip': client_ip,
+        'host': request.host,
+        'public_entry_host': _is_public_entry_host(),
+        'internal_ip': _is_internal_ip(client_ip),
+    })
 
 @main_bp.route('/statistics')
 def statistics():
@@ -1518,4 +1681,4 @@ def view_trips():
         
     except Exception as e:
         logger.error(f"生成行程记录时出错: {str(e)}", exc_info=True)
-        return jsonify({'success': False, 'message': f'生成行程记录时出错: {str(e)}'}), 500 
+        return jsonify({'success': False, 'message': f'生成行程记录时出错: {str(e)}'}), 500
