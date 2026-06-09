@@ -11,6 +11,7 @@ class DingTalkAuthError(RuntimeError):
 class DingTalkAuthService:
     AUTH_URL = 'https://oapi.dingtalk.com/connect/qrconnect'
     SNS_USER_INFO_URL = 'https://oapi.dingtalk.com/sns/getuserinfo_bycode'
+    OAPI_TOKEN_URL = 'https://oapi.dingtalk.com/gettoken'
     APP_TOKEN_URL = 'https://api.dingtalk.com/v1.0/oauth2/accessToken'
     APPROVAL_CREATE_URL = 'https://api.dingtalk.com/v1.0/workflow/processInstances'
     APPROVAL_MANAGED_TEMPLATES_URL = 'https://api.dingtalk.com/v1.0/workflow/processes/managements/templates'
@@ -22,6 +23,8 @@ class DingTalkAuthService:
         self.logger = logger
         self._app_access_token = None
         self._app_token_expires_at = 0
+        self._oapi_access_token = None
+        self._oapi_token_expires_at = 0
 
     def build_authorize_url(self, state):
         query = urlencode({
@@ -60,7 +63,7 @@ class DingTalkAuthService:
 
     def get_user_id_by_union_id(self, union_id):
         data = self._post_json(
-            f'{self.UNIONID_LOOKUP_URL}?access_token={self.get_app_access_token()}',
+            f'{self.UNIONID_LOOKUP_URL}?access_token={self.get_oapi_access_token()}',
             {'unionid': union_id},
         )
         result = data.get('result') or {}
@@ -68,7 +71,7 @@ class DingTalkAuthService:
 
     def get_user_detail(self, user_id):
         data = self._post_json(
-            f'{self.USER_DETAIL_URL}?access_token={self.get_app_access_token()}',
+            f'{self.USER_DETAIL_URL}?access_token={self.get_oapi_access_token()}',
             {'userid': user_id, 'language': 'zh_CN'},
         )
         return data.get('result') or {}
@@ -116,6 +119,25 @@ class DingTalkAuthService:
 
         self._app_access_token = token
         self._app_token_expires_at = time.time() + int(data.get('expireIn', 7200))
+        return token
+
+    def get_oapi_access_token(self):
+        if self._oapi_access_token and time.time() < self._oapi_token_expires_at - 300:
+            return self._oapi_access_token
+
+        data = self._get_json(
+            self.OAPI_TOKEN_URL,
+            params={
+                'appkey': self.config['DINGTALK_CLIENT_ID'],
+                'appsecret': self.config['DINGTALK_CLIENT_SECRET'],
+            },
+        )
+        token = data.get('access_token')
+        if not token:
+            raise DingTalkAuthError(f'DingTalk oapi token response missing access_token: {data}')
+
+        self._oapi_access_token = token
+        self._oapi_token_expires_at = time.time() + int(data.get('expires_in', 7200))
         return token
 
     def _get_json(self, url, headers=None, params=None):
