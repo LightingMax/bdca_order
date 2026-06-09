@@ -583,6 +583,33 @@ def create_dingtalk_travel_approval():
         'summary': summary,
     })
 
+
+@main_bp.route('/api/dingtalk/approval-templates')
+def list_dingtalk_approval_templates():
+    """列出当前用户可管理的钉钉 OA 审批模板，用于查 processCode。"""
+    user_id = (
+        request.args.get('user_id')
+        or session.get('dingtalk_user_id')
+        or current_app.config.get('DINGTALK_DEFAULT_ORIGINATOR_USER_ID')
+    )
+    if not user_id:
+        return jsonify({
+            'success': False,
+            'message': '未获取到 userId。请从公网入口扫码登录，或临时传 ?user_id=xxx 查询。',
+        }), 400
+
+    try:
+        templates = _dingtalk_service().list_manageable_approval_templates(user_id)
+    except DingTalkAuthError as exc:
+        current_app.logger.exception("获取钉钉审批模板失败")
+        return jsonify({'success': False, 'message': str(exc)}), 502
+
+    return jsonify({
+        'success': True,
+        'user_id': user_id,
+        'templates': templates,
+    })
+
 @main_bp.route('/statistics')
 def statistics():
     """渲染统计页面"""

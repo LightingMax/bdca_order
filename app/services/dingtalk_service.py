@@ -13,6 +13,7 @@ class DingTalkAuthService:
     SNS_USER_INFO_URL = 'https://oapi.dingtalk.com/sns/getuserinfo_bycode'
     APP_TOKEN_URL = 'https://api.dingtalk.com/v1.0/oauth2/accessToken'
     APPROVAL_CREATE_URL = 'https://api.dingtalk.com/v1.0/workflow/processInstances'
+    APPROVAL_MANAGED_TEMPLATES_URL = 'https://api.dingtalk.com/v1.0/workflow/processes/managements/templates'
     UNIONID_LOOKUP_URL = 'https://oapi.dingtalk.com/topapi/user/getbyunionid'
     USER_DETAIL_URL = 'https://oapi.dingtalk.com/topapi/v2/user/get'
 
@@ -90,6 +91,14 @@ class DingTalkAuthService:
             raise DingTalkAuthError(f'DingTalk approval response missing instanceId: {data}')
         return instance_id, data
 
+    def list_manageable_approval_templates(self, user_id):
+        data = self._get_json(
+            self.APPROVAL_MANAGED_TEMPLATES_URL,
+            headers={'x-acs-dingtalk-access-token': self.get_app_access_token()},
+            params={'userId': user_id},
+        )
+        return data.get('result') or []
+
     def get_app_access_token(self):
         if self._app_access_token and time.time() < self._app_token_expires_at - 300:
             return self._app_access_token
@@ -109,8 +118,8 @@ class DingTalkAuthService:
         self._app_token_expires_at = time.time() + int(data.get('expireIn', 7200))
         return token
 
-    def _get_json(self, url, headers=None):
-        response = requests.get(url, headers=headers or {}, timeout=15)
+    def _get_json(self, url, headers=None, params=None):
+        response = requests.get(url, headers=headers or {}, params=params or {}, timeout=15)
         return self._parse_response(response)
 
     def _post_json(self, url, payload, auth=None, headers=None):
