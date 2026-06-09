@@ -1,3 +1,6 @@
+import base64
+import hashlib
+import hmac
 import time
 from urllib.parse import urlencode
 
@@ -40,7 +43,7 @@ class DingTalkAuthService:
         sns_data = self._post_json(
             self.SNS_USER_INFO_URL,
             {'tmp_auth_code': code},
-            auth=(self.config['DINGTALK_CLIENT_ID'], self.config['DINGTALK_CLIENT_SECRET']),
+            params=self._sns_signature_params(),
         )
         user_info = sns_data.get('user_info') or sns_data.get('userInfo') or {}
         union_id = user_info.get('unionId') or user_info.get('unionid')
@@ -140,12 +143,33 @@ class DingTalkAuthService:
         self._oapi_token_expires_at = time.time() + int(data.get('expires_in', 7200))
         return token
 
+    def _sns_signature_params(self):
+        timestamp = str(int(time.time() * 1000))
+        digest = hmac.new(
+            self.config['DINGTALK_CLIENT_SECRET'].encode('utf-8'),
+            timestamp.encode('utf-8'),
+            digestmod=hashlib.sha256,
+        ).digest()
+        signature = base64.b64encode(digest).decode('utf-8')
+        return {
+            'accessKey': self.config['DINGTALK_CLIENT_ID'],
+            'timestamp': timestamp,
+            'signature': signature,
+        }
+
     def _get_json(self, url, headers=None, params=None):
         response = requests.get(url, headers=headers or {}, params=params or {}, timeout=15)
         return self._parse_response(response)
 
-    def _post_json(self, url, payload, auth=None, headers=None):
-        response = requests.post(url, json=payload, auth=auth, headers=headers or {}, timeout=15)
+    def _post_json(self, url, payload, auth=None, headers=None, params=None):
+        response = requests.post(
+            url,
+            json=payload,
+            auth=auth,
+            headers=headers or {},
+            params=params or {},
+            timeout=15,
+        )
         return self._parse_response(response)
 
     def _parse_response(self, response):
