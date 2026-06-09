@@ -12,7 +12,10 @@ class DingTalkAuthError(RuntimeError):
 
 
 class DingTalkAuthService:
-    AUTH_URL = 'https://oapi.dingtalk.com/connect/qrconnect'
+    OAUTH2_AUTH_URL = 'https://login.dingtalk.com/oauth2/auth'
+    OAUTH2_USER_TOKEN_URL = 'https://api.dingtalk.com/v1.0/oauth2/userAccessToken'
+    OAUTH2_USER_ME_URL = 'https://api.dingtalk.com/v1.0/contact/users/me'
+    SNS_AUTH_URL = 'https://oapi.dingtalk.com/connect/qrconnect'
     SNS_USER_INFO_URL = 'https://oapi.dingtalk.com/sns/getuserinfo_bycode'
     OAPI_TOKEN_URL = 'https://oapi.dingtalk.com/gettoken'
     APP_TOKEN_URL = 'https://api.dingtalk.com/v1.0/oauth2/accessToken'
@@ -30,16 +33,67 @@ class DingTalkAuthService:
         self._oapi_token_expires_at = 0
 
     def build_authorize_url(self, state):
+        if self.config.get('DINGTALK_AUTH_FLOW') == 'legacy_sns':
+            return self.build_legacy_sns_authorize_url(state)
+
+        query = urlencode({
+            'redirect_uri': self.config['DINGTALK_REDIRECT_URI'],
+            'response_type': 'code',
+            'client_id': self.config['DINGTALK_CLIENT_ID'],
+            'scope': self.config.get('DINGTALK_SCOPE') or 'openid',
+            'state': state,
+            'prompt': 'consent',
+        })
+        return f'{self.OAUTH2_AUTH_URL}?{query}'
+
+    def build_legacy_sns_authorize_url(self, state):
         query = urlencode({
             'redirect_uri': self.config['DINGTALK_REDIRECT_URI'],
             'response_type': 'code',
             'appid': self.config['DINGTALK_CLIENT_ID'],
-            'scope': self.config.get('DINGTALK_SCOPE') or 'snsapi_login',
+            'scope': 'snsapi_login',
             'state': state,
         })
-        return f'{self.AUTH_URL}?{query}'
+        return f'{self.SNS_AUTH_URL}?{query}'
 
     def exchange_code_for_user(self, code):
+        if self.config.get('DINGTALK_AUTH_FLOW') == 'legacy_sns':
+            return self.exchange_legacy_sns_code_for_user(code)
+
+        token_data = self._post_json(
+            self.OAUTH2_USER_TOKEN_URL,
+            {
+                'clientId': self.config['DINGTALK_CLIENT_ID'],
+                'clientSecret': self.config['DINGTALK_CLIENT_SECRET'],
+                'code': code,
+                'grantType': 'authorization_code',
+            },
+        )
+        user_access_token = token_data.get('accessToken')
+        if not user_access_token:
+            raise DingTalkAuthError(f'DingTalk OAuth2 token response missing accessToken: {token_data}')
+
+        user_info = self._get_json(
+            self.OAUTH2_USER_ME_URL,
+            headers={'x-acs-dingtalk-access-token': user_access_token},
+        )
+        user_id = user_info.get('userId') or user_info.get('userid')
+        union_id = user_info.get('unionId') or user_info.get('unionid')
+        if not user_id and union_id:
+            user_id = self.get_user_id_by_union_id(union_id)
+
+        if not user_id:
+            raise DingTalkAuthError(f'DingTalk OAuth2 user response missing userId: {user_info}')
+
+        return {
+            'user_id': user_id,
+            'union_id': union_id,
+            'name': user_info.get('nick') or user_info.get('name') or user_info.get('mobile') or user_id,
+            'avatar': user_info.get('avatarUrl') or user_info.get('avatar'),
+            'raw': {'oauth2': user_info},
+        }
+
+    def exchange_legacy_sns_code_for_user(self, code):
         sns_data = self._post_json(
             self.SNS_USER_INFO_URL,
             {'tmp_auth_code': code},

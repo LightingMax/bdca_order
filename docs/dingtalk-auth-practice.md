@@ -2,7 +2,21 @@
 
 ## 版本说明
 
-当前项目实现的是钉钉旧版 SNS 扫码登录链路，也就是：
+当前分支实现的是钉钉新版 OAuth2 登录链路，也就是：
+
+```text
+login.dingtalk.com/oauth2/auth
+api.dingtalk.com/v1.0/oauth2/userAccessToken
+api.dingtalk.com/v1.0/contact/users/me
+```
+
+旧版 SNS 扫码登录链路仍保留为可选实现，可以通过环境变量切回：
+
+```env
+DINGTALK_AUTH_FLOW=legacy_sns
+```
+
+旧版 SNS 链路是：
 
 ```text
 oapi.dingtalk.com/connect/qrconnect
@@ -11,7 +25,7 @@ oapi.dingtalk.com/gettoken
 oapi.dingtalk.com/topapi/user/getbyunionid
 ```
 
-这套链路和钉钉文档中的“扫码登录第三方网站”一致。后续如果迁移到新版 OAuth 登录，需要单独调整登录地址、code 换 token、用户信息获取、unionId/userId 转换等实现，不应和当前旧版 SNS 流程混用。
+新版 OAuth2 和旧版 SNS 不应在同一次登录流程里混用。当前分支默认使用 `DINGTALK_AUTH_FLOW=oauth2`。
 
 ## 背景
 

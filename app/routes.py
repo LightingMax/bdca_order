@@ -437,7 +437,7 @@ def login():
 
 @main_bp.route('/auth/dingtalk/start')
 def dingtalk_auth_start():
-    """跳转到钉钉扫码登录授权。"""
+    """跳转到钉钉登录授权。"""
     if not current_app.config.get('DINGTALK_AUTH_ENABLED'):
         return redirect('/')
     if not current_app.config.get('DINGTALK_CLIENT_ID') or not current_app.config.get('DINGTALK_CLIENT_SECRET'):
@@ -453,7 +453,7 @@ def dingtalk_auth_start():
 
 @main_bp.route('/auth/dingtalk/callback')
 def dingtalk_auth_callback():
-    """钉钉扫码登录回调：code -> unionId -> userId -> session。"""
+    """钉钉登录回调：code -> userId -> session。"""
     error = request.args.get('error') or request.args.get('error_description')
     if error and not request.args.get('code'):
         current_app.logger.warning(f"钉钉登录回调失败: {request.args.to_dict()}")
@@ -500,6 +500,7 @@ def auth_status():
     client_ip = _request_client_ip()
     return jsonify({
         'auth_enabled': current_app.config.get('DINGTALK_AUTH_ENABLED'),
+        'auth_flow': current_app.config.get('DINGTALK_AUTH_FLOW'),
         'logged_in': bool(session.get('dingtalk_user_id')),
         'user': session.get('dingtalk_user'),
         'client_ip': client_ip,

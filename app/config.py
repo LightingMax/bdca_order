@@ -56,10 +56,11 @@ class Config:
 
     # DingTalk auth. Keep secrets in .env only.
     DINGTALK_AUTH_ENABLED = os.environ.get('DINGTALK_AUTH_ENABLED', 'false').lower() in {'1', 'true', 'yes', 'on'}
+    DINGTALK_AUTH_FLOW = (os.environ.get('DINGTALK_AUTH_FLOW') or 'oauth2').strip().lower()
     DINGTALK_CLIENT_ID = (os.environ.get('DINGTALK_CLIENT_ID') or '').strip()
     DINGTALK_CLIENT_SECRET = (os.environ.get('DINGTALK_CLIENT_SECRET') or '').strip()
     DINGTALK_REDIRECT_URI = (os.environ.get('DINGTALK_REDIRECT_URI') or '').strip()
-    DINGTALK_SCOPE = (os.environ.get('DINGTALK_SCOPE') or 'snsapi_login').strip()
+    DINGTALK_SCOPE = (os.environ.get('DINGTALK_SCOPE') or 'openid').strip()
     DINGTALK_AGENT_ID = int(os.environ.get('DINGTALK_AGENT_ID') or '0')
     DINGTALK_DEFAULT_ORIGINATOR_USER_ID = (os.environ.get('DINGTALK_DEFAULT_ORIGINATOR_USER_ID') or '').strip()
 
