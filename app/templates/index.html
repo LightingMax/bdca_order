@@ -1453,6 +1453,28 @@
             
             // 原始打印的数据
             let rawProcessedFiles = [];
+
+            function getRawFileIdentity(file) {
+                if (!file) {
+                    return '';
+                }
+                return (file.file_path || file.filename || '').trim();
+            }
+
+            function resolveRawDisplayName(displayName, usedNames) {
+                const baseName = displayName || '未命名文件';
+                if (!usedNames.has(baseName)) {
+                    usedNames.add(baseName);
+                    return baseName;
+                }
+                let suffix = 2;
+                while (usedNames.has(`${baseName} (${suffix})`)) {
+                    suffix += 1;
+                }
+                const resolved = `${baseName} (${suffix})`;
+                usedNames.add(resolved);
+                return resolved;
+            }
             
             // 智能处理的结果区域引用
             let smartResultArea = null;
@@ -1717,21 +1739,24 @@
                 
                 // 先添加新文件到rawProcessedFiles，然后重新渲染所有文件
                 const newFiles = [];
+                const usedDisplayNames = new Set(rawProcessedFiles.map(item => item.name));
                 printableFiles.forEach((file) => {
                     // 处理文件信息，兼容后端返回的格式
-                    const fileName = file.name || file.filename || `文件${rawProcessedFiles.length + 1}`;
+                    const fileName = file.name || file.filename || `文件${rawProcessedFiles.length + newFiles.length + 1}`;
                     const fileSize = file.size || file.file_size || 0;
                     const fileType = file.type || file.file_type || 'unknown';
-                    const displayName = fileName;
-                    const storageName = file.filename || fileName;
+                    const identity = getRawFileIdentity(file);
+                    const storageName = file.filename || file.file_path || fileName;
+                    const displayName = resolveRawDisplayName(fileName, usedDisplayNames);
                     
-                    // 检查是否已存在相同文件（避免重复添加）
-                    const isDuplicate = rawProcessedFiles.some(existing => 
-                        existing.storageName === storageName || existing.name === displayName
-                    );
+                    // 仅按服务端唯一标识去重，避免多张同名图片（如微信图片）被误判为重复
+                    const isDuplicate = identity
+                        ? rawProcessedFiles.some(existing => existing.identity === identity)
+                        : rawProcessedFiles.some(existing => existing.storageName === storageName);
                     
                     if (!isDuplicate) {
                         newFiles.push({
+                            identity,
                             name: displayName,
                             storageName: storageName,
                             size: fileSize,
@@ -1740,7 +1765,7 @@
                             originalFile: file
                         });
                     } else {
-                        console.log(`⚠️ 跳过重复文件: ${displayName}`);
+                        console.log(`⚠️ 跳过重复文件: ${displayName} (${identity || storageName})`);
                     }
                 });
                 
@@ -1822,8 +1847,8 @@
                 rawPrintAllBtn.disabled = true;
                 rawPrintAllBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> 任务创建中...';
                 
-                // 收集所有文件名
-                const filenames = rawProcessedFiles.map(file => file.storageName || file.name);
+                // 收集所有文件名（使用服务端唯一存储名，避免同名展示名导致只提交一个文件）
+                const filenames = rawProcessedFiles.map(file => file.storageName || file.identity || file.name);
                 
                 // 调用批量打印接口
                 fetch('/api/print-raw-batch', {
@@ -3030,11 +3055,23 @@
                     const filesToPrint = useIntegratedTrainPrint && trainMergedEntry
                         ? [...nonTrainFiles, trainMergedEntry]
                         : processedFiles.filter(file => !file.is_train_merged_entry);
+                    const printableSmartFiles = filesToPrint.filter(file => file && file.output_file);
+                    const skippedSmartCount = filesToPrint.length - printableSmartFiles.length;
                     const confirmMessage = useIntegratedTrainPrint
-                        ? `检测到 ${trainTicketCount} 张火车票/机票，打印全部时交通票据只会打印整合条目。\n\n是否继续打印 ${filesToPrint.length} 个实际打印任务？`
-                        : `确定要打印全部 ${filesToPrint.length} 个文件吗？`;
+                        ? `检测到 ${trainTicketCount} 张火车票/机票，打印全部时交通票据只会打印整合条目。\n\n是否继续打印 ${printableSmartFiles.length} 个实际打印任务？`
+                        : `确定要打印全部 ${printableSmartFiles.length} 个文件吗？`;
 
                     if (confirm(confirmMessage)) {
+                        if (printableSmartFiles.length === 0) {
+                            showNotification('没有可打印的输出文件，请确认处理结果已生成 PDF', 'warning');
+                            return;
+                        }
+
+                        if (skippedSmartCount > 0) {
+                            console.warn(`⚠️ 打印全部跳过 ${skippedSmartCount} 个缺少 output_file 的条目`, filesToPrint.filter(file => !file || !file.output_file));
+                            showNotification(`有 ${skippedSmartCount} 个条目缺少可打印文件，已跳过`, 'warning');
+                        }
+
                         let printedCount = 0;
                         let successCount = 0;
                         let failCount = 0;
@@ -3051,7 +3088,7 @@
                             return;
                         }
 
-                        filesToPrint.forEach(function(file) {
+                        printableSmartFiles.forEach(function(file) {
                             console.log('🔄 开始打印文件:', file.output_file);
                             fetch(`/api/print/${file.output_file}`, {
                                 method: 'POST'
@@ -3066,7 +3103,7 @@
                                     failCount++;
                                 }
                                 
-                                if (printedCount === filesToPrint.length) {
+                                if (printedCount === printableSmartFiles.length) {
                                     // 恢复按钮状态
                                     printAllBtnEl.innerHTML = originalText;
                                     printAllBtnEl.disabled = false;
@@ -3087,7 +3124,7 @@
                                 failCount++;
                                 console.error('❌ 打印文件出错:', file.output_file, error);
                                 
-                                if (printedCount === filesToPrint.length) {
+                                if (printedCount === printableSmartFiles.length) {
                                     // 恢复按钮状态
                                     printAllBtnEl.innerHTML = originalText;
                                     printAllBtnEl.disabled = false;

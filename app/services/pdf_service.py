@@ -1225,6 +1225,23 @@ def _render_invoice_images(invoice_path: str, dpi: int = 300):
     return _render_pdf_pages_to_pil(invoice_path, dpi=dpi, use_cropbox=use_cropbox)
 
 
+_ITINERARY_HEADER_KEYWORDS = (
+    "滴滴出行",
+    "高德地图",
+    "高德打车",
+    "高德",
+    "AMAP",
+    "ITINERARY",
+    "行程单",
+    "申请日期",
+    "申请时间",
+    "行程起止日期",
+    "行程时间",
+    "行程人手机号",
+    "共计",
+)
+
+
 def _find_itinerary_table_crop_box(itinerary_path, image_size):
     """根据行程单抬头和表格边界返回图片裁剪框，保留汇总信息和完整表格。"""
     logger = current_app.logger
@@ -1249,17 +1266,23 @@ def _find_itinerary_table_crop_box(itinerary_path, image_size):
             table = max(tables, key=lambda t: (t.bbox[2] - t.bbox[0]) * (t.bbox[3] - t.bbox[1]))
             x0, top, x1, bottom = table.bbox
             img_w, img_h = image_size
-            scale_x = img_w / float(page.width)
             scale_y = img_h / float(page.height)
 
             words = page.extract_words() or []
+            # 只取表格上方的抬头/汇总区，避免“合计28.28元”这类汇总行被当成页眉顶部。
             header_tops = [
                 word["top"]
                 for word in words
-                if any(keyword in word.get("text", "") for keyword in ("滴滴出行", "申请日期", "行程起止日期", "行程人手机号", "合计"))
+                if word["top"] < top - 2
+                and any(keyword in word.get("text", "") for keyword in _ITINERARY_HEADER_KEYWORDS)
             ]
-            header_top = min(header_tops) if header_tops else max(0, top - 160)
-            # 留出一点页眉空白，避免“滴滴出行-行程单”等抬头被贴边裁掉。
+            if header_tops:
+                header_top = min(header_tops)
+            else:
+                words_above_table = [word["top"] for word in words if word["top"] < top - 2]
+                header_top = min(words_above_table) if words_above_table else max(0, top - 160)
+
+            # 留出一点页眉空白，避免“滴滴出行-行程单 / 高德地图—打车——行程单”等抬头被贴边裁掉。
             crop_top = max(0, int(header_top * scale_y - 18 * scale_y))
 
             pad_bottom = 24 * scale_y
