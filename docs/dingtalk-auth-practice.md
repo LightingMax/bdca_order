@@ -236,7 +236,8 @@ DINGTALK_AGENT_ID=4641708513
 DINGTALK_CLIENT_ID=dingxxxxxxxxxxxx
 DINGTALK_CLIENT_SECRET=replace_with_secret
 DINGTALK_REDIRECT_URI=http://work.bdcatek.com:50010/auth/dingtalk/callback
-DINGTALK_SCOPE=snsapi_login
+DINGTALK_AUTH_FLOW=oauth2
+DINGTALK_SCOPE=openid Contact.User.Read
 DINGTALK_AUTH_PUBLIC_HOSTS=work.bdcatek.com:50010
 ```
 
@@ -248,6 +249,12 @@ DINGTALK_AUTH_ENABLED
 
 DINGTALK_REDIRECT_URI
 扫码确认后钉钉回调的完整地址。
+
+DINGTALK_AUTH_FLOW
+认证流类型。当前新版实现使用 oauth2；旧版 SNS 回退实现使用 legacy_sns。
+
+DINGTALK_SCOPE
+新版 OAuth2 授权范围。本项目需要 openid 和 Contact.User.Read。
 
 DINGTALK_AUTH_PUBLIC_HOSTS
 通过这些 Host 访问时强制钉钉登录。
@@ -303,28 +310,29 @@ def _requires_dingtalk_login():
     return not _is_internal_ip(_request_client_ip())
 ```
 
-### 2. 服务端生成扫码登录 URL
+### 2. 服务端生成新版 OAuth2 登录 URL
 
-服务端生成钉钉扫码登录地址：
+服务端生成钉钉新版 OAuth2 登录地址：
 
 ```text
-https://oapi.dingtalk.com/connect/qrconnect
+https://login.dingtalk.com/oauth2/auth
 ```
 
 参数包括：
 
 ```text
-appid=AppKey
+client_id=Client ID，也就是原 AppKey
 response_type=code
-scope=snsapi_login
+scope=openid Contact.User.Read
 state=随机字符串
 redirect_uri=完整回调地址
+prompt=consent
 ```
 
 示例：
 
 ```text
-https://oapi.dingtalk.com/connect/qrconnect?appid=dingxxx&response_type=code&scope=snsapi_login&state=xxx&redirect_uri=http%3A%2F%2Fwork.bdcatek.com%3A50010%2Fauth%2Fdingtalk%2Fcallback
+https://login.dingtalk.com/oauth2/auth?client_id=dingxxx&response_type=code&scope=openid%20Contact.User.Read&state=xxx&redirect_uri=http%3A%2F%2Fwork.bdcatek.com%3A50010%2Fauth%2Fdingtalk%2Fcallback&prompt=consent
 ```
 
 `state` 用来防止重放攻击。服务端生成后存入 session，回调时必须一致。
@@ -346,103 +354,80 @@ state 是否和 session 中保存的一致
 
 通过后，开始换取用户身份。
 
-### 4. code 换 unionId
+### 4. code 换 userAccessToken
 
-扫码登录第三方网站使用接口：
+新版 OAuth2 使用接口：
 
 ```text
-POST https://oapi.dingtalk.com/sns/getuserinfo_bycode
+POST https://api.dingtalk.com/v1.0/oauth2/userAccessToken
 ```
 
 请求体：
 
 ```json
 {
-  "tmp_auth_code": "钉钉回调给的 code"
+  "clientId": "应用 Client ID",
+  "clientSecret": "应用 Client Secret",
+  "code": "钉钉回调给的 code",
+  "grantType": "authorization_code"
 }
 ```
 
-这个接口不能简单用 Basic Auth。它需要在 URL query 中带：
+成功后返回用户级访问凭证：
+
+```json
+{
+  "accessToken": "user access token",
+  "expireIn": 7200
+}
+```
+
+这个 token 表示“当前扫码授权用户”的授权，不是企业内部应用的全局 token。
+
+### 5. userAccessToken 获取当前用户信息
+
+新版 OAuth2 获取当前用户信息使用接口：
 
 ```text
-accessKey
-timestamp
-signature
+GET https://api.dingtalk.com/v1.0/contact/users/me
 ```
 
-`signature` 的生成方式是：
+请求头：
 
 ```text
-用 AppSecret 对 timestamp 做 HmacSHA256
-再 base64 编码
+x-acs-dingtalk-access-token: userAccessToken
 ```
 
-本项目核心代码：
+这个接口需要 `Contact.User.Read` 权限。权限需要同时满足两个条件：
 
-```python
-def _sns_signature_params(self):
-    timestamp = str(int(time.time() * 1000))
-    digest = hmac.new(
-        self.config['DINGTALK_CLIENT_SECRET'].encode('utf-8'),
-        timestamp.encode('utf-8'),
-        digestmod=hashlib.sha256,
-    ).digest()
-    signature = base64.b64encode(digest).decode('utf-8')
-    return {
-        'accessKey': self.config['DINGTALK_CLIENT_ID'],
-        'timestamp': timestamp,
-        'signature': signature,
-    }
+```text
+钉钉开放平台应用权限中已申请 Contact.User.Read
+授权 URL 的 scope 中包含 Contact.User.Read
 ```
 
-成功后返回用户的 `unionId`。
+如果缺权限，会报：
 
-### 5. unionId 换企业内 userId
+```json
+{
+  "code": "Forbidden.AccessDenied.AccessTokenPermissionDenied",
+  "accessdenieddetail": {
+    "requiredScopes": ["Contact.User.Read"]
+  }
+}
+```
 
-`unionId` 是钉钉账号维度的身份。发起企业 OA 审批需要企业内 `userId`。
+`contact/users/me` 在企业内部应用场景下可以返回当前用户信息。若返回中包含 `userId`，系统直接使用它作为企业内用户身份。
 
-本项目调用：
+如果只返回 `unionId`，系统会兜底调用旧版通讯录接口把 `unionId` 转成企业内 `userId`：
 
 ```text
 POST https://oapi.dingtalk.com/topapi/user/getbyunionid
 ```
 
-请求体：
-
-```json
-{
-  "unionid": "用户 unionId"
-}
-```
-
-这里需要注意 token 类型。
-
-老版 `oapi.dingtalk.com/topapi/...` 接口需要老式 token：
+这一步使用的是企业内部应用的 `oapi` token：
 
 ```text
 GET https://oapi.dingtalk.com/gettoken?appkey=xxx&appsecret=xxx
-```
-
-不能把新版：
-
-```text
-POST https://api.dingtalk.com/v1.0/oauth2/accessToken
-```
-
-拿到的 token 混用到老版 `oapi` 接口上，否则容易出现：
-
-```text
-40014 不合法的access_token
-```
-
-本项目现在区分了两套 token：
-
-```text
-oapi token
-用于 user/getbyunionid、topapi/v2/user/get
-
-api.dingtalk.com token
-用于新版 OA 审批实例接口
 ```
 
 ### 6. userId 写入 session
@@ -460,6 +445,51 @@ session['dingtalk_user'] = {
 ```
 
 后续请求只要 session 中存在 `dingtalk_user_id`，就认为用户已登录。
+
+## 关键代码实现
+
+新版 OAuth2 认证封装在：
+
+```text
+app/services/dingtalk_service.py
+```
+
+生成授权 URL：
+
+```python
+def build_authorize_url(self, state):
+    query = urlencode({
+        'redirect_uri': self.config['DINGTALK_REDIRECT_URI'],
+        'response_type': 'code',
+        'client_id': self.config['DINGTALK_CLIENT_ID'],
+        'scope': self.config.get('DINGTALK_SCOPE') or 'openid',
+        'state': state,
+        'prompt': 'consent',
+    })
+    return f'{self.OAUTH2_AUTH_URL}?{query}'
+```
+
+code 换用户：
+
+```python
+def exchange_code_for_user(self, code):
+    token_data = self._post_json(
+        self.OAUTH2_USER_TOKEN_URL,
+        {
+            'clientId': self.config['DINGTALK_CLIENT_ID'],
+            'clientSecret': self.config['DINGTALK_CLIENT_SECRET'],
+            'code': code,
+            'grantType': 'authorization_code',
+        },
+    )
+    user_access_token = token_data.get('accessToken')
+    user_info = self._get_json(
+        self.OAUTH2_USER_ME_URL,
+        headers={'x-acs-dingtalk-access-token': user_access_token},
+    )
+```
+
+登录入口、回调、session 写入在 `app/routes.py`。
 
 ## 和 OA 审批的关系
 
@@ -671,35 +701,53 @@ data/dingtalk_approval_instances.json
 
 ## 常见问题
 
-### 40014 不合法的 access_token
+### Contact.User.Read 权限不足
 
-常见原因是 token 类型混用。
+新版 OAuth2 登录如果在获取当前用户信息时报：
 
-老版 `oapi.dingtalk.com/topapi/...` 接口使用：
-
-```text
-https://oapi.dingtalk.com/gettoken
+```json
+{
+  "code": "Forbidden.AccessDenied.AccessTokenPermissionDenied",
+  "accessdenieddetail": {
+    "requiredScopes": ["Contact.User.Read"]
+  }
+}
 ```
 
-新版 `api.dingtalk.com/v1.0/...` 接口使用：
+说明应用没有当前接口要求的权限，或授权 URL 没有请求对应 scope。
+
+需要同时检查：
 
 ```text
-https://api.dingtalk.com/v1.0/oauth2/accessToken
+钉钉开放平台中，应用已申请 Contact.User.Read
+.env 中 DINGTALK_SCOPE 包含 Contact.User.Read
+用户重新授权，不能复用旧授权 session
 ```
 
-不能随意混用。
+本项目配置：
 
-### sns/getuserinfo_bycode 一直失败
+```env
+DINGTALK_SCOPE=openid Contact.User.Read
+```
 
-检查是否按文档生成了：
+修改权限或 scope 后，建议访问：
 
 ```text
-accessKey
-timestamp
-signature
+http://work.bdcatek.com:50010/auth/logout
 ```
 
-`signature` 不是 AppSecret 原文，也不是 Basic Auth。
+然后重新登录。
+
+### code 换 token 失败
+
+检查：
+
+```text
+Client ID 和 Client Secret 是否来自同一个应用
+redirect_uri 是否和发起授权时完全一致
+code 是否只使用了一次
+应用是否已发布或对当前组织可用
+```
 
 ### 回调提示无权限访问
 
@@ -730,11 +778,45 @@ http://work.bdcatek.com:50010/auth/dingtalk/callback
 Client ID / Secret 是否来自同一个应用
 ```
 
+如果 `contact/users/me` 只返回 `unionId` 而没有 `userId`，本项目会兜底调用 `user/getbyunionid`。这一步需要企业内部应用通讯录权限。
+
 ### 查询不到 processCode
 
 `/api/dingtalk/approval-templates` 查询的是当前用户可管理的审批模板。
 
 如果返回空列表，常见原因是扫码用户不是该审批模板管理员。可以换管理员账号扫码，或在 OA 审批后台给当前用户模板管理权限。
+
+## 附录：旧版 SNS 扫码登录
+
+旧版 SNS 扫码登录仍保留为可选实现：
+
+```env
+DINGTALK_AUTH_FLOW=legacy_sns
+DINGTALK_SCOPE=snsapi_login
+```
+
+旧版链路是：
+
+```text
+https://oapi.dingtalk.com/connect/qrconnect
+POST https://oapi.dingtalk.com/sns/getuserinfo_bycode
+GET https://oapi.dingtalk.com/gettoken
+POST https://oapi.dingtalk.com/topapi/user/getbyunionid
+```
+
+旧版 `sns/getuserinfo_bycode` 需要用 `Client Secret` 对时间戳做 HmacSHA256 签名，再 base64 编码，然后在 query 中传：
+
+```text
+accessKey
+timestamp
+signature
+```
+
+旧版 `oapi.dingtalk.com/topapi/...` 接口使用 `oapi.dingtalk.com/gettoken` 返回的老式 token。新版 `api.dingtalk.com/v1.0/...` 接口使用新版 `oauth2/accessToken`。两套 token 不应混用，否则容易出现：
+
+```text
+40014 不合法的access_token
+```
 
 ## 本项目当前实现位置
 
