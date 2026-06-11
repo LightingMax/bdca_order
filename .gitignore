@@ -119,6 +119,9 @@ app/static/output/*
 # 运行时数据（会频繁变动，不适合进库）
 data/user_data.json
 data/file_hashes.json
+data/dingtalk_approval_instances.json
+data/dingtalk_cache.sqlite3
+data/dingtalk_cache.sqlite3-*
 global_stats.json
 
 # =========================

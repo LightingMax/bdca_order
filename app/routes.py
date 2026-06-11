@@ -15,6 +15,8 @@ from app.services.pdf_service import process_pdf_files
 from app.services.print_service import print_pdf, prepare_raw_pdf_for_a4_print, prepare_raw_preview_pdf
 from app.services.user_service import get_user_mac, save_user_data, get_all_user_stats, save_global_stats
 from app.services.dingtalk_service import DingTalkAuthError, DingTalkAuthService
+from app.services.trip_approval_matcher import rank_related_approvals
+from app.services.dingtalk_cache_service import get_related_approval_cache, save_related_approval_cache
 
 main_bp = Blueprint('main', __name__)
 
@@ -413,6 +415,19 @@ def _format_money(value):
     return f"{_money(value):.2f}"
 
 
+RESEARCH_PROJECT_OPTION_KEYS = {
+    '标准化机器人导航感知体系，主管总监：徐晋鸿': 'option_0',
+    '移动机器人一体化操作平台，主管总监：任杰': 'option_2',
+    '基于FMI的虚实仿真技术与控制器设计，主管总监：章志诚': 'option_967YXDAP9RS0',
+    '具身智能服务机器人应用系统，主管总监：杨建党': 'option_N5B56R6Z0740',
+    '非研发支出': 'option_JOGGIP07L4O0',
+}
+
+
+def _normalize_project_label(value):
+    return str(value or '').replace(':', '：').strip()
+
+
 def _build_travel_detail_table(summary, source_values):
     subsidy_amount = _money(source_values.get('subsidy_amount'))
     other_amount = _money(source_values.get('other_amount'))
@@ -435,14 +450,6 @@ def _build_travel_detail_table(summary, source_values):
         {'label': '开始日期', 'value': source_values.get('start_date') or '', 'key': 'DDDateField_1OUZLA4KXKLC0'},
         {'label': '返程日期', 'value': source_values.get('return_date') or '', 'key': 'DDDateField_Z97QT82VZEO0'},
         {'label': '出差天数', 'value': str(source_values.get('travel_days') or ''), 'key': 'NumberField_1IT960N9BWYO0'},
-        {'label': '火车票/高铁票/飞机票', 'value': _format_money(summary.get('ticket_amount')), 'key': 'NumberField_TKQA3FJUR8W0'},
-        {'label': '油费', 'value': _format_money(oil_amount), 'key': 'NumberField_4P8VBLGGCFI0'},
-        {'label': '过路费/停车费', 'value': _format_money(toll_parking_amount), 'key': 'NumberField_1G60JVHLVX9C0'},
-        {'label': '客运费', 'value': _format_money(passenger_amount), 'key': 'NumberField_9PZGX0LJSFG0'},
-        {'label': '打车费/公共交通费', 'value': _format_money(summary.get('taxi_amount')), 'key': 'NumberField_ATTP2STM20S0'},
-        {'label': '住宿费', 'value': _format_money(summary.get('hotel_amount')), 'key': 'NumberField_1YU6A0C0DW8W0'},
-        {'label': '其他费用', 'value': _format_money(other_amount), 'key': 'NumberField_UXD60VTEL0W0'},
-        {'label': '差旅补贴', 'value': _format_money(subsidy_amount), 'key': 'NumberField_22EM1RRVBULC0'},
     ]
 
     related_business_id = (source_values.get('related_business_id') or '').strip()
@@ -461,20 +468,42 @@ def _build_travel_detail_table(summary, source_values):
             'key': 'RelateField_Z6D58A5WKBK0',
         })
 
-    project_text = source_values.get('project_text')
-    if project_text:
-        row_values.append({'label': '所属项目及编号', 'value': project_text, 'key': 'TextareaField_1ROU6Z2Y3IHS0'})
+    row_values.extend([
+        {'label': '火车票/高铁票/飞机票', 'value': _format_money(summary.get('ticket_amount')), 'key': 'NumberField_TKQA3FJUR8W0'},
+        {'label': '油费', 'value': _format_money(oil_amount), 'key': 'NumberField_4P8VBLGGCFI0'},
+        {'label': '过路费/停车费', 'value': _format_money(toll_parking_amount), 'key': 'NumberField_1G60JVHLVX9C0'},
+        {'label': '客运费', 'value': _format_money(passenger_amount), 'key': 'NumberField_9PZGX0LJSFG0'},
+        {'label': '打车费/公共交通费', 'value': _format_money(summary.get('taxi_amount')), 'key': 'NumberField_ATTP2STM20S0'},
+        {'label': '住宿费', 'value': _format_money(summary.get('hotel_amount')), 'key': 'NumberField_1YU6A0C0DW8W0'},
+        {'label': '其他费用', 'value': _format_money(other_amount), 'key': 'NumberField_UXD60VTEL0W0'},
+        {'label': '差旅补贴', 'value': _format_money(subsidy_amount), 'key': 'NumberField_22EM1RRVBULC0'},
+        {
+            'label': '说明',
+            'value': source_values.get('travel_explanation') or '市内出差，湖州部门往来不计发补贴，补贴费用一天50元。',
+            'key': 'TextNote_T9ZBEOSV4K00',
+        },
+        {
+            'label': '差旅费用小计',
+            'source': 'system',
+            'value': _format_money(expense_amount),
+            'key': 'CalculateField_11CR0WMLYFVK0',
+        },
+    ])
 
     other_amount_note = source_values.get('other_amount_note')
     if other_amount_note:
         row_values.append({'label': '其他费用注释', 'value': other_amount_note, 'key': 'TextareaField_BAOJ37YQQNC0'})
 
-    travel_note = source_values.get('travel_note')
-    if travel_note:
-        row_values.append({'label': '备注', 'value': travel_note, 'key': 'TextareaField_1S56PO5W814W0'})
+    project_text = source_values.get('project_text')
+    if project_text:
+        row_values.append({'label': '所属项目及编号', 'value': project_text, 'key': 'TextareaField_1ROU6Z2Y3IHS0'})
 
     research_project_label = source_values.get('research_project_label')
-    research_project_key = source_values.get('research_project_key')
+    research_project_label = _normalize_project_label(research_project_label)
+    research_project_key = (
+        source_values.get('research_project_key')
+        or RESEARCH_PROJECT_OPTION_KEYS.get(research_project_label)
+    )
     if research_project_label:
         research_project_value = {
             'label': '所属研发项目',
@@ -487,6 +516,10 @@ def _build_travel_detail_table(summary, source_values):
                 'key': research_project_key,
             }
         row_values.append(research_project_value)
+
+    travel_note = source_values.get('travel_note')
+    if travel_note:
+        row_values.append({'label': '备注', 'value': travel_note, 'key': 'TextareaField_1S56PO5W814W0'})
 
     return json.dumps([{
         'rowValue': row_values,
@@ -525,7 +558,140 @@ def _build_travel_form_values(summary, extra_values=None):
         value = source_values.get(source_key)
         if component_name and value not in (None, ''):
             form_values.append({'name': component_name, 'value': str(value)})
+    extra_top_fields = {
+        'payee_bank_name': '收款人银行开户行',
+        'payee_bank_account': '收款人银行账号',
+    }
+    configured_names = {item.get('name') for item in form_values}
+    for source_key, component_name in extra_top_fields.items():
+        value = source_values.get(source_key)
+        if component_name not in configured_names and value not in (None, ''):
+            form_values.append({'name': component_name, 'value': str(value)})
     return form_values
+
+
+READONLY_TRAVEL_TABLE_FIELD_KEYS = {
+    'TextNote_T9ZBEOSV4K00',
+    'CalculateField_11CR0WMLYFVK0',
+}
+
+
+def _without_readonly_travel_table_fields(form_values):
+    cleaned = []
+    changed = False
+    for item in form_values:
+        if item.get('name') != '差旅报销明细':
+            cleaned.append(item)
+            continue
+
+        try:
+            rows = json.loads(item.get('value') or '[]')
+        except (TypeError, ValueError):
+            cleaned.append(item)
+            continue
+
+        for row in rows:
+            row_values = row.get('rowValue') or []
+            filtered_values = [
+                field for field in row_values
+                if field.get('key') not in READONLY_TRAVEL_TABLE_FIELD_KEYS
+            ]
+            if len(filtered_values) != len(row_values):
+                changed = True
+                row['rowValue'] = filtered_values
+
+        cleaned_item = {**item, 'value': json.dumps(rows, ensure_ascii=False)}
+        cleaned.append(cleaned_item)
+    return cleaned if changed else form_values
+
+
+def _is_dingtalk_create_system_error(exc):
+    text = str(exc)
+    return 'sysErrror' in text and '创建审批实例系统异常' in text
+
+
+def _legacy_oapi_field_value(field):
+    if field.get('key') == 'RelateField_Z6D58A5WKBK0':
+        related = field.get('extendValue') or {}
+        related_list = related.get('list') or []
+        instance_ids = [
+            item.get('procInstId')
+            for item in related_list
+            if isinstance(item, dict) and item.get('procInstId')
+        ]
+        if instance_ids:
+            return instance_ids
+    return field.get('value', '')
+
+
+def _legacy_oapi_form_values(form_values):
+    legacy_values = []
+    for item in form_values:
+        if item.get('name') != '差旅报销明细':
+            legacy_values.append({
+                'name': item.get('name'),
+                'value': item.get('value', ''),
+            })
+            continue
+
+        try:
+            rows = json.loads(item.get('value') or '[]')
+        except (TypeError, ValueError):
+            legacy_values.append({
+                'name': item.get('name'),
+                'value': item.get('value', ''),
+            })
+            continue
+
+        table_rows = []
+        for row in rows:
+            row_items = []
+            for field in row.get('rowValue') or []:
+                label = field.get('label')
+                if not label:
+                    continue
+                row_items.append({
+                    'name': label,
+                    'value': _legacy_oapi_field_value(field),
+                })
+            if row_items:
+                table_rows.append(row_items)
+        legacy_values.append({
+            'name': item.get('name'),
+            'value': table_rows,
+        })
+    return legacy_values
+
+
+def _legacy_oapi_workflow_people(forecast_result, target_approver_user_id):
+    result = forecast_result.get('result') or {}
+    approver_ids = []
+    cc_ids = []
+    for rule in result.get('workflowActivityRules') or []:
+        actor = rule.get('workflowActor') or {}
+        actor_type = actor.get('actorType')
+        if actor_type == 'approver' and not rule.get('isTargetSelect'):
+            for actioner in rule.get('activityActioners') or []:
+                user_id = actioner.get('userId')
+                if user_id and user_id not in approver_ids:
+                    approver_ids.append(user_id)
+        if actor_type == 'notifier':
+            for actioner in rule.get('activityActioners') or []:
+                user_id = actioner.get('userId')
+                if user_id and user_id not in cc_ids:
+                    cc_ids.append(user_id)
+
+    if target_approver_user_id and target_approver_user_id not in approver_ids:
+        approver_ids.append(target_approver_user_id)
+
+    approvers_v2 = [
+        {
+            'task_action_type': 'NONE',
+            'user_ids': [user_id],
+        }
+        for user_id in approver_ids
+    ]
+    return approvers_v2, cc_ids
 
 
 def _resolve_originator_dept_id(originator_user_id, requested_dept_id=None):
@@ -745,6 +911,16 @@ def create_dingtalk_travel_approval():
     form_values = _build_travel_form_values(summary, data.get('form_values'))
     if not form_values:
         return jsonify({'success': False, 'message': '未生成审批表单字段，请配置 DINGTALK_TRAVEL_FIELD_MAP'}), 400
+    form_value_names = {item.get('name') for item in form_values}
+    missing_top_fields = [
+        name for name in ('收款人银行开户行', '收款人银行账号')
+        if name not in form_value_names
+    ]
+    if missing_top_fields:
+        return jsonify({
+            'success': False,
+            'message': f"请填写必填字段：{'、'.join(missing_top_fields)}。刷新页面后可看到这两个输入框。",
+        }), 400
 
     if data.get('dry_run'):
         return jsonify({
@@ -770,6 +946,10 @@ def create_dingtalk_travel_approval():
             process_code=process_code,
             dept_id=dept_id,
             form_values=form_values,
+        )
+        current_app.logger.info(
+            "DingTalk approval forecast result: %s",
+            json.dumps(forecast, ensure_ascii=False)[:4000],
         )
         required_actioners = _required_target_select_actioners(forecast)
     except DingTalkAuthError as exc:
@@ -805,6 +985,7 @@ def create_dingtalk_travel_approval():
         json.dumps(form_values, ensure_ascii=False),
     )
 
+    create_attempts = []
     try:
         instance_id, raw_response = _dingtalk_service().create_approval_instance(
             originator_user_id=originator_user_id,
@@ -814,9 +995,60 @@ def create_dingtalk_travel_approval():
             form_values=form_values,
             target_select_actioners=target_select_actioners,
         )
+        create_attempts.append('full_payload')
     except DingTalkAuthError as exc:
-        current_app.logger.exception("发起钉钉差旅报销审批失败")
-        return jsonify({'success': False, 'message': str(exc)}), 502
+        create_attempts.append(f'full_payload_failed: {exc}')
+        cleaned_form_values = _without_readonly_travel_table_fields(form_values)
+        if cleaned_form_values is form_values or not _is_dingtalk_create_system_error(exc):
+            current_app.logger.exception("发起钉钉差旅报销审批失败")
+            return jsonify({'success': False, 'message': str(exc), 'attempts': create_attempts}), 502
+
+        current_app.logger.warning(
+            "完整差旅报销审批 payload 创建失败，尝试去掉只读/计算字段后重试: %s",
+            exc,
+        )
+        try:
+            instance_id, raw_response = _dingtalk_service().create_approval_instance(
+                originator_user_id=originator_user_id,
+                process_code=process_code,
+                dept_id=dept_id,
+                agent_id=agent_id,
+                form_values=cleaned_form_values,
+                target_select_actioners=target_select_actioners,
+            )
+            form_values = cleaned_form_values
+            create_attempts.append('without_readonly_table_fields')
+        except DingTalkAuthError as retry_exc:
+            create_attempts.append(f'without_readonly_table_fields_failed: {retry_exc}')
+            if not _is_dingtalk_create_system_error(retry_exc):
+                current_app.logger.exception("去掉只读字段后发起钉钉差旅报销审批仍失败")
+                return jsonify({'success': False, 'message': str(retry_exc), 'attempts': create_attempts}), 502
+
+            legacy_form_values = _legacy_oapi_form_values(form_values)
+            legacy_approvers_v2, legacy_cc_list = _legacy_oapi_workflow_people(
+                forecast,
+                target_approver_user_id,
+            )
+            current_app.logger.warning(
+                "新版审批实例接口两次失败，尝试老 OAPI 直接指定审批流兜底: %s",
+                retry_exc,
+            )
+            try:
+                instance_id, raw_response = _dingtalk_service().create_approval_instance_oapi_direct(
+                    originator_user_id=originator_user_id,
+                    process_code=process_code,
+                    dept_id=dept_id,
+                    agent_id=agent_id,
+                    form_values=legacy_form_values,
+                    approvers_v2=legacy_approvers_v2,
+                    cc_list=legacy_cc_list,
+                )
+                form_values = legacy_form_values
+                create_attempts.append('legacy_oapi_direct_workflow')
+            except DingTalkAuthError as legacy_exc:
+                create_attempts.append(f'legacy_oapi_direct_workflow_failed: {legacy_exc}')
+                current_app.logger.exception("老 OAPI 兜底发起钉钉差旅报销审批仍失败")
+                return jsonify({'success': False, 'message': str(legacy_exc), 'attempts': create_attempts}), 502
 
     record = {
         'instance_id': instance_id,
@@ -826,6 +1058,7 @@ def create_dingtalk_travel_approval():
         'summary': summary,
         'form_component_values': form_values,
         'raw_response': raw_response,
+        'create_attempts': create_attempts,
     }
     _append_approval_history(record)
 
@@ -1039,12 +1272,17 @@ def list_dingtalk_related_approvals():
         'statuses': statuses,
         'limit': limit,
     }, ensure_ascii=False, sort_keys=True)
-    cache_store = getattr(current_app, 'dingtalk_related_approval_cache', None)
-    if cache_store is None:
-        cache_store = {}
-        current_app.dingtalk_related_approval_cache = cache_store
-    cached = cache_store.get(cache_key)
+    cache_db_path = current_app.config['DINGTALK_CACHE_DB']
+    cached = None if request.args.get('refresh') else get_related_approval_cache(cache_db_path, cache_key)
     if cached and not request.args.get('refresh'):
+        ranked_approvals, inferred_trip_range = rank_related_approvals(
+            cached['approvals'],
+            session.get('processed_files') or [],
+            {
+                'start_date': request.args.get('start_date'),
+                'return_date': request.args.get('return_date') or request.args.get('end_date'),
+            },
+        )
         return jsonify({
             'success': True,
             'cached': True,
@@ -1052,7 +1290,10 @@ def list_dingtalk_related_approvals():
             'user_id': user_id,
             'start_time': start_time,
             'end_time': end_time,
-            'approvals': cached['approvals'],
+            'cached_at': cached.get('cached_at'),
+            'cache_source': 'sqlite',
+            'inferred_trip_range': inferred_trip_range,
+            'approvals': ranked_approvals,
         })
 
     try:
@@ -1060,6 +1301,7 @@ def list_dingtalk_related_approvals():
             process_code=process_code,
             start_time_ms=_timestamp_ms_from_date(start_time),
             end_time_ms=_timestamp_ms_from_date(end_time, end_of_day=True),
+            user_ids=[user_id],
             statuses=statuses or None,
             max_pages=5,
         )
@@ -1078,10 +1320,25 @@ def list_dingtalk_related_approvals():
         current_app.logger.exception("获取可关联钉钉审批单失败")
         return jsonify({'success': False, 'message': str(exc)}), 502
 
-    cache_store[cache_key] = {
-        'cached_at': datetime.datetime.now().isoformat(timespec='seconds'),
-        'approvals': approvals,
-    }
+    cached_at = save_related_approval_cache(
+        cache_db_path,
+        cache_key=cache_key,
+        user_id=user_id,
+        process_code=process_code,
+        start_time=start_time,
+        end_time=end_time,
+        statuses=statuses,
+        limit=limit,
+        approvals=approvals,
+    )
+    ranked_approvals, inferred_trip_range = rank_related_approvals(
+        approvals,
+        session.get('processed_files') or [],
+        {
+            'start_date': request.args.get('start_date'),
+            'return_date': request.args.get('return_date') or request.args.get('end_date'),
+        },
+    )
 
     return jsonify({
         'success': True,
@@ -1090,7 +1347,10 @@ def list_dingtalk_related_approvals():
         'user_id': user_id,
         'start_time': start_time,
         'end_time': end_time,
-        'approvals': approvals,
+        'cached_at': cached_at,
+        'cache_source': 'dingtalk_refresh',
+        'inferred_trip_range': inferred_trip_range,
+        'approvals': ranked_approvals,
     })
 
 

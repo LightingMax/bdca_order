@@ -23,6 +23,7 @@ class DingTalkAuthService:
     OAPI_TOKEN_URL = 'https://oapi.dingtalk.com/gettoken'
     APP_TOKEN_URL = 'https://api.dingtalk.com/v1.0/oauth2/accessToken'
     APPROVAL_CREATE_URL = 'https://api.dingtalk.com/v1.0/workflow/processInstances'
+    OAPI_APPROVAL_CREATE_URL = 'https://oapi.dingtalk.com/topapi/processinstance/create'
     APPROVAL_INSTANCE_IDS_URL = 'https://api.dingtalk.com/v1.0/workflow/processes/instanceIds/query'
     APPROVAL_MANAGED_TEMPLATES_URL = 'https://api.dingtalk.com/v1.0/workflow/processes/managements/templates'
     UNIONID_LOOKUP_URL = 'https://oapi.dingtalk.com/topapi/user/getbyunionid'
@@ -168,6 +169,43 @@ class DingTalkAuthService:
         instance_id = data.get('instanceId') or data.get('processInstanceId')
         if not instance_id:
             raise DingTalkAuthError(f'DingTalk approval response missing instanceId: {data}')
+        return instance_id, data
+
+    def create_approval_instance_oapi_direct(
+        self,
+        originator_user_id,
+        process_code,
+        dept_id,
+        agent_id,
+        form_values,
+        approvers_v2=None,
+        cc_list=None,
+        cc_position='FINISH',
+    ):
+        payload = {
+            'originator_user_id': originator_user_id,
+            'process_code': process_code,
+            'dept_id': dept_id,
+            'agent_id': agent_id,
+            'form_component_values': form_values,
+        }
+        if approvers_v2:
+            payload['approvers_v2'] = approvers_v2
+        if cc_list:
+            payload['cc_list'] = ','.join(cc_list)
+            payload['cc_position'] = cc_position
+
+        current_app.logger.info(
+            "DingTalk oapi approval create payload: %s",
+            json.dumps(payload, ensure_ascii=False),
+        )
+        data = self._post_json(
+            f'{self.OAPI_APPROVAL_CREATE_URL}?access_token={self.get_oapi_access_token()}',
+            payload,
+        )
+        instance_id = data.get('process_instance_id') or data.get('processInstanceId')
+        if not instance_id:
+            raise DingTalkAuthError(f'DingTalk oapi approval response missing process_instance_id: {data}')
         return instance_id, data
 
     def forecast_approval_process(self, originator_user_id, process_code, dept_id, form_values):

@@ -8,6 +8,7 @@ from pathlib import Path
 from PyPDF2 import PdfReader, PdfWriter
 from flask import current_app
 from app.services.file_service import get_file_paths, group_files_by_type
+from app.services.trip_approval_matcher import extract_dates_from_text
 
 # ============================================================================
 # 以下函数已废弃，改用高德打车PDF解析器（parse_gaode_itinerary_enhanced）
@@ -1842,6 +1843,7 @@ def _collect_train_ticket_pages(train_ticket_pdfs):
                     text = doc.load_page(i).get_text() or ""
                     amount = _extract_train_amount_from_text(text)
                     meta = _extract_flight_meta_from_text(text, Path(pdf_path).name) if is_flight else _extract_train_meta_from_text(text, Path(pdf_path).name)
+                    ticket_dates = [item.isoformat() for item in extract_dates_from_text(text)]
                     pages.append({
                         "pdf_path": pdf_path,
                         "page_no": i + 1,
@@ -1853,6 +1855,7 @@ def _collect_train_ticket_pages(train_ticket_pdfs):
                         "from_station": meta["from_station"],
                         "to_station": meta["to_station"],
                         "display_name": meta["display_name"],
+                        "ticket_dates": ticket_dates,
                     })
                 doc.close()
             else:
@@ -1861,6 +1864,7 @@ def _collect_train_ticket_pages(train_ticket_pdfs):
                     text = page.extract_text() or ""
                     amount = _extract_train_amount_from_text(text)
                     meta = _extract_flight_meta_from_text(text, Path(pdf_path).name) if is_flight else _extract_train_meta_from_text(text, Path(pdf_path).name)
+                    ticket_dates = [item.isoformat() for item in extract_dates_from_text(text)]
                     pages.append({
                         "pdf_path": pdf_path,
                         "page_no": i + 1,
@@ -1872,6 +1876,7 @@ def _collect_train_ticket_pages(train_ticket_pdfs):
                         "from_station": meta["from_station"],
                         "to_station": meta["to_station"],
                         "display_name": meta["display_name"],
+                        "ticket_dates": ticket_dates,
                     })
         except Exception as e:
             logger.warning(f"火车票页面解析失败: {pdf_path}, err={e}")

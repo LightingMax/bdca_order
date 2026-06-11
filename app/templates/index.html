@@ -35,6 +35,54 @@
             border-color: #28a745;
             background-color: #e8f4ea;
         }
+        .related-approval-panel {
+            background: #102033;
+            border: 1px solid #274762;
+            color: #eef6ff;
+        }
+        .related-approval-panel .text-muted {
+            color: #a8bfd4 !important;
+        }
+        .related-approval-list {
+            display: grid;
+            gap: 8px;
+        }
+        .related-approval-item,
+        .related-approval-message {
+            width: 100%;
+            border: 1px solid #315675;
+            border-radius: 8px;
+            background: #182b41;
+            color: #eef6ff;
+            padding: 10px 12px;
+            text-align: left;
+        }
+        .related-approval-item:hover,
+        .related-approval-item:focus {
+            background: #223a54;
+            border-color: #4aa3df;
+            color: #ffffff;
+        }
+        .related-approval-badge {
+            display: inline-flex;
+            max-width: 100%;
+            border: 1px solid #3d6282;
+            border-radius: 999px;
+            background: #0d1a2a;
+            color: #d9ecff;
+            padding: 3px 8px;
+            margin: 0 4px 4px 0;
+            font-size: 12px;
+            white-space: normal;
+        }
+        .related-approval-recommend {
+            border-radius: 999px;
+            background: #2f9e44;
+            color: #fff;
+            padding: 3px 8px;
+            font-size: 12px;
+            white-space: nowrap;
+        }
         .progress {
             display: none;
             margin: 20px 0;
@@ -1139,6 +1187,39 @@
                 travel: '差旅报销',
                 city_transport: '市内交通费'
             };
+            const relatedApprovalCacheTtlMs = 10 * 60 * 1000;
+
+            function relatedApprovalCacheKey(url) {
+                return `dingtalk_related_approvals:${url}`;
+            }
+
+            function readRelatedApprovalCache(url) {
+                try {
+                    const raw = sessionStorage.getItem(relatedApprovalCacheKey(url));
+                    if (!raw) {
+                        return null;
+                    }
+                    const cached = JSON.parse(raw);
+                    if (!cached || Date.now() - cached.cachedAt > relatedApprovalCacheTtlMs) {
+                        sessionStorage.removeItem(relatedApprovalCacheKey(url));
+                        return null;
+                    }
+                    return cached.data || null;
+                } catch (error) {
+                    return null;
+                }
+            }
+
+            function writeRelatedApprovalCache(url, data) {
+                try {
+                    sessionStorage.setItem(relatedApprovalCacheKey(url), JSON.stringify({
+                        cachedAt: Date.now(),
+                        data,
+                    }));
+                } catch (error) {
+                    // 缓存失败不影响主流程。
+                }
+            }
 
             function getResultKey(result) {
                 return result.output_file || result.order_id || '';
@@ -3371,13 +3452,13 @@
                     const hotelAmount = Number(amounts.hotel || 0);
 
                     const researchProjectOptions = [
-                        { label: '标准化机器人导航感知体系，主管总监：徐晋鸿', key: '' },
+                        { label: '标准化机器人导航感知体系，主管总监：徐晋鸿', key: 'option_0' },
                         { label: '移动平台远程操作与视频分析平台，主管总监：徐晋鸿', key: '' },
-                        { label: '移动机器人一体化操作平台，主管总监：任杰', key: '' },
-                        { label: '基于FMI的虚实仿真技术与控制器设计，主管总监：章志诚', key: '' },
+                        { label: '移动机器人一体化操作平台，主管总监：任杰', key: 'option_2' },
+                        { label: '基于FMI的虚实仿真技术与控制器设计，主管总监：章志诚', key: 'option_967YXDAP9RS0' },
                         { label: '具身智能服务机器人应用系统，主管总监：杨建党', key: 'option_N5B56R6Z0740' },
                         { label: '具身智能场景教育实训平台，主管总监：杨建党', key: '' },
-                        { label: '非研发支出', key: '' }
+                        { label: '非研发支出', key: 'option_JOGGIP07L4O0' }
                     ];
 
                     modal.innerHTML = `
@@ -3449,15 +3530,15 @@
                                         </div>
 
                                         <div class="col-12">
-                                            <div id="relatedApprovalPanel" class="border rounded p-2 d-none">
+                                            <div id="relatedApprovalPanel" class="related-approval-panel rounded p-3 d-none">
                                                 <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
                                                     <div>
                                                         <div class="fw-semibold">我的可关联审批单</div>
-                                                        <div class="small text-muted">选择后会自动带入审批编号和实例 ID。</div>
+                                                        <div class="small text-muted" id="relatedApprovalHint">选择后会自动带入审批编号和实例 ID。</div>
                                                     </div>
                                                     <button type="button" class="btn btn-sm btn-outline-secondary" id="refreshRelatedApprovalsBtn">刷新</button>
                                                 </div>
-                                                <div id="relatedApprovalList" class="list-group"></div>
+                                                <div id="relatedApprovalList" class="related-approval-list"></div>
                                             </div>
                                         </div>
 
@@ -3488,6 +3569,14 @@
                                         <div class="col-md-6">
                                             <label class="form-label">收款人姓名</label>
                                             <input name="payee_name" class="form-control" required>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label">收款人银行开户行</label>
+                                            <input name="payee_bank_name" class="form-control" required>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label">收款人银行账号</label>
+                                            <input name="payee_bank_account" class="form-control" required>
                                         </div>
                                         <div class="col-12">
                                             <label class="form-label">备注</label>
@@ -3521,6 +3610,7 @@
                     const relatedTitleInput = form.querySelector('[name="related_title"]');
                     const relatedBusinessInput = form.querySelector('[name="related_business_id"]');
                     const relatedInstanceInput = form.querySelector('[name="related_instance_id"]');
+                    const relatedHint = modal.querySelector('#relatedApprovalHint');
                     const loadRelatedBtn = modal.querySelector('#loadRelatedApprovalsBtn');
                     const refreshRelatedBtn = modal.querySelector('#refreshRelatedApprovalsBtn');
                     const researchProjectSelect = form.querySelector('[name="research_project_label"]');
@@ -3561,25 +3651,47 @@
                     researchProjectSelect.addEventListener('change', updateResearchProjectKey);
                     updateResearchProjectKey();
 
-                    function renderRelatedApprovals(approvals) {
+                    function relatedApprovalsUrl(forceRefresh = false) {
+                        const params = new URLSearchParams({ days: '30', limit: '10' });
+                        const startDate = form.querySelector('[name="start_date"]')?.value || '';
+                        const returnDate = form.querySelector('[name="return_date"]')?.value || '';
+                        if (startDate) params.set('start_date', startDate);
+                        if (returnDate) params.set('return_date', returnDate);
+                        if (forceRefresh) params.set('refresh', '1');
+                        return `/api/dingtalk/related-approvals?${params.toString()}`;
+                    }
+
+                    function renderRelatedApprovals(approvals, inferredTripRange) {
                         relatedList.innerHTML = '';
+                        if (inferredTripRange && inferredTripRange.start_date) {
+                            const endText = inferredTripRange.end_date && inferredTripRange.end_date !== inferredTripRange.start_date
+                                ? ` 至 ${inferredTripRange.end_date}`
+                                : '';
+                            relatedHint.textContent = `系统按行程日期 ${inferredTripRange.start_date}${endText} 推荐最相关的出差申请。`;
+                        } else {
+                            relatedHint.textContent = '选择后会自动带入审批编号和实例 ID。';
+                        }
                         if (!approvals.length) {
-                            relatedList.innerHTML = '<div class="list-group-item text-muted">最近没有查到可关联的审批单。请确认已配置出差申请 processCode。</div>';
+                            relatedList.innerHTML = '<div class="related-approval-message text-muted">最近没有查到可关联的审批单。请确认已配置出差申请 processCode。</div>';
                             return;
                         }
                         approvals.forEach((approval) => {
                             const button = document.createElement('button');
                             button.type = 'button';
-                            button.className = 'list-group-item list-group-item-action';
+                            button.className = `related-approval-item${approval.recommended ? ' border-success' : ''}`;
                             const fields = (approval.fields || []).slice(0, 5).map((field) => (
-                                `<span class="badge text-bg-light me-1 mb-1">${escapeHtml(field.name)}：${escapeHtml(field.value)}</span>`
+                                `<span class="related-approval-badge">${escapeHtml(field.name)}：${escapeHtml(field.value)}</span>`
                             )).join('');
+                            const matchBadge = approval.recommended
+                                ? `<span class="related-approval-recommend">推荐 · ${escapeHtml(approval.match_reason || '')}</span>`
+                                : `<span class="small text-muted">${escapeHtml(approval.match_reason || '')}</span>`;
                             button.innerHTML = `
-                                <div class="d-flex justify-content-between gap-2">
+                                <div class="d-flex justify-content-between gap-2 align-items-start">
                                     <div class="fw-semibold">${escapeHtml(approval.title || '未命名审批')}</div>
                                     <div class="small text-muted text-nowrap">${escapeHtml(approval.status || '')}</div>
                                 </div>
                                 <div class="small text-muted">编号：${escapeHtml(approval.business_id)} · ${escapeHtml(approval.create_time || '')}</div>
+                                <div class="mt-1">${matchBadge}</div>
                                 <div class="mt-1">${fields}</div>
                             `;
                             button.addEventListener('click', () => {
@@ -3593,27 +3705,35 @@
                         });
                     }
 
-                    function loadRelatedApprovals() {
+                    function loadRelatedApprovals(forceRefresh = false) {
                         relatedPanel.classList.remove('d-none');
-                        relatedList.innerHTML = '<div class="list-group-item text-muted">正在加载你的审批单...</div>';
-                        fetch('/api/dingtalk/related-approvals?days=30&limit=10')
+                        const url = relatedApprovalsUrl(forceRefresh);
+                        const cachedData = forceRefresh ? null : readRelatedApprovalCache(url);
+                        if (cachedData && cachedData.success) {
+                            renderRelatedApprovals(cachedData.approvals || [], cachedData.inferred_trip_range || null);
+                            return;
+                        }
+
+                        relatedList.innerHTML = '<div class="related-approval-message text-muted">正在加载你的审批单...</div>';
+                        fetch(url)
                             .then(response => response.json().then(data => ({ ok: response.ok, data })))
                             .then(({ ok, data }) => {
                                 if (ok && data.success) {
-                                    renderRelatedApprovals(data.approvals || []);
+                                    writeRelatedApprovalCache(relatedApprovalsUrl(false), data);
+                                    renderRelatedApprovals(data.approvals || [], data.inferred_trip_range || null);
                                 } else if (data && data.login_url) {
                                     relatedList.innerHTML = `
-                                        <div class="list-group-item">
+                                        <div class="related-approval-message">
                                             <div class="text-danger mb-2">${escapeHtml(data.message || '需要先钉钉登录后才能加载我的审批单')}</div>
                                             <a class="btn btn-sm btn-primary" href="${escapeHtml(data.login_url)}">去钉钉登录</a>
                                         </div>
                                     `;
                                 } else {
-                                    relatedList.innerHTML = `<div class="list-group-item text-danger">${escapeHtml(data.message || data.error || '审批单加载失败')}</div>`;
+                                    relatedList.innerHTML = `<div class="related-approval-message text-danger">${escapeHtml(data.message || data.error || '审批单加载失败')}</div>`;
                                 }
                             })
                             .catch(() => {
-                                relatedList.innerHTML = '<div class="list-group-item text-danger">审批单加载失败</div>';
+                                relatedList.innerHTML = '<div class="related-approval-message text-danger">审批单加载失败</div>';
                             });
                     }
 
@@ -3665,8 +3785,8 @@
                         }
                     });
 
-                    loadRelatedBtn.addEventListener('click', loadRelatedApprovals);
-                    refreshRelatedBtn.addEventListener('click', loadRelatedApprovals);
+                    loadRelatedBtn.addEventListener('click', () => loadRelatedApprovals(false));
+                    refreshRelatedBtn.addEventListener('click', () => loadRelatedApprovals(true));
 
                     form.addEventListener('submit', (event) => {
                         event.preventDefault();
@@ -3700,14 +3820,24 @@
             }
 
             function prefetchRelatedApprovalsForLoggedInUser() {
+                const url = '/api/dingtalk/related-approvals?days=30&limit=10';
+                if (readRelatedApprovalCache(url)) {
+                    return;
+                }
                 fetch('/api/auth/status')
                     .then(response => response.json())
                     .then(data => {
                         if (!data || !data.logged_in) {
                             return;
                         }
-                        return fetch('/api/dingtalk/related-approvals?days=30&limit=10')
+                        return fetch(url)
                             .then(response => response.json())
+                            .then(data => {
+                                if (data && data.success) {
+                                    writeRelatedApprovalCache(url, data);
+                                }
+                                return data;
+                            })
                             .catch(() => null);
                     })
                     .catch(() => null);
