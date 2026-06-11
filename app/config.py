@@ -67,8 +67,10 @@ class Config:
     # Travel reimbursement approval template. The field map keys are internal summary keys,
     # and values must match DingTalk approval component names exactly.
     DINGTALK_TRAVEL_PROCESS_CODE = (os.environ.get('DINGTALK_TRAVEL_PROCESS_CODE') or '').strip()
+    DINGTALK_RELATED_TRIP_PROCESS_CODE = (os.environ.get('DINGTALK_RELATED_TRIP_PROCESS_CODE') or '').strip()
     DINGTALK_TRAVEL_DEPT_ID = int(os.environ.get('DINGTALK_TRAVEL_DEPT_ID') or '-1')
     DINGTALK_TRAVEL_FIELD_MAP = _json_env('DINGTALK_TRAVEL_FIELD_MAP', {})
+    DINGTALK_APPROVER_CANDIDATES = _json_env('DINGTALK_APPROVER_CANDIDATES', [])
 
     # Hosts that should always require DingTalk login, useful when public access comes through TCP stream.
     # Example: work.bdcatek.com:12306

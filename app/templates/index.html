@@ -3168,8 +3168,357 @@
                 }
             });
 
+            function escapeHtml(value) {
+                const div = document.createElement('div');
+                div.textContent = value == null ? '' : String(value);
+                return div.innerHTML;
+            }
+
+            function formatApprovalMoney(value) {
+                const numberValue = Number(value || 0);
+                return Number.isFinite(numberValue) ? numberValue.toFixed(2) : '0.00';
+            }
+
+            function showDingtalkApprovalForm(today, amounts, billableCount) {
+                return new Promise((resolve) => {
+                    const modal = document.createElement('div');
+                    modal.className = 'modal fade';
+                    modal.tabIndex = -1;
+                    const ticketAmount = Number(amounts.train || 0) + Number(amounts.flight || 0);
+                    const taxiAmount = Number(amounts.taxi || 0);
+                    const hotelAmount = Number(amounts.hotel || 0);
+
+                    const researchProjectOptions = [
+                        { label: '标准化机器人导航感知体系，主管总监：徐晋鸿', key: '' },
+                        { label: '移动平台远程操作与视频分析平台，主管总监：徐晋鸿', key: '' },
+                        { label: '移动机器人一体化操作平台，主管总监：任杰', key: '' },
+                        { label: '基于FMI的虚实仿真技术与控制器设计，主管总监：章志诚', key: '' },
+                        { label: '具身智能服务机器人应用系统，主管总监：杨建党', key: 'option_N5B56R6Z0740' },
+                        { label: '具身智能场景教育实训平台，主管总监：杨建党', key: '' },
+                        { label: '非研发支出', key: '' }
+                    ];
+
+                    modal.innerHTML = `
+                        <div class="modal-dialog modal-xl">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title">发起差旅报销审批</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <form id="dingtalkApprovalForm" class="row g-3">
+                                        <div class="col-12">
+                                            <div class="d-flex flex-wrap gap-3 align-items-center p-3 bg-light border rounded">
+                                                <div><span class="text-muted small">报销条目</span><div class="fw-semibold">${billableCount} 个</div></div>
+                                                <div><span class="text-muted small">票务</span><div class="fw-semibold">¥${formatApprovalMoney(ticketAmount)}</div></div>
+                                                <div><span class="text-muted small">交通</span><div class="fw-semibold">¥${formatApprovalMoney(taxiAmount)}</div></div>
+                                                <div><span class="text-muted small">住宿</span><div class="fw-semibold">¥${formatApprovalMoney(hotelAmount)}</div></div>
+                                                <div><span class="text-muted small">当前合计</span><div class="fw-semibold text-primary" id="approvalSummaryTotal">¥${formatApprovalMoney(amounts.total)}</div></div>
+                                            </div>
+                                        </div>
+
+                                        <div class="col-12">
+                                            <div class="table-responsive border rounded">
+                                                <table class="table table-sm align-middle mb-0">
+                                                    <thead class="table-light">
+                                                        <tr>
+                                                            <th style="min-width: 130px;">出差地</th>
+                                                            <th style="min-width: 130px;">*开始日期</th>
+                                                            <th style="min-width: 130px;">*返程日期</th>
+                                                            <th style="min-width: 110px;">*出差天数</th>
+                                                            <th style="min-width: 180px;">*关联审批单</th>
+                                                            <th style="min-width: 160px;">火车票/高铁票/飞机票</th>
+                                                            <th style="min-width: 110px;">油费</th>
+                                                            <th style="min-width: 150px;">过路费/停车费</th>
+                                                            <th style="min-width: 110px;">客运费</th>
+                                                            <th style="min-width: 160px;">打车费/公共交通费</th>
+                                                            <th style="min-width: 120px;">住宿费</th>
+                                                            <th style="min-width: 120px;">其他费用</th>
+                                                            <th style="min-width: 120px;">差旅补贴</th>
+                                                            <th style="min-width: 130px;">*差旅费用小计</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        <tr>
+                                                            <td><input name="destination" class="form-control form-control-sm" required></td>
+                                                            <td><input name="start_date" type="date" class="form-control form-control-sm" value="${today}" required></td>
+                                                            <td><input name="return_date" type="date" class="form-control form-control-sm" value="${today}" required></td>
+                                                            <td><input name="travel_days" type="number" min="0" step="0.5" class="form-control form-control-sm" required></td>
+                                                            <td>
+                                                                <button type="button" class="btn btn-outline-primary btn-sm w-100 mb-1" id="loadRelatedApprovalsBtn">选择审批单</button>
+                                                                <input name="related_title" class="form-control form-control-sm mb-1" placeholder="未选择关联审批单" readonly>
+                                                                <input name="related_business_id" type="hidden">
+                                                                <input name="related_instance_id" type="hidden">
+                                                            </td>
+                                                            <td><input name="ticket_amount_display" type="number" class="form-control form-control-sm approval-money-field" value="${formatApprovalMoney(ticketAmount)}" readonly></td>
+                                                            <td><input name="oil_amount" type="number" min="0" step="0.01" class="form-control form-control-sm approval-money-field" value="0.00"></td>
+                                                            <td><input name="toll_parking_amount" type="number" min="0" step="0.01" class="form-control form-control-sm approval-money-field" value="0.00"></td>
+                                                            <td><input name="passenger_amount" type="number" min="0" step="0.01" class="form-control form-control-sm approval-money-field" value="0.00"></td>
+                                                            <td><input name="taxi_amount_display" type="number" class="form-control form-control-sm approval-money-field" value="${formatApprovalMoney(taxiAmount)}" readonly></td>
+                                                            <td><input name="hotel_amount_display" type="number" class="form-control form-control-sm approval-money-field" value="${formatApprovalMoney(hotelAmount)}" readonly></td>
+                                                            <td><input name="other_amount" type="number" min="0" step="0.01" class="form-control form-control-sm approval-money-field" value="0.00"></td>
+                                                            <td><input name="subsidy_amount" type="number" min="0" step="0.01" class="form-control form-control-sm approval-money-field" value="0.00"></td>
+                                                            <td><input name="expense_subtotal_display" class="form-control form-control-sm fw-semibold" value="${formatApprovalMoney(amounts.total)}" readonly></td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            <div class="form-text">金额列已根据当前上传结果预填；灰色只读项来自系统识别，其他费用可手动补充。</div>
+                                        </div>
+
+                                        <div class="col-12">
+                                            <div id="relatedApprovalPanel" class="border rounded p-2 d-none">
+                                                <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+                                                    <div>
+                                                        <div class="fw-semibold">我的可关联审批单</div>
+                                                        <div class="small text-muted">选择后会自动带入审批编号和实例 ID。</div>
+                                                    </div>
+                                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="refreshRelatedApprovalsBtn">刷新</button>
+                                                </div>
+                                                <div id="relatedApprovalList" class="list-group"></div>
+                                            </div>
+                                        </div>
+
+                                        <div class="col-12 position-relative">
+                                            <label class="form-label">自选审批人</label>
+                                            <input id="approvalApproverInput" class="form-control" placeholder="输入姓名或 userId 搜索，例如：杨、章、5055" autocomplete="off" required>
+                                            <input name="target_approver_user_id" type="hidden" required>
+                                            <div id="approvalApproverResults" class="list-group position-absolute w-100 shadow-sm" style="z-index: 1060; max-height: 220px; overflow-y: auto;"></div>
+                                            <div class="form-text">请输入人名的一部分，从候选里选择；提交时会使用对应 userId。</div>
+                                        </div>
+                                        <div class="col-12">
+                                            <label class="form-label">*所属项目及编号</label>
+                                            <textarea name="project_text" class="form-control" rows="2" required>待立项项目
+智能院-小专题课题4</textarea>
+                                            <div class="form-text">1、费用属于已立项项目，请填写所属项目名称+项目编号；2、如果是待立项项目，请使用显著描述。</div>
+                                        </div>
+                                        <div class="col-12">
+                                            <label class="form-label">*所属研发项目</label>
+                                            <select name="research_project_label" class="form-select" required>
+                                                ${researchProjectOptions.map((item) => `<option value="${escapeHtml(item.label)}" data-key="${escapeHtml(item.key)}">${escapeHtml(item.label)}</option>`).join('')}
+                                            </select>
+                                            <input name="research_project_key" type="hidden">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label">其他费用注释</label>
+                                            <input name="other_amount_note" class="form-control">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label">收款人姓名</label>
+                                            <input name="payee_name" class="form-control" required>
+                                        </div>
+                                        <div class="col-12">
+                                            <label class="form-label">备注</label>
+                                            <textarea name="travel_note" class="form-control" rows="2"></textarea>
+                                        </div>
+                                        <div class="col-12">
+                                            <div class="small text-muted">
+                                                审批流程：李星宇审批 → 你选择的审批人审批 → 抄送李星宇、吴佳丽、王埸、章志诚、杨建党、刘勇浙江大学、任杰、徐晋鸿、王晓芬。流程预测中还可能包含符艳青，请以钉钉后台配置为准。
+                                            </div>
+                                        </div>
+                                    </form>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                                    <button type="submit" form="dingtalkApprovalForm" class="btn btn-info text-white">发起审批</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+
+                    document.body.appendChild(modal);
+                    const bsModal = new bootstrap.Modal(modal);
+                    const form = modal.querySelector('#dingtalkApprovalForm');
+                    const approverInput = modal.querySelector('#approvalApproverInput');
+                    const approverUserIdInput = form.querySelector('[name="target_approver_user_id"]');
+                    const resultsEl = modal.querySelector('#approvalApproverResults');
+                    const subtotalInput = form.querySelector('[name="expense_subtotal_display"]');
+                    const summaryTotalEl = modal.querySelector('#approvalSummaryTotal');
+                    const relatedPanel = modal.querySelector('#relatedApprovalPanel');
+                    const relatedList = modal.querySelector('#relatedApprovalList');
+                    const relatedTitleInput = form.querySelector('[name="related_title"]');
+                    const relatedBusinessInput = form.querySelector('[name="related_business_id"]');
+                    const relatedInstanceInput = form.querySelector('[name="related_instance_id"]');
+                    const loadRelatedBtn = modal.querySelector('#loadRelatedApprovalsBtn');
+                    const refreshRelatedBtn = modal.querySelector('#refreshRelatedApprovalsBtn');
+                    const researchProjectSelect = form.querySelector('[name="research_project_label"]');
+                    const researchProjectKeyInput = form.querySelector('[name="research_project_key"]');
+                    let resolved = false;
+                    let searchTimer = null;
+
+                    function numberFromField(name) {
+                        const input = form.querySelector(`[name="${name}"]`);
+                        return Number(input && input.value ? input.value : 0) || 0;
+                    }
+
+                    function updateApprovalSubtotal() {
+                        const subtotal =
+                            ticketAmount
+                            + taxiAmount
+                            + hotelAmount
+                            + numberFromField('oil_amount')
+                            + numberFromField('toll_parking_amount')
+                            + numberFromField('passenger_amount')
+                            + numberFromField('other_amount')
+                            + numberFromField('subsidy_amount');
+                        const formatted = formatApprovalMoney(subtotal);
+                        subtotalInput.value = formatted;
+                        summaryTotalEl.textContent = `¥${formatted}`;
+                    }
+
+                    form.querySelectorAll('.approval-money-field').forEach((input) => {
+                        if (!input.readOnly) {
+                            input.addEventListener('input', updateApprovalSubtotal);
+                        }
+                    });
+
+                    function updateResearchProjectKey() {
+                        const option = researchProjectSelect.options[researchProjectSelect.selectedIndex];
+                        researchProjectKeyInput.value = option ? (option.dataset.key || '') : '';
+                    }
+                    researchProjectSelect.addEventListener('change', updateResearchProjectKey);
+                    updateResearchProjectKey();
+
+                    function renderRelatedApprovals(approvals) {
+                        relatedList.innerHTML = '';
+                        if (!approvals.length) {
+                            relatedList.innerHTML = '<div class="list-group-item text-muted">最近没有查到可关联的审批单。请确认已配置出差申请 processCode。</div>';
+                            return;
+                        }
+                        approvals.forEach((approval) => {
+                            const button = document.createElement('button');
+                            button.type = 'button';
+                            button.className = 'list-group-item list-group-item-action';
+                            const fields = (approval.fields || []).slice(0, 5).map((field) => (
+                                `<span class="badge text-bg-light me-1 mb-1">${escapeHtml(field.name)}：${escapeHtml(field.value)}</span>`
+                            )).join('');
+                            button.innerHTML = `
+                                <div class="d-flex justify-content-between gap-2">
+                                    <div class="fw-semibold">${escapeHtml(approval.title || '未命名审批')}</div>
+                                    <div class="small text-muted text-nowrap">${escapeHtml(approval.status || '')}</div>
+                                </div>
+                                <div class="small text-muted">编号：${escapeHtml(approval.business_id)} · ${escapeHtml(approval.create_time || '')}</div>
+                                <div class="mt-1">${fields}</div>
+                            `;
+                            button.addEventListener('click', () => {
+                                relatedTitleInput.value = approval.title || approval.business_id;
+                                relatedBusinessInput.value = approval.business_id || '';
+                                relatedInstanceInput.value = approval.instance_id || '';
+                                relatedPanel.classList.add('d-none');
+                                showNotification(`已选择关联审批单：${approval.title || approval.business_id}`, 'success');
+                            });
+                            relatedList.appendChild(button);
+                        });
+                    }
+
+                    function loadRelatedApprovals() {
+                        relatedPanel.classList.remove('d-none');
+                        relatedList.innerHTML = '<div class="list-group-item text-muted">正在加载你的审批单...</div>';
+                        fetch('/api/dingtalk/related-approvals?days=30&limit=10')
+                            .then(response => response.json().then(data => ({ ok: response.ok, data })))
+                            .then(({ ok, data }) => {
+                                if (ok && data.success) {
+                                    renderRelatedApprovals(data.approvals || []);
+                                } else if (data && data.login_url) {
+                                    relatedList.innerHTML = `
+                                        <div class="list-group-item">
+                                            <div class="text-danger mb-2">${escapeHtml(data.message || '需要先钉钉登录后才能加载我的审批单')}</div>
+                                            <a class="btn btn-sm btn-primary" href="${escapeHtml(data.login_url)}">去钉钉登录</a>
+                                        </div>
+                                    `;
+                                } else {
+                                    relatedList.innerHTML = `<div class="list-group-item text-danger">${escapeHtml(data.message || data.error || '审批单加载失败')}</div>`;
+                                }
+                            })
+                            .catch(() => {
+                                relatedList.innerHTML = '<div class="list-group-item text-danger">审批单加载失败</div>';
+                            });
+                    }
+
+                    function renderApproverResults(candidates) {
+                        resultsEl.innerHTML = '';
+                        if (!candidates.length) {
+                            resultsEl.innerHTML = '<div class="list-group-item text-muted">没有匹配候选</div>';
+                            return;
+                        }
+                        candidates.forEach((candidate) => {
+                            const button = document.createElement('button');
+                            button.type = 'button';
+                            button.className = 'list-group-item list-group-item-action';
+                            button.innerHTML = `
+                                <div class="fw-semibold">${escapeHtml(candidate.name)}</div>
+                                <div class="small text-muted">${escapeHtml(candidate.user_id)}${candidate.title ? ' · ' + escapeHtml(candidate.title) : ''}</div>
+                            `;
+                            button.addEventListener('click', () => {
+                                approverInput.value = `${candidate.name} (${candidate.user_id})`;
+                                approverUserIdInput.value = candidate.user_id;
+                                resultsEl.innerHTML = '';
+                            });
+                            resultsEl.appendChild(button);
+                        });
+                    }
+
+                    function searchApprovers(query) {
+                        fetch(`/api/dingtalk/approver-candidates?q=${encodeURIComponent(query || '')}`)
+                            .then(response => response.json())
+                            .then(data => {
+                                if (data && data.success) {
+                                    renderApproverResults(data.candidates || []);
+                                }
+                            })
+                            .catch(() => {
+                                resultsEl.innerHTML = '<div class="list-group-item text-danger">候选加载失败</div>';
+                            });
+                    }
+
+                    approverInput.addEventListener('input', () => {
+                        approverUserIdInput.value = '';
+                        clearTimeout(searchTimer);
+                        searchTimer = setTimeout(() => searchApprovers(approverInput.value.trim()), 160);
+                    });
+
+                    approverInput.addEventListener('focus', () => {
+                        if (!resultsEl.innerHTML) {
+                            searchApprovers(approverInput.value.trim());
+                        }
+                    });
+
+                    loadRelatedBtn.addEventListener('click', loadRelatedApprovals);
+                    refreshRelatedBtn.addEventListener('click', loadRelatedApprovals);
+
+                    form.addEventListener('submit', (event) => {
+                        event.preventDefault();
+                        if (!relatedBusinessInput.value || !relatedInstanceInput.value) {
+                            showNotification('请先选择关联审批单', 'warning');
+                            loadRelatedApprovals();
+                            return;
+                        }
+                        if (!approverUserIdInput.value) {
+                            showNotification('请从候选列表中选择审批人', 'warning');
+                            approverInput.focus();
+                            searchApprovers(approverInput.value.trim());
+                            return;
+                        }
+                        resolved = true;
+                        const formData = new FormData(form);
+                        const values = Object.fromEntries(formData.entries());
+                        bsModal.hide();
+                        resolve(values);
+                    });
+
+                    modal.addEventListener('hidden.bs.modal', () => {
+                        document.body.removeChild(modal);
+                        if (!resolved) {
+                            resolve(null);
+                        }
+                    });
+
+                    bsModal.show();
+                });
+            }
+
             // 使用事件委托绑定发起钉钉审批按钮
-            document.addEventListener('click', function(e) {
+            document.addEventListener('click', async function(e) {
                 const approvalBtnEl = e.target && e.target.closest ? e.target.closest('#dingtalkApprovalBtn') : null;
                 if (!approvalBtnEl) {
                     return;
@@ -3192,6 +3541,12 @@
                     return;
                 }
 
+                const today = new Date().toISOString().slice(0, 10);
+                const formValues = await showDingtalkApprovalForm(today, amounts, billableCount);
+                if (!formValues) {
+                    return;
+                }
+
                 const originalText = approvalBtnEl.innerHTML;
                 approvalBtnEl.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 发起中...';
                 approvalBtnEl.disabled = true;
@@ -3202,7 +3557,8 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        processed_files: processedFiles
+                        processed_files: processedFiles,
+                        form_values: formValues
                     })
                 })
                 .then(response => response.json().then(data => ({ ok: response.ok, data })))

@@ -1,10 +1,13 @@
 import base64
 import hashlib
 import hmac
+import json
 import time
+import uuid
 from urllib.parse import urlencode
 
 import requests
+from flask import current_app
 
 
 class DingTalkAuthError(RuntimeError):
@@ -20,6 +23,7 @@ class DingTalkAuthService:
     OAPI_TOKEN_URL = 'https://oapi.dingtalk.com/gettoken'
     APP_TOKEN_URL = 'https://api.dingtalk.com/v1.0/oauth2/accessToken'
     APPROVAL_CREATE_URL = 'https://api.dingtalk.com/v1.0/workflow/processInstances'
+    APPROVAL_INSTANCE_IDS_URL = 'https://api.dingtalk.com/v1.0/workflow/processes/instanceIds/query'
     APPROVAL_MANAGED_TEMPLATES_URL = 'https://api.dingtalk.com/v1.0/workflow/processes/managements/templates'
     UNIONID_LOOKUP_URL = 'https://oapi.dingtalk.com/topapi/user/getbyunionid'
     USER_DETAIL_URL = 'https://oapi.dingtalk.com/topapi/v2/user/get'
@@ -133,14 +137,29 @@ class DingTalkAuthService:
         )
         return data.get('result') or {}
 
-    def create_approval_instance(self, originator_user_id, process_code, dept_id, agent_id, form_values):
+    def create_approval_instance(
+        self,
+        originator_user_id,
+        process_code,
+        dept_id,
+        agent_id,
+        form_values,
+        target_select_actioners=None,
+    ):
         payload = {
             'originatorUserId': originator_user_id,
             'processCode': process_code,
             'deptId': dept_id,
             'microappAgentId': agent_id,
             'formComponentValues': form_values,
+            'RequestId': uuid.uuid4().hex,
         }
+        if target_select_actioners:
+            payload['targetSelectActioners'] = target_select_actioners
+        current_app.logger.info(
+            "DingTalk approval create payload: %s",
+            json.dumps(payload, ensure_ascii=False),
+        )
         data = self._post_json(
             self.APPROVAL_CREATE_URL,
             payload,
@@ -151,6 +170,20 @@ class DingTalkAuthService:
             raise DingTalkAuthError(f'DingTalk approval response missing instanceId: {data}')
         return instance_id, data
 
+    def forecast_approval_process(self, originator_user_id, process_code, dept_id, form_values):
+        payload = {
+            'userId': originator_user_id,
+            'processCode': process_code,
+            'deptId': dept_id,
+            'formComponentValues': form_values,
+            'RequestId': uuid.uuid4().hex,
+        }
+        return self._post_json(
+            'https://api.dingtalk.com/v1.0/workflow/processes/forecast',
+            payload,
+            headers={'x-acs-dingtalk-access-token': self.get_app_access_token()},
+        )
+
     def list_manageable_approval_templates(self, user_id):
         data = self._get_json(
             self.APPROVAL_MANAGED_TEMPLATES_URL,
@@ -158,6 +191,60 @@ class DingTalkAuthService:
             params={'userId': user_id},
         )
         return data.get('result') or []
+
+    def query_approval_instance_ids(self, process_code, start_time_ms, end_time_ms=None, user_ids=None, statuses=None, max_pages=50):
+        instance_ids = []
+        next_token = None
+        pages = 0
+        while pages < max_pages:
+            payload = {
+                'processCode': process_code,
+                'startTime': start_time_ms,
+                'maxResults': 20,
+                'nextToken': next_token or 0,
+            }
+            if end_time_ms:
+                payload['endTime'] = end_time_ms
+            if user_ids:
+                payload['userIds'] = user_ids
+            if statuses:
+                payload['statuses'] = statuses
+
+            data = self._post_json(
+                self.APPROVAL_INSTANCE_IDS_URL,
+                payload,
+                headers={'x-acs-dingtalk-access-token': self.get_app_access_token()},
+            )
+            result = data.get('result') or {}
+            instance_ids.extend(result.get('list') or [])
+            next_token = result.get('nextToken')
+            pages += 1
+            if not next_token:
+                break
+
+        return instance_ids
+
+    def get_approval_instance(self, process_instance_id):
+        data = self._get_json(
+            self.APPROVAL_CREATE_URL,
+            headers={'x-acs-dingtalk-access-token': self.get_app_access_token()},
+            params={'processInstanceId': process_instance_id},
+        )
+        return data.get('result') or data
+
+    def find_approval_instance_by_business_id(self, business_id, process_code, start_time_ms, end_time_ms=None, user_ids=None, statuses=None):
+        instance_ids = self.query_approval_instance_ids(
+            process_code=process_code,
+            start_time_ms=start_time_ms,
+            end_time_ms=end_time_ms,
+            user_ids=user_ids,
+            statuses=statuses,
+        )
+        for instance_id in instance_ids:
+            detail = self.get_approval_instance(instance_id)
+            if str(detail.get('businessId') or '') == str(business_id):
+                return detail, instance_ids
+        return None, instance_ids
 
     def get_app_access_token(self):
         if self._app_access_token and time.time() < self._app_token_expires_at - 300:

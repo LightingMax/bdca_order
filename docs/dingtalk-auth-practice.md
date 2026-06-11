@@ -554,7 +554,7 @@ http://work.bdcatek.com:50010/api/dingtalk/approval-templates
 本项目通过环境变量配置字段映射：
 
 ```env
-DINGTALK_TRAVEL_FIELD_MAP={"total_amount":"报销金额","details":"报销明细","remark":"备注"}
+DINGTALK_TRAVEL_FIELD_MAP={"application_date":"申请日期","travel_detail_table":"差旅报销明细","total_amount":"本次差旅报销金额合计（元）","payee_name":"收款人姓名"}
 ```
 
 左侧是系统内部汇总字段：
@@ -595,7 +595,7 @@ flight_amount
 则配置为：
 
 ```env
-DINGTALK_TRAVEL_FIELD_MAP={"total_amount":"费用总额","details":"费用明细","remark":"申请说明"}
+DINGTALK_TRAVEL_FIELD_MAP={"application_date":"申请日期","travel_detail_table":"差旅报销明细","total_amount":"本次差旅报销金额合计（元）","payee_name":"收款人姓名"}
 ```
 
 ## 验证流程
