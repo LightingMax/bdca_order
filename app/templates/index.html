@@ -297,6 +297,11 @@
         #smart-processing .upload-area {
             border-color: #28a745;
             background-color: #f8f9fa;
+            min-height: 190px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
         }
         
         #smart-processing .upload-area:hover {
@@ -722,10 +727,79 @@
             color: #0d6efd;
             font-weight: 600;
         }
+
+        .account-bar {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .account-menu {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid #dee2e6;
+            background: #fff;
+            color: #495057;
+            border-radius: 999px;
+            padding: 6px 10px 6px 6px;
+        }
+
+        .account-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #0d6efd;
+            color: #fff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            overflow: hidden;
+        }
+
+        .account-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .account-name {
+            max-width: 180px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body>
     <div class="container">
+        <div class="account-bar">
+            {% if dingtalk_user %}
+            <div class="dropdown">
+                <button class="account-menu dropdown-toggle" type="button" id="accountMenuButton" data-bs-toggle="dropdown" aria-expanded="false">
+                    <span class="account-avatar">
+                        {% if dingtalk_user.avatar %}
+                        <img src="{{ dingtalk_user.avatar }}" alt="">
+                        {% else %}
+                        {{ (dingtalk_user.name or '钉')[:1] }}
+                        {% endif %}
+                    </span>
+                    <span class="account-name">{{ dingtalk_user.name or dingtalk_user.user_id }}</span>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="accountMenuButton">
+                    <li><h6 class="dropdown-header">当前钉钉账号</h6></li>
+                    <li><span class="dropdown-item-text small text-muted">{{ dingtalk_user.user_id }}</span></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="/auth/switch">切换账号</a></li>
+                    <li><a class="dropdown-item" href="/auth/logout">退出登录</a></li>
+                </ul>
+            </div>
+            {% else %}
+            <a class="btn btn-sm btn-outline-primary" href="/auth/dingtalk/start">钉钉登录</a>
+            {% endif %}
+        </div>
         <h1 class="text-center mb-4">打车行程单和发票文件处理系统</h1>
         <div id="globalSlogan" class="hero-slogan text-center animate-fade-in">
             报销战报加载中...
@@ -2384,10 +2458,39 @@
             }
             
             // 上传智能处理文件到服务器
-            function uploadSmartFiles(files) {
+            async function ensureDingTalkSessionForAction() {
+                try {
+                    const response = await fetch('/api/auth/status', {
+                        credentials: 'same-origin',
+                        cache: 'no-store'
+                    });
+                    if (response.status === 401) {
+                        const data = await response.json().catch(() => ({}));
+                        return { ok: false, loginUrl: data.login_url || '/auth/dingtalk/start' };
+                    }
+                    const data = await response.json();
+                    return {
+                        ok: Boolean(data && data.logged_in),
+                        loginUrl: '/auth/dingtalk/start',
+                    };
+                } catch (error) {
+                    console.warn('钉钉登录态检查失败:', error);
+                    return { ok: false, loginUrl: '/auth/dingtalk/start' };
+                }
+            }
+
+            // 上传智能处理文件到服务器
+            async function uploadSmartFiles(files) {
                 console.log('🚀 智能处理区域 - uploadSmartFiles 开始，文件数量:', files.length);
                 console.log('📊 上传前 processedFiles 长度:', processedFiles ? processedFiles.length : 'undefined');
                 console.log('📊 上传前 resultList 内容长度:', resultList.innerHTML.length);
+
+                const sessionCheck = await ensureDingTalkSessionForAction();
+                if (!sessionCheck.ok) {
+                    showNotification('登录状态已失效，请重新钉钉登录后再上传', 'warning');
+                    window.location.href = sessionCheck.loginUrl || '/auth/dingtalk/start';
+                    return;
+                }
                 
                 const formData = new FormData();
                 for (let i = 0; i < files.length; i++) {
@@ -2511,10 +2614,17 @@
                         }
                     } else {
                         let errorMessage = '上传失败';
+                        let loginUrl = null;
                         try {
                             const response = JSON.parse(xhr.responseText);
-                            errorMessage = response.error || errorMessage;
+                            errorMessage = response.error || response.message || errorMessage;
+                            loginUrl = response.login_url || null;
                         } catch (e) {}
+                        if (xhr.status === 401 && loginUrl) {
+                            showNotification('登录状态已失效，请重新钉钉登录', 'warning');
+                            window.location.href = loginUrl;
+                            return;
+                        }
                         showNotification(errorMessage, 'error');
                         document.getElementById('fileList').style.display = 'none';
                     }
@@ -2533,6 +2643,7 @@
                 });
                 
                 xhr.open('POST', '/api/upload');
+                xhr.withCredentials = true;
                 xhr.send(formData);
             }
             

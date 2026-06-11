@@ -64,6 +64,7 @@ def _requires_dingtalk_login():
         'main.dingtalk_auth_start',
         'main.dingtalk_auth_callback',
         'main.dingtalk_logout',
+        'main.dingtalk_switch_account',
         'main.auth_status',
         'static',
     }:
@@ -80,6 +81,15 @@ def require_dingtalk_auth_for_external_access():
     if not _requires_dingtalk_login():
         return None
 
+    current_app.logger.warning(
+        "钉钉鉴权拦截: path=%s, endpoint=%s, host=%s, remote=%s, has_cookie=%s, session_user=%s",
+        request.path,
+        request.endpoint,
+        request.host,
+        _request_client_ip(),
+        bool(request.headers.get('Cookie')),
+        session.get('dingtalk_user_id'),
+    )
     if request.path.startswith('/api/'):
         return jsonify({'error': '需要钉钉登录', 'login_url': '/auth/dingtalk/start'}), 401
     return redirect('/auth/dingtalk/start')
@@ -615,7 +625,7 @@ def login():
         'box-shadow:0 12px 35px rgba(20,30,60,.12);text-align:center;}'
         'a{display:inline-block;background:#1677ff;color:#fff;text-decoration:none;padding:12px 22px;'
         'border-radius:6px;font-weight:600;}p{color:#667085;line-height:1.6;}</style></head><body>'
-        '<div class="box"><h2>钉钉登录</h2><p>外网访问需要先通过钉钉确认身份。内网直连可免登录。</p>'
+        '<div class="box"><h2>钉钉登录</h2><p>当前系统需要先通过钉钉确认身份。</p>'
         '<a href="/auth/dingtalk/start">使用钉钉登录</a></div></body></html>'
     )
 
@@ -678,6 +688,14 @@ def dingtalk_logout():
     session.pop('dingtalk_user', None)
     session.pop('dingtalk_oauth_state', None)
     return redirect('/login')
+
+
+@main_bp.route('/auth/switch')
+def dingtalk_switch_account():
+    session.pop('dingtalk_user_id', None)
+    session.pop('dingtalk_user', None)
+    session.pop('dingtalk_oauth_state', None)
+    return redirect('/auth/dingtalk/start')
 
 
 @main_bp.route('/api/auth/status')
