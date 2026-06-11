@@ -864,9 +864,19 @@
                     <button id="downloadCollectionBtn" class="btn btn-success me-2">
                         <i class="fas fa-download me-1"></i>下载合集
                     </button>
-                    <button id="dingtalkApprovalBtn" class="btn btn-info text-white me-2">
-                        <i class="fas fa-paper-plane me-1"></i>发起钉钉审批
-                    </button>
+                    <div class="btn-group me-2" id="dingtalkApprovalWorkflowGroup">
+                        <button id="dingtalkApprovalBtn" class="btn btn-info text-white" title="系统会基于票据内容推荐审批流程，点击后进入推荐流程">
+                            <i class="fas fa-paper-plane me-1"></i><span id="dingtalkApprovalBtnLabel">发起钉钉审批</span>
+                        </button>
+                        <button class="btn btn-info text-white dropdown-toggle dropdown-toggle-split" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="切换审批流程">
+                            <span class="visually-hidden">切换审批流程</span>
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><h6 class="dropdown-header" id="approvalWorkflowRecommendation">系统推荐流程</h6></li>
+                            <li><button class="dropdown-item approval-workflow-option" type="button" data-workflow="travel">差旅报销</button></li>
+                            <li><button class="dropdown-item approval-workflow-option" type="button" data-workflow="city_transport">市内交通费</button></li>
+                        </ul>
+                    </div>
                     <button id="viewTripsBtn" class="btn btn-warning me-2" style="display: none;">
                         <i class="fas fa-route me-1"></i>查看行程
                     </button>
@@ -1049,6 +1059,12 @@
             let trainMergedRefreshing = false;
             let pendingTrainMergeRefresh = null;
             let trainMergeRefreshSeq = 0;
+            let selectedApprovalWorkflow = null;
+
+            const approvalWorkflowLabels = {
+                travel: '差旅报销',
+                city_transport: '市内交通费'
+            };
 
             function getResultKey(result) {
                 return result.output_file || result.order_id || '';
@@ -1135,6 +1151,58 @@
 
             function countBillableResults(results) {
                 return (results || []).filter(item => item && !item.is_train_merged_entry).length;
+            }
+
+            function recommendApprovalWorkflow(results, amounts) {
+                const billable = (results || []).filter(item => item && !item.is_train_merged_entry);
+                const hasTicketOrHotel = billable.some((item) => {
+                    const combinedType = item.combined_type || '';
+                    return item.has_train_ticket === true
+                        || item.has_flight_ticket === true
+                        || item.has_transport_ticket === true
+                        || item.has_hotel_bill === true
+                        || combinedType.startsWith('train_')
+                        || combinedType.startsWith('flight_')
+                        || combinedType.startsWith('ticket_')
+                        || combinedType === 'hotel_accommodation'
+                        || String(item.order_id || '').startsWith('hotel_');
+                });
+                const hasTaxiOnlySignal = (amounts && amounts.taxi > 0) && !hasTicketOrHotel;
+                if (hasTaxiOnlySignal) {
+                    return {
+                        workflow: 'city_transport',
+                        reason: '仅识别到网约车/市内交通费用，推荐走市内交通费流程；如这是出差过程中的交通，可手动切换为差旅报销。',
+                    };
+                }
+                return {
+                    workflow: 'travel',
+                    reason: '识别到火车票、机票、住宿或混合票据，推荐走差旅报销流程；最终以你的业务判断为准。',
+                };
+            }
+
+            function resolveApprovalWorkflow(results, amounts) {
+                const recommendation = recommendApprovalWorkflow(results, amounts);
+                return selectedApprovalWorkflow || recommendation.workflow;
+            }
+
+            function updateApprovalWorkflowHint() {
+                const amounts = sumAmountsFromResults(processedFiles);
+                const recommendation = recommendApprovalWorkflow(processedFiles, amounts);
+                const workflow = selectedApprovalWorkflow || recommendation.workflow;
+                const labelEl = document.getElementById('dingtalkApprovalBtnLabel');
+                const recommendationEl = document.getElementById('approvalWorkflowRecommendation');
+                const buttonEl = document.getElementById('dingtalkApprovalBtn');
+                if (labelEl) {
+                    labelEl.textContent = `发起钉钉审批：${approvalWorkflowLabels[workflow]}`;
+                }
+                if (recommendationEl) {
+                    recommendationEl.textContent = selectedApprovalWorkflow
+                        ? `已手动选择：${approvalWorkflowLabels[workflow]}`
+                        : `推荐：${approvalWorkflowLabels[recommendation.workflow]}`;
+                }
+                if (buttonEl) {
+                    buttonEl.title = `${recommendation.reason} 当前将进入：${approvalWorkflowLabels[workflow]}。`;
+                }
             }
 
             function withTrainSortIndex(file, index) {
@@ -2606,6 +2674,7 @@
                     // 仅按“当前页面结果”生成火车票整合条目，后续拖拽也复用同一刷新逻辑
                     await refreshTrainMergedEntry({ renderAfter: false, notify: false });
                     syncSessionAmountsFromProcessedFiles();
+                    updateApprovalWorkflowHint();
                     
                     console.log('📤 添加新结果后，processedFiles 长度:', processedFiles.length);
                     console.log('📤 添加新结果后，processedFiles 内容:', JSON.stringify(processedFiles));
@@ -2981,6 +3050,8 @@
                         window.sessionTrainAmount = 0;
                         window.sessionFlightAmount = 0;
                         window.sessionTotalAmount = 0;
+                        selectedApprovalWorkflow = null;
+                        updateApprovalWorkflowHint();
                         // 清除缓存的行程记录和文件哈希
                         cachedTripRecords = null;
                         cachedFileHashes = null;
@@ -3517,8 +3588,33 @@
                 });
             }
 
+            function prefetchRelatedApprovalsForLoggedInUser() {
+                fetch('/api/auth/status')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (!data || !data.logged_in) {
+                            return;
+                        }
+                        return fetch('/api/dingtalk/related-approvals?days=30&limit=10')
+                            .then(response => response.json())
+                            .catch(() => null);
+                    })
+                    .catch(() => null);
+            }
+
+            updateApprovalWorkflowHint();
+            prefetchRelatedApprovalsForLoggedInUser();
+
             // 使用事件委托绑定发起钉钉审批按钮
             document.addEventListener('click', async function(e) {
+                const workflowOptionEl = e.target && e.target.closest ? e.target.closest('.approval-workflow-option') : null;
+                if (workflowOptionEl) {
+                    selectedApprovalWorkflow = workflowOptionEl.dataset.workflow || null;
+                    updateApprovalWorkflowHint();
+                    showNotification(`已切换审批流程：${approvalWorkflowLabels[selectedApprovalWorkflow] || '未知流程'}`, 'info');
+                    return;
+                }
+
                 const approvalBtnEl = e.target && e.target.closest ? e.target.closest('#dingtalkApprovalBtn') : null;
                 if (!approvalBtnEl) {
                     return;
@@ -3535,8 +3631,19 @@
                     showNotification('没有可提交审批的有效金额', 'warning');
                     return;
                 }
+                updateApprovalWorkflowHint();
+                const workflow = resolveApprovalWorkflow(processedFiles, amounts);
+                if (workflow === 'city_transport') {
+                    showNotification('市内交通费报销流程功能开发中。可以从按钮右侧菜单手动切换为差旅报销继续调试。', 'warning');
+                    return;
+                }
+                if (workflow !== 'travel') {
+                    showNotification('未知审批流程，暂时无法发起', 'error');
+                    return;
+                }
 
-                const confirmMessage = `确定要发起钉钉差旅报销审批吗？\n\n条目：${billableCount} 个\n总金额：¥${amounts.total.toFixed(2)}`;
+                const recommendation = recommendApprovalWorkflow(processedFiles, amounts);
+                const confirmMessage = `确定要进入${approvalWorkflowLabels[workflow]}流程吗？\n\n系统推荐：${approvalWorkflowLabels[recommendation.workflow]}\n原因：${recommendation.reason}\n\n条目：${billableCount} 个\n总金额：¥${amounts.total.toFixed(2)}`;
                 if (!confirm(confirmMessage)) {
                     return;
                 }

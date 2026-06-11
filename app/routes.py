@@ -72,9 +72,7 @@ def _requires_dingtalk_login():
         return False
     if session.get('dingtalk_user_id'):
         return False
-    if _is_public_entry_host():
-        return True
-    return not _is_internal_ip(_request_client_ip())
+    return True
 
 
 @main_bp.before_request
@@ -989,10 +987,12 @@ def list_dingtalk_related_approvals():
     process_code = (
         request.args.get('process_code')
         or current_app.config.get('DINGTALK_RELATED_TRIP_PROCESS_CODE')
-        or current_app.config.get('DINGTALK_TRAVEL_PROCESS_CODE')
     )
     if not process_code:
-        return jsonify({'success': False, 'message': '未配置关联审批模板 processCode'}), 400
+        return jsonify({
+            'success': False,
+            'message': '未配置出差申请模板 processCode。关联审批单应来自“出差申请”，请配置 DINGTALK_RELATED_TRIP_PROCESS_CODE。',
+        }), 400
 
     user_id = (
         request.args.get('user_id')
@@ -1013,6 +1013,29 @@ def list_dingtalk_related_approvals():
     end_time = request.args.get('end_time') or today.strftime('%Y-%m-%d')
     statuses = [value.strip() for value in (request.args.get('statuses') or '').split(',') if value.strip()]
     limit = min(max(int(request.args.get('limit') or 20), 1), 50)
+    cache_key = json.dumps({
+        'user_id': user_id,
+        'process_code': process_code,
+        'start_time': start_time,
+        'end_time': end_time,
+        'statuses': statuses,
+        'limit': limit,
+    }, ensure_ascii=False, sort_keys=True)
+    cache_store = getattr(current_app, 'dingtalk_related_approval_cache', None)
+    if cache_store is None:
+        cache_store = {}
+        current_app.dingtalk_related_approval_cache = cache_store
+    cached = cache_store.get(cache_key)
+    if cached and not request.args.get('refresh'):
+        return jsonify({
+            'success': True,
+            'cached': True,
+            'process_code': process_code,
+            'user_id': user_id,
+            'start_time': start_time,
+            'end_time': end_time,
+            'approvals': cached['approvals'],
+        })
 
     try:
         instance_ids = _dingtalk_service().query_approval_instance_ids(
@@ -1037,8 +1060,14 @@ def list_dingtalk_related_approvals():
         current_app.logger.exception("获取可关联钉钉审批单失败")
         return jsonify({'success': False, 'message': str(exc)}), 502
 
+    cache_store[cache_key] = {
+        'cached_at': datetime.datetime.now().isoformat(timespec='seconds'),
+        'approvals': approvals,
+    }
+
     return jsonify({
         'success': True,
+        'cached': False,
         'process_code': process_code,
         'user_id': user_id,
         'start_time': start_time,
