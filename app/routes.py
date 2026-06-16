@@ -10,7 +10,12 @@ from app.services.file_service import (
     get_processed_orders, update_file_print_status, is_printable_file
 )
 from app.services.pdf_service import process_pdf_files
-from app.services.print_service import print_pdf, prepare_raw_pdf_for_a4_print, prepare_raw_preview_pdf
+from app.services.print_service import (
+    describe_raw_print_pipeline,
+    print_pdf,
+    prepare_raw_pdf_for_a4_print,
+    prepare_raw_preview_pdf,
+)
 from app.services.user_service import get_user_mac, save_user_data, get_all_user_stats, save_global_stats
 
 main_bp = Blueprint('main', __name__)
@@ -97,6 +102,9 @@ def _prepare_raw_file_info(file_info):
             current_app.logger.warning(f"原始文件预生成PDF失败: {file_path}, error={e}")
     else:
         file_info['preview_ready'] = True
+
+    if file_info.get('is_printable') and file_path:
+        file_info['print_pipeline'] = describe_raw_print_pipeline(file_path)
 
     _register_raw_file(file_info)
     return file_info
@@ -795,20 +803,26 @@ def print_raw_file():
         source_path = registry_entry.get('preview_path') if registry_entry else None
         if source_path and not os.path.exists(source_path):
             source_path = None
-        print_path = prepare_raw_pdf_for_a4_print(source_path or file_path)
+        processing_log = []
+        print_path = prepare_raw_pdf_for_a4_print(
+            source_path or file_path,
+            processing_log=processing_log,
+        )
         logger.info(f"开始提交原始打印: {print_path}, printer={printer_name}, copies={copies}, tray={tray}")
         print_result = print_pdf(
             print_path,
             printer_name=printer_name,
             copies=copies,
             media_source=tray,
+            processing_log=processing_log,
         )
         status_code = 200 if print_result.get('success') else 500
         return jsonify({
             'success': print_result.get('success', False),
             'message': print_result.get('message', '打印失败'),
             'printer': print_result.get('printer', printer_name or '未知打印机'),
-            'job_id': print_result.get('job_id', '')
+            'job_id': print_result.get('job_id', ''),
+            'processing_log': processing_log,
         }), status_code
             
     except Exception as e:
@@ -840,48 +854,69 @@ def print_raw_files_batch():
         
         # 批量处理结果
         print_results = []
+        processing_log = []
         success_count = 0
         failed_count = 0
         
-        for filename in filenames:
+        for index, filename in enumerate(filenames, start=1):
             registry_entry = _find_raw_file(filename)
             file_path = registry_entry.get('file_path') if registry_entry else None
             if not file_path or not os.path.exists(file_path):
                 logger.warning(f"文件未找到: {filename}")
+                processing_log.append({
+                    'message': f'[{index}/{len(filenames)}] 文件未找到：{filename}',
+                    'level': 'error',
+                })
                 print_results.append({
                     'filename': filename,
                     'success': False,
                     'message': f'文件 {filename} 未找到，可能已被清理或移动',
                     'printer': printer_name,
-                    'job_id': None
+                    'job_id': None,
+                    'processing_log': [],
                 })
                 failed_count += 1
                 continue
             if not is_printable_file(file_path):
                 logger.warning(f"文件类型不支持原始打印: {filename}")
+                processing_log.append({
+                    'message': f'[{index}/{len(filenames)}] 文件格式不支持打印：{filename}',
+                    'level': 'error',
+                })
                 print_results.append({
                     'filename': filename,
                     'success': False,
                     'message': f'文件 {filename} 的格式暂不支持打印',
                     'printer': printer_name,
-                    'job_id': None
+                    'job_id': None,
+                    'processing_log': [],
                 })
                 failed_count += 1
                 continue
             
             logger.info(f"找到文件: {file_path}，开始打印")
+            processing_log.append({
+                'message': f'—— 开始处理第 {index}/{len(filenames)} 个文件：{filename} ——',
+                'level': 'info',
+            })
             
             try:
                 source_path = registry_entry.get('preview_path') if registry_entry else None
                 if source_path and not os.path.exists(source_path):
                     source_path = None
-                print_path = prepare_raw_pdf_for_a4_print(source_path or file_path)
+                file_log = []
+                print_path = prepare_raw_pdf_for_a4_print(
+                    source_path or file_path,
+                    processing_log=file_log,
+                )
                 print_result = print_pdf(
                     print_path,
                     printer_name=printer_name,
                     copies=copies,
                     media_source=tray,
+                    processing_log=file_log,
                 )
+                processing_log.extend(file_log)
                 if print_result.get('success'):
                     logger.info(f"文件 {filename} 打印任务提交成功")
                     print_results.append({
@@ -889,7 +924,8 @@ def print_raw_files_batch():
                         'success': True,
                         'message': print_result.get('message', f'文件 {filename} 已发送至打印机'),
                         'printer': print_result.get('printer', printer_name),
-                        'job_id': print_result.get('job_id', '')
+                        'job_id': print_result.get('job_id', ''),
+                        'processing_log': file_log,
                     })
                     success_count += 1
                 else:
@@ -899,31 +935,43 @@ def print_raw_files_batch():
                         'success': False,
                         'message': print_result.get('message', f'文件 {filename} 打印失败'),
                         'printer': print_result.get('printer', printer_name),
-                        'job_id': print_result.get('job_id', None)
+                        'job_id': print_result.get('job_id', None),
+                        'processing_log': file_log,
                     })
                     failed_count += 1
                     
             except Exception as e:
                 logger.error(f"打印文件 {filename} 时出错: {str(e)}")
+                processing_log.append({
+                    'message': f'[{index}/{len(filenames)}] 打印出错：{e}',
+                    'level': 'error',
+                })
                 print_results.append({
                     'filename': filename,
                     'success': False,
                     'message': f'打印文件 {filename} 时出错: {str(e)}',
                     'printer': printer_name,
-                    'job_id': None
+                    'job_id': None,
+                    'processing_log': file_log if 'file_log' in locals() else [],
                 })
                 failed_count += 1
         
         # 返回批量打印结果
         logger.info(f"批量打印完成: 成功 {success_count}/{len(filenames)}, 失败 {failed_count}/{len(filenames)}")
         
+        processing_log.append({
+            'message': f'批量打印结束：成功 {success_count} 个，失败 {failed_count} 个',
+            'level': 'success' if failed_count == 0 else 'warning',
+        })
+
         return jsonify({
             'success': True,
             'message': f'批量打印完成: {success_count} 个成功, {failed_count} 个失败',
             'total': len(filenames),
             'success_count': success_count,
             'failed_count': failed_count,
-            'results': print_results
+            'results': print_results,
+            'processing_log': processing_log,
         })
         
     except Exception as e:
@@ -1129,8 +1177,18 @@ def print_file(filename):
         if not os.path.exists(file_path):
             logger.warning(f"文件不存在: {file_path}")
             return jsonify({'success': False, 'message': '文件不存在', 'error': '文件不存在'}), 404
-        
-        print_result = print_pdf(file_path)
+
+        processing_log = []
+        processing_log.append({
+            'message': f'开始智能打印：{filename}',
+            'level': 'info',
+        })
+        processing_log.append({
+            'message': f'使用合成 PDF 直接提交打印机（{file_path}）',
+            'level': 'info',
+        })
+
+        print_result = print_pdf(file_path, processing_log=processing_log)
         ok = bool(print_result.get('success'))
         if ok:
             logger.info(f"文件已发送至打印机: {file_path}")
@@ -1146,6 +1204,9 @@ def print_file(filename):
             ),
             'printer': print_result.get('printer', '未知打印机'),
             'job_id': print_result.get('job_id', ''),
+            'queue_confirmed': print_result.get('queue_confirmed', ok),
+            'returncode': print_result.get('returncode'),
+            'processing_log': processing_log,
             'debug': print_result.get('debug', False)
         })
         return response if ok else (response, 500)

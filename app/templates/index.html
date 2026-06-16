@@ -803,6 +803,15 @@
                     <h3>打印文件列表</h3>
                     <p class="text-muted mb-3">以下是可打印的文件，您可以预览或直接打印</p>
                     <div id="rawResultList" class="mt-3"></div>
+                    <div id="rawPrintLogPanel" class="mt-3" style="display: none;">
+                        <div class="card border-info">
+                            <div class="card-header py-2 d-flex align-items-center">
+                                <div class="spinner-border spinner-border-sm me-2" id="rawPrintLogSpinner" role="status" style="display: none;"></div>
+                                <strong id="rawPrintLogTitle">打印处理进度</strong>
+                            </div>
+                            <ul class="list-group list-group-flush small" id="rawPrintLogList"></ul>
+                        </div>
+                    </div>
                     <div class="mt-3">
                         <button id="rawPrintAllBtn" class="btn btn-primary me-2">打印全部</button>
                         <button id="rawClearResultsBtn" class="btn btn-outline-secondary">清空结果</button>
@@ -857,6 +866,15 @@
             <div id="smartResultArea" class="result-area">
                 <h3>处理结果</h3>
                 <div id="resultList" class="mt-3"></div>
+                <div id="smartPrintLogPanel" class="mt-3" style="display: none;">
+                    <div class="card border-primary">
+                        <div class="card-header py-2 d-flex align-items-center">
+                            <div class="spinner-border spinner-border-sm me-2" id="smartPrintLogSpinner" role="status" style="display: none;"></div>
+                            <strong id="smartPrintLogTitle">智能打印进度</strong>
+                        </div>
+                        <ul class="list-group list-group-flush small" id="smartPrintLogList"></ul>
+                    </div>
+                </div>
                 <div class="mt-3">
                     <button id="printAllBtn" class="btn btn-primary me-2">
                         <i class="fas fa-print me-1"></i>打印全部
@@ -970,6 +988,11 @@
                         if (functionType === 'smart-processing') {
                             console.log('🔄 切换到智能处理区域，重新绑定事件');
                             bindSmartProcessingEvents();
+                            const smartResultAreaEl = document.getElementById('smartResultArea');
+                            if (smartResultAreaEl && processedFiles.length > 0) {
+                                smartResultAreaEl.style.display = 'block';
+                                smartResultAreaEl.classList.add('show');
+                            }
                         }
                         
                         // 如果是原始打印区域，清理智能处理的结果显示
@@ -1461,6 +1484,231 @@
                 return (file.file_path || file.filename || '').trim();
             }
 
+            const rawPrintLogPanel = document.getElementById('rawPrintLogPanel');
+            const rawPrintLogList = document.getElementById('rawPrintLogList');
+            const rawPrintLogSpinner = document.getElementById('rawPrintLogSpinner');
+            const rawPrintLogTitle = document.getElementById('rawPrintLogTitle');
+
+            function clearRawPrintLog() {
+                if (rawPrintLogList) {
+                    rawPrintLogList.innerHTML = '';
+                }
+                if (rawPrintLogPanel) {
+                    rawPrintLogPanel.style.display = 'none';
+                }
+                if (rawPrintLogSpinner) {
+                    rawPrintLogSpinner.style.display = 'none';
+                }
+            }
+
+            function appendRawPrintLog(entries, options = {}) {
+                const {
+                    title = '打印处理进度',
+                    waiting = false,
+                    toast = true,
+                } = options;
+                if (!rawPrintLogPanel || !rawPrintLogList || !Array.isArray(entries) || entries.length === 0) {
+                    return;
+                }
+
+                rawPrintLogPanel.style.display = 'block';
+                if (rawPrintLogTitle) {
+                    rawPrintLogTitle.textContent = title;
+                }
+                if (rawPrintLogSpinner) {
+                    rawPrintLogSpinner.style.display = waiting ? 'inline-block' : 'none';
+                }
+
+                entries.forEach((entry, index) => {
+                    const message = typeof entry === 'string' ? entry : entry.message;
+                    const level = typeof entry === 'string' ? 'info' : (entry.level || 'info');
+                    if (!message) {
+                        return;
+                    }
+
+                    const li = document.createElement('li');
+                    li.className = 'list-group-item py-2';
+                    const iconMap = {
+                        success: 'check-circle-fill text-success',
+                        warning: 'exclamation-triangle-fill text-warning',
+                        error: 'x-circle-fill text-danger',
+                        info: 'info-circle-fill text-info',
+                    };
+                    const iconClass = iconMap[level] || iconMap.info;
+                    li.innerHTML = `<i class="bi bi-${iconClass} me-2"></i>${message}`;
+                    rawPrintLogList.appendChild(li);
+
+                    if (toast) {
+                        const toastType = level === 'error' ? 'error' : (level === 'warning' ? 'warning' : (level === 'success' ? 'success' : 'info'));
+                        window.setTimeout(() => showNotification(message, toastType, 4500), index * 350);
+                    }
+                });
+            }
+
+            function beginRawPrintWaiting(fileInfo, title = '正在准备打印，请稍候...') {
+                clearRawPrintLog();
+                const hints = [];
+                const pipeline = fileInfo && (fileInfo.originalFile && fileInfo.originalFile.print_pipeline);
+                if (pipeline) {
+                    hints.push(pipeline);
+                } else {
+                    const name = (fileInfo && (fileInfo.name || fileInfo.storageName) || '').toLowerCase();
+                    if (/\.(jpg|jpeg|png)$/.test(name)) {
+                        hints.push('检测到图片文件，正在转换为 A4 标准 PDF...');
+                    } else if (/\.pdf$/.test(name)) {
+                        hints.push('检测到 PDF 文件，正在判断直打或适配打印（发票/火车票等特殊 PDF 会先渲染）...');
+                    } else if (/\.(doc|docx)$/.test(name)) {
+                        hints.push('检测到 Word 文档，正在转换为 PDF 并适配 A4...');
+                    } else {
+                        hints.push('正在准备文件并提交打印机队列...');
+                    }
+                }
+                hints.push('服务器处理中，请勿关闭页面。若刚完成智能打印，打印机可能仍在排队出纸。');
+                appendRawPrintLog(hints.map(message => ({ message, level: 'info' })), {
+                    title,
+                    waiting: true,
+                    toast: false,
+                });
+            }
+
+            function showRawPrintResponseLog(data, title = '打印处理完成') {
+                if (rawPrintLogSpinner) {
+                    rawPrintLogSpinner.style.display = 'none';
+                }
+                if (Array.isArray(data.processing_log) && data.processing_log.length > 0) {
+                    if (rawPrintLogList) {
+                        rawPrintLogList.innerHTML = '';
+                    }
+                    appendRawPrintLog(data.processing_log, {
+                        title,
+                        waiting: false,
+                        toast: true,
+                    });
+                }
+            }
+
+            const smartPrintLogPanel = document.getElementById('smartPrintLogPanel');
+            const smartPrintLogList = document.getElementById('smartPrintLogList');
+            const smartPrintLogSpinner = document.getElementById('smartPrintLogSpinner');
+            const smartPrintLogTitle = document.getElementById('smartPrintLogTitle');
+
+            function clearSmartPrintLog() {
+                if (smartPrintLogList) {
+                    smartPrintLogList.innerHTML = '';
+                }
+                if (smartPrintLogPanel) {
+                    smartPrintLogPanel.style.display = 'none';
+                }
+                if (smartPrintLogSpinner) {
+                    smartPrintLogSpinner.style.display = 'none';
+                }
+            }
+
+            function appendSmartPrintLog(entries, options = {}) {
+                const {
+                    title = '智能打印进度',
+                    waiting = false,
+                    toast = true,
+                    reset = false,
+                } = options;
+                if (!smartPrintLogPanel || !smartPrintLogList || !Array.isArray(entries) || entries.length === 0) {
+                    return;
+                }
+
+                const smartResultArea = document.getElementById('smartResultArea');
+                if (smartResultArea) {
+                    smartResultArea.style.display = 'block';
+                    smartResultArea.classList.add('show');
+                }
+
+                if (reset && smartPrintLogList) {
+                    smartPrintLogList.innerHTML = '';
+                }
+
+                smartPrintLogPanel.style.display = 'block';
+                if (smartPrintLogTitle) {
+                    smartPrintLogTitle.textContent = title;
+                }
+                if (smartPrintLogSpinner) {
+                    smartPrintLogSpinner.style.display = waiting ? 'inline-block' : 'none';
+                }
+
+                const baseIndex = smartPrintLogList ? smartPrintLogList.children.length : 0;
+                entries.forEach((entry, index) => {
+                    const message = typeof entry === 'string' ? entry : entry.message;
+                    const level = typeof entry === 'string' ? 'info' : (entry.level || 'info');
+                    if (!message) {
+                        return;
+                    }
+
+                    const li = document.createElement('li');
+                    li.className = 'list-group-item py-2';
+                    const iconMap = {
+                        success: 'check-circle-fill text-success',
+                        warning: 'exclamation-triangle-fill text-warning',
+                        error: 'x-circle-fill text-danger',
+                        info: 'info-circle-fill text-info',
+                    };
+                    const iconClass = iconMap[level] || iconMap.info;
+                    li.innerHTML = `<i class="bi bi-${iconClass} me-2"></i>${message}`;
+                    smartPrintLogList.appendChild(li);
+
+                    if (toast) {
+                        const toastType = level === 'error' ? 'error' : (level === 'warning' ? 'warning' : (level === 'success' ? 'success' : 'info'));
+                        window.setTimeout(() => showNotification(message, toastType, 4500), (baseIndex + index) * 350);
+                    }
+                });
+            }
+
+            function beginSmartPrintAll(files) {
+                clearSmartPrintLog();
+                const previewEntries = [
+                    { message: `准备打印 ${files.length} 个智能合成 PDF`, level: 'info' },
+                    { message: '将直接提交合成后的 PDF 到打印机队列（不经过原始打印转换）', level: 'info' },
+                    { message: '若 lpstat 连接异常，任务可能显示成功但实际未出纸', level: 'warning' },
+                ];
+                files.forEach((file, index) => {
+                    const label = file.order_id || file.output_file || `文件${index + 1}`;
+                    previewEntries.push({
+                        message: `待打印 ${index + 1}/${files.length}：${label} → ${file.output_file}`,
+                        level: 'info',
+                    });
+                });
+                appendSmartPrintLog(previewEntries, {
+                    title: '智能打印处理中...',
+                    waiting: true,
+                    toast: false,
+                    reset: true,
+                });
+            }
+
+            function appendSmartPrintFileResult(file, data, index, total, waiting) {
+                const label = file.order_id || file.output_file || `文件${index}`;
+                const entries = [
+                    { message: `—— 第 ${index}/${total} 个：${label} ——`, level: 'info' },
+                ];
+                if (Array.isArray(data.processing_log)) {
+                    entries.push(...data.processing_log);
+                }
+                if (!data.success) {
+                    entries.push({
+                        message: data.message || `${file.output_file} 打印失败`,
+                        level: 'error',
+                    });
+                } else if (!data.job_id) {
+                    entries.push({
+                        message: `${file.output_file} 已提交，但未返回任务号，请到打印机确认是否出纸`,
+                        level: 'warning',
+                    });
+                }
+                appendSmartPrintLog(entries, {
+                    title: waiting ? `智能打印处理中（${index}/${total}）...` : `智能打印完成（${index}/${total}）`,
+                    waiting,
+                    toast: true,
+                    reset: false,
+                });
+            }
+
             function resolveRawDisplayName(displayName, usedNames) {
                 const baseName = displayName || '未命名文件';
                 if (!usedNames.has(baseName)) {
@@ -1772,6 +2020,13 @@
                 // 将新文件添加到列表中
                 rawProcessedFiles.push(...newFiles);
                 console.log(`✅ 添加了 ${newFiles.length} 个新文件，总文件数: ${rawProcessedFiles.length}`);
+
+                newFiles.forEach((fileInfo) => {
+                    const pipeline = fileInfo.originalFile && fileInfo.originalFile.print_pipeline;
+                    if (pipeline) {
+                        showNotification(`${fileInfo.name}：${pipeline}`, 'info', 5000);
+                    }
+                });
                 
                 // 清空显示列表，重新渲染所有文件
                 rawResultList.innerHTML = '';
@@ -1840,8 +2095,12 @@
                 
                 console.log(`🖨️ 开始批量打印 ${rawProcessedFiles.length} 个文件`);
                 
-                // 显示任务创建提示
-                showNotification(`正在创建打印任务，准备发送 ${rawProcessedFiles.length} 个文件到打印机...`, 'info');
+                clearRawPrintLog();
+                appendRawPrintLog([
+                    { message: `准备批量打印 ${rawProcessedFiles.length} 个文件`, level: 'info' },
+                    { message: '将依次检测文件类型、转换格式并提交打印机队列', level: 'info' },
+                    { message: '若刚完成智能打印，打印机可能仍在排队，请耐心等待出纸', level: 'warning' },
+                ], { title: '批量打印处理中...', waiting: true, toast: false });
                 
                 // 禁用打印按钮，防止重复点击
                 rawPrintAllBtn.disabled = true;
@@ -1866,6 +2125,8 @@
                     rawPrintAllBtn.disabled = false;
                     rawPrintAllBtn.innerHTML = '<i class="bi bi-printer"></i> 打印全部';
                     
+                    showRawPrintResponseLog(data, '批量打印处理完成');
+
                     if (data.success) {
                         const successCount = data.success_count || 0;
                         const failedCount = data.failed_count || 0;
@@ -1906,6 +2167,7 @@
                 
                 // 清空数据
                 rawProcessedFiles = [];
+                clearRawPrintLog();
                 
                 // 隐藏文件列表
                 if (rawFileList) {
@@ -1978,8 +2240,13 @@
             
             // 全局打印函数
             window.printRawFile = function(filename, silent = false) {
+                const fileInfo = rawProcessedFiles.find(file =>
+                    file.storageName === filename
+                    || file.identity === filename
+                    || file.name === filename
+                );
                 if (!silent) {
-                    showNotification(`正在打印文件: ${filename}`, 'info');
+                    beginRawPrintWaiting(fileInfo, `正在打印：${(fileInfo && fileInfo.name) || filename}`);
                 }
                 
                 // 调用后端打印API
@@ -1995,24 +2262,26 @@
                 })
                 .then(response => response.json())
                 .then(data => {
-                    if (data.success) {
-                        if (!silent) {
-                            showNotification(`文件 ${filename} 打印任务已创建，已发送到打印机`, 'success');
-                        }
-                        return true; // 返回成功状态
-                    } else {
-                        if (!silent) {
-                            showNotification(`文件 ${filename} 打印失败: ${data.message}`, 'error');
-                        }
-                        return false; // 返回失败状态
+                    if (!silent) {
+                        showRawPrintResponseLog(data, `打印完成：${(fileInfo && fileInfo.name) || filename}`);
                     }
+                    if (data.success) {
+                        return true;
+                    }
+                    if (!silent && (!data.processing_log || data.processing_log.length === 0)) {
+                        showNotification(`文件 ${filename} 打印失败: ${data.message}`, 'error');
+                    }
+                    return false;
                 })
                 .catch(error => {
                     console.error('打印请求出错:', error);
+                    if (rawPrintLogSpinner) {
+                        rawPrintLogSpinner.style.display = 'none';
+                    }
                     if (!silent) {
                         showNotification(`文件 ${filename} 打印请求失败`, 'error');
                     }
-                    return false; // 返回失败状态
+                    return false;
                 });
             };
             
@@ -2238,6 +2507,7 @@
                 
                 // 清空原始打印的数据
                 rawProcessedFiles = [];
+                clearRawPrintLog();
                 console.log('✅ 原始打印数据已清空');
                 
                 // 清空文件输入
@@ -2895,6 +3165,12 @@
                     printBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 打印中...';
                     printBtn.disabled = true;
                 }
+
+                clearSmartPrintLog();
+                appendSmartPrintLog([
+                    { message: `开始打印：${filename}`, level: 'info' },
+                    { message: '正在提交合成 PDF 到打印机队列...', level: 'info' },
+                ], { title: `正在打印：${filename}`, waiting: true, toast: false, reset: true });
                 
                 fetch(`/api/print/${filename}`, {
                     method: 'POST'
@@ -2906,19 +3182,16 @@
                         printBtn.innerHTML = '打印';
                         printBtn.disabled = false;
                     }
+
+                    appendSmartPrintFileResult({ output_file: filename, order_id: filename }, data, 1, 1, false);
                     
                     if (data.success) {
-                        // 显示打印成功通知，包含打印机信息
-                        let message = `文件已发送至打印机: ${data.printer}`;
-                        if (data.job_id) {
-                            message += `，任务ID: ${data.job_id}`;
-                        }
                         if (data.debug) {
                             showNotification('调试模式：模拟打印成功', 'info');
-                        } else {
-                            showNotification(message, 'success');
+                        } else if (!data.job_id) {
+                            showNotification(`已提交打印，但未返回任务号，请确认打印机是否出纸`, 'warning');
                         }
-                    } else {
+                    } else if (!Array.isArray(data.processing_log) || data.processing_log.length === 0) {
                         showNotification('打印失败: ' + (data.message || '未知错误'), 'error');
                     }
                 })
@@ -2928,7 +3201,12 @@
                         printBtn.innerHTML = '打印';
                         printBtn.disabled = false;
                     }
-                    showNotification('打印请求出错: ' + error, 'error');
+                    if (smartPrintLogSpinner) {
+                        smartPrintLogSpinner.style.display = 'none';
+                    }
+                    appendSmartPrintLog([
+                        { message: `打印请求失败：${error}`, level: 'error' },
+                    ], { title: `打印失败：${filename}`, waiting: false, toast: true, reset: false });
                 });
             }
             
@@ -2998,6 +3276,7 @@
                         
                         // 重置处理文件数组
                         processedFiles = [];
+                        clearSmartPrintLog();
                         window.sessionTaxiAmount = 0;
                         window.sessionHotelAmount = 0;
                         window.sessionTrainAmount = 0;
@@ -3088,7 +3367,11 @@
                             return;
                         }
 
-                        printableSmartFiles.forEach(function(file) {
+                        beginSmartPrintAll(printableSmartFiles);
+
+                        printableSmartFiles.forEach(function(file, fileIndex) {
+                            const fileNo = fileIndex + 1;
+                            const total = printableSmartFiles.length;
                             console.log('🔄 开始打印文件:', file.output_file);
                             fetch(`/api/print/${file.output_file}`, {
                                 method: 'POST'
@@ -3102,19 +3385,24 @@
                                 } else {
                                     failCount++;
                                 }
+
+                                const stillWaiting = printedCount < total;
+                                appendSmartPrintFileResult(file, data, fileNo, total, stillWaiting);
                                 
-                                if (printedCount === printableSmartFiles.length) {
+                                if (printedCount === total) {
                                     // 恢复按钮状态
                                     printAllBtnEl.innerHTML = originalText;
                                     printAllBtnEl.disabled = false;
                                     
                                     // 显示打印结果通知
-                                    let message = `打印完成: ${successCount}个成功`;
+                                    let message = `智能打印完成: ${successCount}个成功`;
                                     if (failCount > 0) {
-                                        message += `, ${failCount}个失败`;
-                                        showNotification(message, failCount > successCount ? 'warning' : 'success');
+                                        message += `, ${failCount}个失败（请查看下方进度日志）`;
+                                        showNotification(message, 'warning');
+                                    } else if (successCount > 0) {
+                                        showNotification(message + '，请到打印机确认出纸', 'success');
                                     } else {
-                                        showNotification(message, 'success');
+                                        showNotification(message, 'error');
                                     }
                                     console.log('✅ 所有文件打印完成');
                                 }
@@ -3123,18 +3411,27 @@
                                 printedCount++;
                                 failCount++;
                                 console.error('❌ 打印文件出错:', file.output_file, error);
+                                appendSmartPrintFileResult(
+                                    file,
+                                    {
+                                        success: false,
+                                        message: String(error),
+                                        processing_log: [
+                                            { message: `请求失败：${error}`, level: 'error' },
+                                        ],
+                                    },
+                                    fileNo,
+                                    total,
+                                    printedCount < total
+                                );
                                 
-                                if (printedCount === printableSmartFiles.length) {
+                                if (printedCount === total) {
                                     // 恢复按钮状态
                                     printAllBtnEl.innerHTML = originalText;
                                     printAllBtnEl.disabled = false;
                                     
-                                    // 显示打印结果通知
-                                    let message = `打印完成: ${successCount}个成功`;
-                                    if (failCount > 0) {
-                                        message += `, ${failCount}个失败`;
-                                        showNotification(message, failCount > successCount ? 'warning' : 'success');
-                                    }
+                                    let message = `智能打印完成: ${successCount}个成功, ${failCount}个失败`;
+                                    showNotification(message, 'warning');
                                 }
                             });
                         });

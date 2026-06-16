@@ -3504,10 +3504,53 @@ def parse_simple_trip_info(lines):
         return []
 
 
+def _parse_itinerary_for_trip_view(file_info):
+    """
+    按平台解析单个行程单，优先读 itinerary_file，不可用时回退 raw_table_data。
+    """
+    from utils.trip_table_parse_enhanced import (
+        is_gaode_itinerary,
+        parse_gaode_itinerary_enhanced,
+    )
+    from utils.trip_table_parse_didi import (
+        is_didi_itinerary,
+        parse_didi_itinerary_enhanced,
+        parse_didi_trips_from_raw_table,
+    )
+
+    logger = current_app.logger
+    itinerary_file = file_info.get('itinerary_file')
+    output_name = file_info.get('output_file', '未知')
+
+    if itinerary_file and os.path.exists(itinerary_file):
+        logger.info(f"开始解析行程单文件: {itinerary_file}")
+        if is_didi_itinerary(itinerary_file):
+            return parse_didi_itinerary_enhanced(itinerary_file)
+        if is_gaode_itinerary(itinerary_file):
+            return parse_gaode_itinerary_enhanced(itinerary_file)
+        # 未知平台时依次尝试
+        for parser in (parse_didi_itinerary_enhanced, parse_gaode_itinerary_enhanced):
+            result = parser(itinerary_file)
+            if result.get('success') and result.get('trips'):
+                return result
+        return {'success': False, 'error': '无法识别行程单平台'}
+
+    raw_table_data = file_info.get('raw_table_data')
+    if raw_table_data:
+        logger.warning(f"文件 {output_name} 行程单路径不可用，尝试使用 raw_table_data 兜底")
+        trips = parse_didi_trips_from_raw_table(raw_table_data)
+        if trips:
+            return {'success': True, 'platform': '滴滴出行', 'trips': trips}
+        return {'success': False, 'error': 'raw_table_data 未能还原行程'}
+
+    logger.warning(f"文件 {output_name} 没有找到可用的行程单数据源")
+    return {'success': False, 'error': '缺少行程单文件或缓存数据'}
+
+
 def generate_trip_records(processed_files):
     """
     生成行程记录字符串
-    使用高德打车PDF解析器提取行程信息，支持多文件合并和按时间排序
+    支持高德/滴滴行程单解析，多文件合并并按上车时间排序
     
     Args:
         processed_files: 已处理的文件列表
@@ -3543,42 +3586,28 @@ def generate_trip_records(processed_files):
         else:
             logger.info("没有找到完整的缓存，需要重新生成行程记录")
         
-        # 如果没有缓存，则生成新的行程记录
-        # 导入高德打车PDF解析器
-        import sys
-        from pathlib import Path
-        project_root = Path(__file__).parent.parent.parent
-        sys.path.insert(0, str(project_root))
-        from utils.trip_table_parse_enhanced import parse_gaode_itinerary_enhanced
-        
         all_trips = []  # 收集所有文件的行程记录
         
-        # 遍历所有文件，使用新的解析器提取行程信息
         for file_info in processed_files:
-            # 只处理包含行程单的文件
             if not file_info.get('has_itinerary', False):
                 continue
-            
-            # 检查是否有原始行程单文件路径
-            itinerary_file = file_info.get('itinerary_file')
-            if not itinerary_file or not os.path.exists(itinerary_file):
-                logger.warning(f"文件 {file_info.get('output_file', '未知')} 没有找到原始行程单文件路径")
-                continue
-            
-            logger.info(f"开始解析行程单文件: {itinerary_file}")
+
             try:
-                # 使用新的解析器解析高德打车行程单
-                parse_result = parse_gaode_itinerary_enhanced(itinerary_file)
-                
+                parse_result = _parse_itinerary_for_trip_view(file_info)
                 if parse_result.get('success') and parse_result.get('trips'):
                     trips = parse_result['trips']
-                    logger.info(f"✅ 成功解析文件 {itinerary_file}，获得 {len(trips)} 条行程记录")
+                    logger.info(
+                        f"✅ 成功解析 {file_info.get('output_file', '未知')} "
+                        f"({parse_result.get('platform', '未知平台')})，获得 {len(trips)} 条行程"
+                    )
                     all_trips.extend(trips)
                 else:
                     error_msg = parse_result.get('error', '未知错误')
-                    logger.warning(f"⚠️ 解析文件 {itinerary_file} 失败: {error_msg}")
+                    logger.warning(
+                        f"⚠️ 解析 {file_info.get('output_file', '未知')} 失败: {error_msg}"
+                    )
             except Exception as e:
-                logger.error(f"❌ 解析文件 {itinerary_file} 时出错: {e}")
+                logger.error(f"❌ 解析 {file_info.get('output_file', '未知')} 时出错: {e}")
                 import traceback
                 traceback.print_exc()
         
