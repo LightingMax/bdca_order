@@ -9,7 +9,12 @@ from app.services.file_service import (
     check_file_exists, save_file_hash, check_order_processed,
     get_processed_orders, update_file_print_status, is_printable_file
 )
-from app.services.pdf_service import process_pdf_files
+from app.services.pdf_service import (
+    combine_toll_invoice_results,
+    looks_like_toll_invoice,
+    parse_toll_invoice_source,
+    process_pdf_files,
+)
 from app.services.print_service import (
     describe_raw_print_pipeline,
     print_pdf,
@@ -144,10 +149,69 @@ def _should_reprocess_upload(filename):
     qq_invoice_keywords = ['qq邮箱发票', 'qq_', '总金额']
     return (
         _looks_like_flight_upload(filename)
+        or parse_toll_invoice_source(filename) is not None
+        or looks_like_toll_invoice(name=filename)
         or any(keyword in name for keyword in hotel_keywords)
         or any(keyword in name for keyword in didi_keywords)
         or any(keyword in name for keyword in qq_invoice_keywords)
     )
+
+
+def _toll_pair_identity(item):
+    """同一组过路费发票的稳定身份，不随双拼 PDF 文件名变化。"""
+    replaced = tuple(sorted(order_id for order_id in (item.get('replaced_order_ids') or []) if order_id))
+    if replaced:
+        return ('replaced', replaced)
+    order_id = item.get('order_id')
+    if order_id:
+        return ('order', order_id)
+    return ('output', item.get('output_file') or '')
+
+
+def _align_results_with_session_toll_merge(batch_results, session_results):
+    """增量上传时，用会话双拼结果替换本批里已被合并的单票。"""
+    batch_results = list(batch_results or [])
+    doubles = [item for item in (session_results or []) if item.get('is_toll_merged')]
+    if not doubles:
+        return batch_results
+
+    replaced_ids = {
+        order_id
+        for item in doubles
+        for order_id in (item.get('replaced_order_ids') or [])
+        if order_id
+    }
+    batch_ids = {item.get('order_id') for item in batch_results if item.get('order_id')}
+    aligned = []
+    used_pair_ids = set()
+    for item in batch_results:
+        if item.get('is_toll_merged'):
+            pair_id = _toll_pair_identity(item)
+            if pair_id in used_pair_ids:
+                continue
+            aligned.append(item)
+            used_pair_ids.add(pair_id)
+            continue
+        if item.get('order_id') in replaced_ids:
+            continue
+        aligned.append(item)
+
+    # 同一组发票只回最新的一份双拼，和一次上传两张时的 results 一致。
+    overlapping_doubles = []
+    for item in doubles:
+        replaced = {order_id for order_id in (item.get('replaced_order_ids') or []) if order_id}
+        if replaced & batch_ids:
+            overlapping_doubles.append(item)
+    if overlapping_doubles:
+        latest_by_pair = {}
+        for item in overlapping_doubles:
+            latest_by_pair[_toll_pair_identity(item)] = item
+        for pair_id, item in latest_by_pair.items():
+            if pair_id in used_pair_ids:
+                continue
+            aligned.append(item)
+            used_pair_ids.add(pair_id)
+    return aligned
 
 
 def _result_dedup_key(item):
@@ -167,17 +231,31 @@ def _result_dedup_key(item):
         pages = item.get('train_ticket_pages') or []
         page_sig = ','.join(str(p) for p in pages) if pages else 'p1'
         return f"ticket::{order_id}::{page_sig}"
+    if item.get('has_toll_invoice') or str(item.get('combined_type', '')).startswith('toll_') or str(order_id).startswith('过路费-'):
+        replaced = tuple(sorted(oid for oid in (item.get('replaced_order_ids') or []) if oid))
+        if replaced:
+            return f"toll_pair::{','.join(replaced)}"
+        return f"toll::{order_id}"
     if order_id:
         return f"order::{order_id}"
     return item.get('output_file') or str(uuid.uuid4())
 
 
 def _extract_result_amounts(result):
-    """从单条处理结果提取分类金额；整合条目不参与统计。"""
+    """从单条处理结果提取分类金额；整合条目不参与统计。返回 taxi/hotel/train/flight/toll。"""
     if not result or result.get('is_train_merged_entry'):
-        return 0.0, 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0, 0.0
 
     order_id = str(result.get('order_id', '') or '')
+    amount = float(result.get('amount', 0) or 0)
+    if (
+        result.get('has_toll_invoice')
+        or str(result.get('combined_type', '')).startswith('toll_')
+        or order_id.startswith('过路费-')
+    ):
+        toll_amount = float(result.get('toll_amount', 0) or 0) or amount
+        return 0.0, 0.0, 0.0, 0.0, toll_amount
+
     is_transport = (
         result.get('has_train_ticket')
         or result.get('has_flight_ticket')
@@ -187,18 +265,16 @@ def _extract_result_amounts(result):
     if is_transport:
         train_amount = float(result.get('train_amount', 0) or 0)
         flight_amount = float(result.get('flight_amount', 0) or 0)
-        amount = float(result.get('amount', 0) or 0)
         if train_amount == 0 and flight_amount == 0:
             if result.get('has_flight_ticket') and not result.get('has_train_ticket'):
                 flight_amount = amount
             else:
                 train_amount = amount
-        return 0.0, 0.0, train_amount, flight_amount
+        return 0.0, 0.0, train_amount, flight_amount, 0.0
 
-    amount = float(result.get('amount', 0) or 0)
     if order_id.startswith('hotel_') or result.get('has_hotel_bill'):
-        return 0.0, amount, 0.0, 0.0
-    return amount, 0.0, 0.0, 0.0
+        return 0.0, amount, 0.0, 0.0, 0.0
+    return amount, 0.0, 0.0, 0.0, 0.0
 
 
 def _aggregate_result_amounts(results):
@@ -207,6 +283,7 @@ def _aggregate_result_amounts(results):
     hotel_amount = 0.0
     train_amount = 0.0
     flight_amount = 0.0
+    toll_amount = 0.0
     seen_keys = set()
 
     for result in results or []:
@@ -217,18 +294,20 @@ def _aggregate_result_amounts(results):
             continue
         seen_keys.add(dedup_key)
 
-        taxi_part, hotel_part, train_part, flight_part = _extract_result_amounts(result)
+        taxi_part, hotel_part, train_part, flight_part, toll_part = _extract_result_amounts(result)
         taxi_amount += taxi_part
         hotel_amount += hotel_part
         train_amount += train_part
         flight_amount += flight_part
+        toll_amount += toll_part
 
     return {
         'taxi_amount': round(taxi_amount, 2),
         'hotel_amount': round(hotel_amount, 2),
         'train_amount': round(train_amount, 2),
         'flight_amount': round(flight_amount, 2),
-        'total_amount': round(taxi_amount + hotel_amount + train_amount + flight_amount, 2),
+        'toll_amount': round(toll_amount, 2),
+        'total_amount': round(taxi_amount + hotel_amount + train_amount + flight_amount + toll_amount, 2),
         'order_count': len(seen_keys),
     }
 
@@ -239,11 +318,13 @@ def _aggregate_classification_info(file_results):
     current_hotel_amount = 0.0
     current_train_amount = 0.0
     current_flight_amount = 0.0
+    current_toll_amount = 0.0
     current_taxi_orders = 0
     current_hotel_orders = 0
     current_train_tickets = 0
     current_flight_tickets = 0
     current_train_groups = 0
+    current_toll_orders = 0
     current_taxi_warnings = []
     current_hotel_warnings = []
 
@@ -253,11 +334,13 @@ def _aggregate_classification_info(file_results):
         current_hotel_amount += info.get('hotel_amount', 0)
         current_train_amount += info.get('train_amount', 0)
         current_flight_amount += info.get('flight_amount', 0)
+        current_toll_amount += info.get('toll_amount', 0)
         current_taxi_orders += info.get('taxi_orders', 0)
         current_hotel_orders += info.get('hotel_orders', 0)
         current_train_tickets += info.get('train_tickets', 0)
         current_flight_tickets += info.get('flight_tickets', 0)
         current_train_groups += info.get('train_groups', 0)
+        current_toll_orders += info.get('toll_orders', 0)
         current_taxi_warnings.extend(info.get('taxi_warnings', []))
         current_hotel_warnings.extend(info.get('hotel_warnings', []))
 
@@ -266,12 +349,17 @@ def _aggregate_classification_info(file_results):
         'hotel_amount': round(current_hotel_amount, 2),
         'train_amount': round(current_train_amount, 2),
         'flight_amount': round(current_flight_amount, 2),
-        'total_amount': round(current_taxi_amount + current_hotel_amount + current_train_amount + current_flight_amount, 2),
+        'toll_amount': round(current_toll_amount, 2),
+        'total_amount': round(
+            current_taxi_amount + current_hotel_amount + current_train_amount + current_flight_amount + current_toll_amount,
+            2,
+        ),
         'taxi_orders': current_taxi_orders,
         'hotel_orders': current_hotel_orders,
         'train_tickets': current_train_tickets,
         'flight_tickets': current_flight_tickets,
         'train_groups': current_train_groups,
+        'toll_orders': current_toll_orders,
         'taxi_warnings': current_taxi_warnings,
         'hotel_warnings': current_hotel_warnings,
     }
@@ -412,12 +500,14 @@ def upload_file():
                                 'hotel_amount': 0,
                                 'train_amount': 0,
                                 'flight_amount': 0,
+                                'toll_amount': 0,
                                 'total_amount': 0,
                                 'taxi_orders': 0,
                                 'hotel_orders': 0,
                                 'train_tickets': 0,
                                 'flight_tickets': 0,
                                 'train_groups': 0,
+                                'toll_orders': 0,
                                 'taxi_warnings': [],
                                 'hotel_warnings': []
                             })
@@ -496,6 +586,10 @@ def upload_file():
                 logger.error(f"处理文件 {filename} 时出错: {str(e)}", exc_info=True)
                 # 如果一个ZIP文件处理失败，继续处理其他文件
                 continue
+
+        # 2 张过路费自动上下拼到一张 A4，3 张则 2+1。
+        all_results = combine_toll_invoice_results(all_results)
+        new_results = combine_toll_invoice_results(new_results)
         
         # 检查是否有任何结果（包括重用的）
         if not all_results and not reused_files:
@@ -559,7 +653,9 @@ def upload_file():
             f"火车票 {all_classification_info['train_tickets']} 张({all_classification_info['train_groups']} 组), "
             f"火车金额 {all_classification_info['train_amount']:.2f}元, "
             f"机票 {all_classification_info['flight_tickets']} 张, "
-            f"机票金额 {all_classification_info['flight_amount']:.2f}元"
+            f"机票金额 {all_classification_info['flight_amount']:.2f}元, "
+            f"过路费 {all_classification_info.get('toll_orders', 0)} 张, "
+            f"过路费金额 {all_classification_info.get('toll_amount', 0):.2f}元"
         )
         
         # 计算本次新处理订单的金额（排除复用结果与整合条目）
@@ -568,6 +664,7 @@ def upload_file():
         current_session_hotel_amount = current_session_stats['hotel_amount']
         current_session_train_amount = current_session_stats['train_amount']
         current_session_flight_amount = current_session_stats['flight_amount']
+        current_session_toll_amount = current_session_stats.get('toll_amount', 0)
         current_session_total = current_session_stats['total_amount']
         
         logger.info(
@@ -576,6 +673,7 @@ def upload_file():
             f"酒店={current_session_hotel_amount:.2f}元, "
             f"火车={current_session_train_amount:.2f}元, "
             f"机票={current_session_flight_amount:.2f}元, "
+            f"过路费={current_session_toll_amount:.2f}元, "
             f"总计={current_session_total:.2f}元"
         )
         
@@ -592,14 +690,17 @@ def upload_file():
             merged_results_map[_result_dedup_key(item)] = item
 
         # 移除旧的火车票整合条目（上传阶段不自动重建，避免单文件上传被历史状态污染）
-        merged_session_results = [
+        merged_session_results = combine_toll_invoice_results([
             item for item in merged_results_map.values()
             if not item.get('is_train_merged_entry')
-        ]
+        ])
 
         session['processed_files'] = merged_session_results
         session.modified = True
         logger.info(f"已将处理结果增量保存到session中，当前累计 {len(session['processed_files'])} 个")
+
+        # 会话里 1+1 拼成双票时，接口仍返回双拼结果，并带 replaced_order_ids 让前端丢掉旧单票。
+        all_results = _align_results_with_session_toll_merge(all_results, merged_session_results)
         
         return jsonify({
             'success': True,
@@ -622,6 +723,7 @@ def upload_file():
                 'hotel_amount': current_session_hotel_amount,
                 'train_amount': current_session_train_amount,
                 'flight_amount': current_session_flight_amount,
+                'toll_amount': current_session_toll_amount,
                 'total_amount': current_session_total,
                 'orders': current_session_stats['order_count']
             }

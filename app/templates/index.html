@@ -1102,6 +1102,7 @@
                 let hotel = 0;
                 let train = 0;
                 let flight = 0;
+                let toll = 0;
 
                 (results || []).forEach((result) => {
                     if (!result || result.is_train_merged_entry) {
@@ -1127,7 +1128,14 @@
                     }
 
                     const amount = Number(result.amount || 0);
-                    if (result.has_hotel_bill || combinedType === 'hotel_accommodation' || String(result.order_id || '').startsWith('hotel_')) {
+                    if (
+                        result.has_toll_invoice
+                        || combinedType === 'toll_invoice'
+                        || combinedType === 'toll_double'
+                        || String(result.order_id || '').startsWith('过路费-')
+                    ) {
+                        toll += Number(result.toll_amount || amount || 0);
+                    } else if (result.has_hotel_bill || combinedType === 'hotel_accommodation' || String(result.order_id || '').startsWith('hotel_')) {
                         hotel += amount;
                     } else {
                         taxi += amount;
@@ -1139,7 +1147,8 @@
                     hotel,
                     train,
                     flight,
-                    total: taxi + hotel + train + flight,
+                    toll,
+                    total: taxi + hotel + train + flight + toll,
                 };
             }
 
@@ -1149,6 +1158,7 @@
                 window.sessionHotelAmount = amounts.hotel;
                 window.sessionTrainAmount = amounts.train;
                 window.sessionFlightAmount = amounts.flight;
+                window.sessionTollAmount = amounts.toll;
                 window.sessionTotalAmount = amounts.total;
                 return amounts;
             }
@@ -1259,12 +1269,21 @@
                 if (result.has_hotel_bill || (result.combined_type || '') === 'hotel_accommodation') {
                     return 'hotel';
                 }
+                if (
+                    result.has_toll_invoice
+                    || (result.combined_type || '') === 'toll_invoice'
+                    || (result.combined_type || '') === 'toll_double'
+                    || String(result.order_id || '').startsWith('过路费-')
+                ) {
+                    return 'toll';
+                }
                 return 'taxi';
             }
 
             function categoryTitle(category) {
                 if (category === 'train') return '🚆✈️ 火车票/机票订单处理结果';
                 if (category === 'hotel') return '🏨 酒店订单处理结果';
+                if (category === 'toll') return '🛣️ 过路费发票处理结果';
                 return '🚗 网约车订单处理结果';
             }
 
@@ -1276,6 +1295,12 @@
                 }
                 if (result.has_hotel_bill || result.combined_type === 'hotel_accommodation') {
                     return '<span class="text-success">✓ 酒店</span>';
+                }
+                if (result.has_toll_invoice || result.combined_type === 'toll_invoice' || result.combined_type === 'toll_double') {
+                    if ((result.toll_invoice_count || 1) > 1 || result.combined_type === 'toll_double') {
+                        return '<span class="text-success">✓ 过路费双拼</span>';
+                    }
+                    return '<span class="text-success">✓ 过路费</span>';
                 }
                 if (result.has_itinerary && result.has_invoice) return '<span class="text-success">✓ 完整</span>';
                 if (result.has_itinerary || result.has_invoice) return '<span class="text-warning">⚠ 部分</span>';
@@ -1295,6 +1320,15 @@
                         ? result.train_routes.join('；')
                         : '行程信息待识别';
                     return `${countParts.join(' | ')} | 布局: ${result.combined_type || 'ticket_single'} | 行程: ${routeText}`;
+                }
+                if (result.has_toll_invoice || result.combined_type === 'toll_invoice' || result.combined_type === 'toll_double') {
+                    const count = result.toll_invoice_count || (result.combined_type === 'toll_double' ? 2 : 1);
+                    const plate = result.toll_plate || '车牌待识别';
+                    const color = result.toll_color ? `[${result.toll_color}]` : '';
+                    if (count > 1) {
+                        return `过路费 ${count} 张 | 车牌: ${plate} | 一页双拼`;
+                    }
+                    return `过路费发票 | 车牌: ${plate}${color} | 发票: 有`;
                 }
                 const itineraryLabel = result.has_hotel_bill ? '结账单' : '行程单';
                 const itineraryValue = result.has_hotel_bill ? '有' : (result.has_itinerary ? '有' : '无');
@@ -1321,14 +1355,17 @@
                 groupTitle.innerHTML = `<small>📁 当前累计 (${processedFiles.length} 个条目，本次新增 ${newFilesCount} 个)</small>`;
                 newOrdersGroup.appendChild(groupTitle);
 
-                const grouped = { taxi: [], hotel: [], train: [] };
+                const grouped = { taxi: [], hotel: [], train: [], toll: [] };
                 processedFiles.forEach((result) => {
                     const category = getOrderCategory(result);
+                    if (!grouped[category]) {
+                        grouped[category] = [];
+                    }
                     grouped[category].push(result);
                 });
 
                 let globalIndex = 0;
-                ['taxi', 'hotel', 'train'].forEach((category) => {
+                ['taxi', 'hotel', 'train', 'toll'].forEach((category) => {
                     let list = grouped[category];
                     if (!list || list.length === 0) return;
 
@@ -2877,21 +2914,69 @@
                     
                     // 确保新结果被正确添加
                     const newResults = response.results || [];
-                    // 去重合并：同 output_file / order_id 视作同一条，避免增量上传时重复堆叠
+                    // 去重合并：同 output_file / order_id 视作同一条。
+                    // 过路费双拼后必须丢掉旧单票和旧双拼页，否则逐步上传会打印出两份。
+                    const incomingDoubles = newResults.filter(item =>
+                        item && (item.is_toll_merged || item.combined_type === 'toll_double')
+                    );
+                    const replacedOrderIds = new Set();
+                    const replacedOutputFiles = new Set();
+                    newResults.forEach(item => {
+                        (item.replaced_order_ids || []).forEach(id => replacedOrderIds.add(id));
+                        (item.replaced_output_files || []).forEach(file => replacedOutputFiles.add(file));
+                        (item.toll_items || []).forEach(part => {
+                            if (part && part.order_id) {
+                                replacedOrderIds.add(part.order_id);
+                            }
+                        });
+                        if (item && item.is_toll_merged && item.order_id) {
+                            replacedOrderIds.add(item.order_id);
+                        }
+                    });
                     const mergedMap = {};
+                    const getMergeKey = (item) => {
+                        const combinedType = item.combined_type || '';
+                        if (
+                            item.has_toll_invoice
+                            || combinedType.startsWith('toll_')
+                            || String(item.order_id || '').startsWith('过路费-')
+                        ) {
+                            return item.order_id || item.output_file || Math.random().toString(36).slice(2);
+                        }
+                        return item.output_file || item.order_id || Math.random().toString(36).slice(2);
+                    };
+                    const shouldDropLocalToll = (item) => {
+                        if (!item) {
+                            return false;
+                        }
+                        if (replacedOrderIds.has(item.order_id) || replacedOutputFiles.has(item.output_file)) {
+                            return true;
+                        }
+                        if (!(item.is_toll_merged || item.combined_type === 'toll_double')) {
+                            return false;
+                        }
+                        const localReplaced = new Set(item.replaced_order_ids || []);
+                        return incomingDoubles.some((incoming) => {
+                            if (item.order_id && incoming.order_id && item.order_id === incoming.order_id) {
+                                return true;
+                            }
+                            return (incoming.replaced_order_ids || []).some(id => localReplaced.has(id));
+                        });
+                    };
                     processedFiles.forEach(item => {
                         if (item && item.is_train_merged_entry) {
                             return;
                         }
-                        const key = item.output_file || item.order_id || Math.random().toString(36).slice(2);
-                        mergedMap[key] = item;
+                        if (shouldDropLocalToll(item)) {
+                            return;
+                        }
+                        mergedMap[getMergeKey(item)] = item;
                     });
                     newResults.forEach(item => {
                         if (item && item.is_train_merged_entry) {
                             return;
                         }
-                        const key = item.output_file || item.order_id || Math.random().toString(36).slice(2);
-                        mergedMap[key] = item;
+                        mergedMap[getMergeKey(item)] = item;
                     });
                     processedFiles = Object.values(mergedMap);
 
@@ -2914,6 +2999,7 @@
                     const hotelAmount = sessionAmounts.hotel;
                     const trainAmount = sessionAmounts.train;
                     const flightAmount = sessionAmounts.flight;
+                    const tollAmount = sessionAmounts.toll;
                     const totalClassificationAmount = sessionAmounts.total;
                     
                     console.log('📊 统计信息 - 本次:', newFilesCount, '累计:', totalFiles, '总金额:', totalClassificationAmount);
@@ -2986,13 +3072,14 @@
                     let summaryText = `本次处理 <strong>${currentSessionOrders}</strong> 个订单，金额: <strong>¥${currentSessionTotal.toFixed(2)}</strong>`;
                     summaryText += `<br><small>累计处理 <strong>${totalFiles}</strong> 个订单，总金额: <strong>¥${totalClassificationAmount.toFixed(2)}</strong></small>`;
                     // 添加分类统计信息 - 根据金额情况动态显示（显示累计数据）
-                    if (taxiAmount > 0 || hotelAmount > 0 || trainAmount > 0 || flightAmount > 0) {
+                    if (taxiAmount > 0 || hotelAmount > 0 || trainAmount > 0 || flightAmount > 0 || tollAmount > 0) {
                         summaryText += `<br><small class="text-info">`;
                         const amountParts = [];
                         if (taxiAmount > 0) amountParts.push(`🚗 网约车: ¥${taxiAmount.toFixed(2)}`);
                         if (hotelAmount > 0) amountParts.push(`🏨 酒店: ¥${hotelAmount.toFixed(2)}`);
                         if (trainAmount > 0) amountParts.push(`🚆 火车票: ¥${trainAmount.toFixed(2)}`);
                         if (flightAmount > 0) amountParts.push(`✈️ 机票: ¥${flightAmount.toFixed(2)}`);
+                        if (tollAmount > 0) amountParts.push(`🛣️ 过路费: ¥${tollAmount.toFixed(2)}`);
                         summaryText += amountParts.join(' | ');
                         summaryText += `</small>`;
                     }
@@ -3281,6 +3368,7 @@
                         window.sessionHotelAmount = 0;
                         window.sessionTrainAmount = 0;
                         window.sessionFlightAmount = 0;
+                        window.sessionTollAmount = 0;
                         window.sessionTotalAmount = 0;
                         // 清除缓存的行程记录和文件哈希
                         cachedTripRecords = null;

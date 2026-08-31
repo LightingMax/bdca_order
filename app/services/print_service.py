@@ -33,6 +33,7 @@ def describe_raw_print_pipeline(file_path):
 _RASTERIZE_REASON_LABELS = {
     "cropbox": "页面可见区域与纸张尺寸不一致（电子发票常见，直打可能裁切或留白异常）",
     "transport_ticket": "交通票据（火车票/机票，直打可能丢字）",
+    "toll_invoice": "过路费电子发票（直打可能裁切或留白异常）",
     "gbk_font": "含 GBK 嵌入式字体（Docker/CUPS 直打可能缺字）",
 }
 
@@ -72,6 +73,8 @@ def _assess_raw_pdf_print_strategy(pdf_path):
     pdf_type = identify_pdf_type(pdf_path)
     if pdf_type in ("train_ticket", "flight_ticket"):
         reasons.append("transport_ticket")
+    if pdf_type == "toll_invoice":
+        reasons.append("toll_invoice")
 
     if _pdf_has_gbk_like_fonts(pdf_path):
         reasons.append("gbk_font")

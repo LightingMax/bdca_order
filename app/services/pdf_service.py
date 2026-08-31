@@ -2,12 +2,32 @@ import re
 import uuid
 import xml.etree.ElementTree as ET
 import os
+import shutil
 import requests
 import json
 from pathlib import Path
 from PyPDF2 import PdfReader, PdfWriter
 from flask import current_app
 from app.services.file_service import get_file_paths, group_files_by_type
+
+# 票根/通行费发票服务平台常见 ZIP：浙ADA2734[渐变绿]+202608291849+21.00元
+TOLL_PLATE_PROVINCES = '京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤青藏川宁琼'
+TOLL_PLATE_COLORS = r'蓝色|黄色|白色|黑色|绿色|渐变绿|黄绿|渐变黄'
+TOLL_SOURCE_NAME_RE = re.compile(
+    rf'(?P<plate>[{TOLL_PLATE_PROVINCES}][A-HJ-NP-Z][A-HJ-NP-Z0-9]{{4,6}})'
+    rf'\[(?P<color>{TOLL_PLATE_COLORS})\]'
+    rf'\+(?P<when>\d{{12}})\+'
+    rf'(?P<amount>\d+\.\d{{2}})元'
+)
+TOLL_POSITIVE_KEYWORDS = (
+    '通行费', '过路费', '过路过桥', '收费公路', '高速公路通行',
+    'etc通行', '路桥费', '车辆通行费', '经营租赁*通行费', '经营租赁＊通行费',
+)
+TOLL_NEGATIVE_KEYWORDS = (
+    '行程单', '个行程', '网约车', '高德打车', '高德', '滴滴出行', '滴滴',
+    '客运服务', '打车', '曹操出行', '约车',
+    '火车票', '机票', '结账单', '住宿', '代订机票',
+)
 
 # ============================================================================
 # 以下函数已废弃，改用高德打车PDF解析器（parse_gaode_itinerary_enhanced）
@@ -288,11 +308,71 @@ def extract_amount_from_pdf(pdf_path):
         logger.error(f"从PDF文件提取金额出错: {str(e)}")
         return 0
 
-def identify_pdf_type(pdf_path):
-    """识别 PDF 文件类型（网约车/酒店/火车票/机票）。"""
+def parse_toll_invoice_source(name):
+    """解析票根/通行费包文件名，成功则返回车牌、颜色、时间、金额。"""
+    if not name:
+        return None
+    match = TOLL_SOURCE_NAME_RE.search(Path(name).name)
+    if not match:
+        return None
+    return {
+        'plate': match.group('plate'),
+        'color': match.group('color'),
+        'when': match.group('when'),
+        'amount': float(match.group('amount')),
+    }
+
+
+def looks_like_toll_invoice(name='', text='', zip_filename=''):
+    """
+    过路费发票判定：
+    1. 票根包文件名（车牌[颜色]+时间+金额）置信度最高；
+    2. 文件名/内容含通行费等正向词，且不含网约车/火车票等负向词；
+    3. 网约车发票里的“过路费”明细因行程单/客运服务等负向词被排除。
+    """
+    blob = ' '.join(part or '' for part in (name, text, zip_filename))
+    if any(keyword in blob for keyword in TOLL_NEGATIVE_KEYWORDS):
+        return False
+    if parse_toll_invoice_source(name) or parse_toll_invoice_source(zip_filename):
+        return True
+    return any(keyword in blob for keyword in TOLL_POSITIVE_KEYWORDS)
+
+
+def build_toll_order_id(pdf_path=None, zip_filename=None, amount=0):
+    """生成稳定的过路费订单ID，避免不同车辆/时间互相覆盖。"""
+    meta = parse_toll_invoice_source(zip_filename) or parse_toll_invoice_source(
+        Path(pdf_path).name if pdf_path else ''
+    )
+    if meta:
+        return f"过路费-{meta['plate']}-{meta['when']}-{meta['amount']:.2f}元"
+    stem = Path(pdf_path).stem if pdf_path else 'toll'
+    return f"过路费-{stem}-{float(amount or 0):.2f}元"
+
+
+def extract_toll_invoice_amount(pdf_path, zip_filename=None, xml_path=None):
+    """过路费金额：票根文件名 > XML > PDF。"""
+    meta = parse_toll_invoice_source(zip_filename) or parse_toll_invoice_source(
+        Path(pdf_path).name if pdf_path else ''
+    )
+    if meta:
+        return round(meta['amount'], 2)
+    if xml_path:
+        xml_amount = extract_amount_from_xml(xml_path)
+        if xml_amount > 0:
+            return round(float(xml_amount), 2)
+    if pdf_path:
+        pdf_amount = extract_amount_from_pdf(pdf_path)
+        if pdf_amount > 0:
+            return round(float(pdf_amount), 2)
+    return 0.0
+
+
+def identify_pdf_type(pdf_path, zip_filename=None):
+    """识别 PDF 文件类型（网约车/酒店/火车票/机票/过路费）。"""
     logger = current_app.logger
     try:
-        filename = Path(pdf_path).name.lower()
+        original_filename = Path(pdf_path).name
+        filename = original_filename.lower()
         logger.info(f"正在识别PDF类型: {pdf_path}")
 
         train_keywords = [
@@ -303,27 +383,43 @@ def identify_pdf_type(pdf_path):
             '机票', '航班', '飞机票', '航空', '飞猪', '代订机票', 'flight', 'air ticket'
         ]
 
-        # 通过文件名判断
+        # 通过文件名判断；过路费必须在通用“发票”之前，否则“通行费发票”会被吞掉。
+        # 含“发票”的文件名必须先于“行程”，否则网约车“xx元-N个行程…电子发票”会被误判成行程单。
         if any(keyword in filename for keyword in flight_keywords):
             logger.info(f"通过文件名识别为机票: {pdf_path}")
             return 'flight_ticket'
         if any(keyword in filename for keyword in train_keywords):
             logger.info(f"通过文件名识别为火车票: {pdf_path}")
             return 'train_ticket'
-        if '发票' in filename or 'invoice' in filename or 'receipt' in filename:
+        if looks_like_toll_invoice(name=original_filename, zip_filename=zip_filename or ''):
+            logger.info(f"通过文件名识别为过路费发票: {pdf_path}")
+            return 'toll_invoice'
+        if '发票' in original_filename or 'invoice' in filename or 'receipt' in filename:
+            page_text = ''
+            try:
+                reader = PdfReader(pdf_path)
+                if reader.pages:
+                    page_text = reader.pages[0].extract_text() or ''
+            except Exception:
+                page_text = ''
+            if looks_like_toll_invoice(name=original_filename, text=page_text, zip_filename=zip_filename or ''):
+                logger.info(f"通过发票正文识别为过路费发票: {pdf_path}")
+                return 'toll_invoice'
             logger.info(f"通过文件名识别为发票: {pdf_path}")
             return 'invoice'
-        elif '行程' in filename or 'itinerary' in filename or 'trip' in filename:
+        if '行程' in filename or 'itinerary' in filename or 'trip' in filename:
             logger.info(f"通过文件名识别为行程单: {pdf_path}")
             return 'itinerary'
-        elif '结账单' in filename or '账单' in filename or 'bill' in filename:
+        if '结账单' in filename or '账单' in filename or 'bill' in filename:
             logger.info(f"通过文件名识别为结账单: {pdf_path}")
             return 'hotel_bill'
         
         # 通过文件内容判断（简单版）
         reader = PdfReader(pdf_path)
+        page_text = ''
         if len(reader.pages) > 0:
-            text = (reader.pages[0].extract_text() or '').lower()
+            page_text = reader.pages[0].extract_text() or ''
+            text = page_text.lower()
             train_no_match = re.search(r'\b[gdcztk]\d{1,4}\b', text, flags=re.IGNORECASE)
             flight_no_match = re.search(r'\b[a-z]{2}\d{3,4}\b', text, flags=re.IGNORECASE)
             if any(keyword in text for keyword in flight_keywords) or flight_no_match:
@@ -332,6 +428,9 @@ def identify_pdf_type(pdf_path):
             if any(keyword in text for keyword in train_keywords) or train_no_match:
                 logger.info(f"通过内容识别为火车票: {pdf_path}")
                 return 'train_ticket'
+            if looks_like_toll_invoice(name=original_filename, text=page_text, zip_filename=zip_filename or ''):
+                logger.info(f"通过内容识别为过路费发票: {pdf_path}")
+                return 'toll_invoice'
             if '发票' in text or 'invoice' in text or 'receipt' in text:
                 logger.info(f"通过内容识别为发票: {pdf_path}")
                 return 'invoice'
@@ -355,6 +454,12 @@ def extract_order_id(file_path):
     try:
         logger.info(f"正在提取订单ID: {file_path}")
         filename = Path(file_path).name
+
+        toll_meta = parse_toll_invoice_source(filename)
+        if toll_meta:
+            order_id = build_toll_order_id(file_path, filename, toll_meta['amount'])
+            logger.info(f"从过路费文件名提取到订单ID: {order_id}")
+            return order_id
         
         # 方法0: 最高优先级 - 从发票文件名中提取【】内的内容
         # 支持格式：【及时用车-53.21元-2个行程】高德打车电子发票
@@ -977,6 +1082,9 @@ def identify_zip_type_from_filename(zip_filename):
     """根据ZIP文件名识别类型"""
     if not zip_filename:
         return 'unknown'
+
+    if parse_toll_invoice_source(zip_filename) or looks_like_toll_invoice(name=zip_filename):
+        return 'toll'
     
     filename_lower = zip_filename.lower()
     
@@ -1745,6 +1853,189 @@ def create_hotel_combined_pdf(invoice_path: str, hotel_bill_path: str, output_pa
         return False
 
 
+def create_toll_invoice_pdf(invoice_path: str, output_path: str) -> bool:
+    """将单张过路费电子发票渲染到 A4。"""
+    return create_toll_invoices_layout_pdf([{'pdf_path': invoice_path}], output_path)
+
+
+def create_toll_invoices_layout_pdf(invoice_items, output_path) -> bool:
+    """
+    过路费智能排版：票根电子发票接近半张 A4，两张上下拼到一页。
+    - 1 张 -> 整页
+    - 2 张 -> 一页上下排
+    """
+    logger = current_app.logger
+    items = [item for item in (invoice_items or []) if item and item.get('pdf_path')]
+    if not items:
+        return False
+
+    try:
+        from PIL import Image
+    except ImportError as e:
+        logger.error(f"❌ 缺少过路费排版依赖: {e}")
+        return False
+
+    a4_width, a4_height = 2480, 3508  # 300 DPI A4
+    page_margin = 70
+    cell_gap = 36
+    ticket_count = min(2, len(items))
+    rows = 2 if ticket_count == 2 else 1
+    cell_width = a4_width - 2 * page_margin
+    cell_height = (a4_height - 2 * page_margin - (rows - 1) * cell_gap) // rows
+    canvas = Image.new("RGB", (a4_width, a4_height), (255, 255, 255))
+    logger.info(f"🛣️ 过路费排版开始: tickets={ticket_count}, layout={'toll_double' if ticket_count == 2 else 'toll_single'}")
+
+    pasted = 0
+    for idx, item in enumerate(items[:2]):
+        invoice_path = item['pdf_path']
+        try:
+            images = _render_invoice_images(invoice_path, dpi=220)
+            if not images:
+                logger.warning(f"过路费发票渲染为空: {invoice_path}")
+                continue
+            invoice_img = images[0]
+        except Exception as e:
+            logger.error(f"过路费发票渲染失败: {invoice_path}, err={e}")
+            continue
+
+        ratio = min(cell_width / invoice_img.width, cell_height / invoice_img.height)
+        resized = invoice_img.resize(
+            (max(1, int(invoice_img.width * ratio)), max(1, int(invoice_img.height * ratio))),
+            Image.Resampling.LANCZOS,
+        )
+        cell_y = page_margin + idx * (cell_height + cell_gap)
+        paste_x = page_margin + (cell_width - resized.width) // 2
+        paste_y = cell_y + (cell_height - resized.height) // 2
+        canvas.paste(resized, (paste_x, paste_y))
+        pasted += 1
+
+    if pasted == 0:
+        logger.error("❌ 过路费排版没有可用页面")
+        return False
+
+    canvas.save(output_path, "PDF", resolution=300.0)
+    if not Path(output_path).exists() or Path(output_path).stat().st_size < 1000:
+        logger.error(f"❌ 过路费排版输出异常: {output_path}")
+        return False
+    logger.info(f"✅ 过路费排版成功: {output_path}")
+    return True
+
+
+def _split_toll_invoice_groups(toll_items):
+    """过路费按 2 张一页拆分，与火车票规则一致。"""
+    groups = []
+    i = 0
+    items = list(toll_items or [])
+    while i < len(items):
+        take = 2 if (len(items) - i) >= 2 else 1
+        groups.append(items[i:i + take])
+        i += take
+    return groups
+
+
+def combine_toll_invoice_results(results):
+    """
+    将本次/会话内的过路费单票结果按两张一页重排。
+    已是双拼的条目保持不变；无法渲染时回退为原来的单票结果。
+    """
+    logger = current_app.logger
+    results = list(results or [])
+    singles = []
+    others = []
+    for item in results:
+        combined_type = str(item.get('combined_type') or '')
+        is_single = (
+            item.get('has_toll_invoice')
+            and combined_type in ('', 'toll_invoice', 'toll_single')
+            and not item.get('is_toll_merged')
+            and item.get('source_invoice_path')
+            and Path(item.get('source_invoice_path')).exists()
+        )
+        if is_single:
+            singles.append(item)
+        else:
+            others.append(item)
+
+    if len(singles) < 2:
+        return results
+
+    singles.sort(key=lambda item: (str(item.get('toll_when') or ''), str(item.get('order_id') or '')))
+    grouped_singles = _split_toll_invoice_groups(singles)
+    consumed_ids = {
+        item.get('order_id')
+        for group in grouped_singles
+        for item in group
+        if item.get('order_id')
+    }
+    combined = []
+    for item in others:
+        # 同一批发票再拼一次时，丢掉旧的双拼页，避免打印列表里出现两份。
+        if item.get('is_toll_merged') or str(item.get('combined_type') or '') == 'toll_double':
+            replaced = {order_id for order_id in (item.get('replaced_order_ids') or []) if order_id}
+            if replaced & consumed_ids:
+                continue
+        combined.append(item)
+
+    for group in grouped_singles:
+        if len(group) == 1:
+            combined.append(group[0])
+            continue
+
+        output_filename = f"toll_pair_{uuid.uuid4().hex[:8]}.pdf"
+        output_path = Path(current_app.config['OUTPUT_FOLDER']) / output_filename
+        layout_items = [{'pdf_path': item['source_invoice_path']} for item in group]
+        if not create_toll_invoices_layout_pdf(layout_items, output_path):
+            logger.warning("过路费双拼失败，保留单票结果")
+            combined.extend(group)
+            continue
+
+        plates = [item.get('toll_plate') or '' for item in group]
+        plate_text = '+'.join(p for p in plates if p) or '2张'
+        amount = round(sum(float(item.get('amount') or 0) for item in group), 2)
+        replaced_order_ids = [item.get('order_id') for item in group if item.get('order_id')]
+        replaced_output_files = [item.get('output_file') for item in group if item.get('output_file')]
+        combined.append({
+            'order_id': f"过路费-{plate_text}-{amount:.2f}元",
+            'amount': amount,
+            'output_file': output_filename,
+            'has_itinerary': False,
+            'has_invoice': True,
+            'has_hotel_bill': False,
+            'has_toll_invoice': True,
+            'is_toll_merged': True,
+            'toll_plate': ' / '.join(p for p in plates if p),
+            'toll_color': group[0].get('toll_color', ''),
+            'toll_when': group[0].get('toll_when', ''),
+            'toll_amount': amount,
+            'toll_invoice_count': len(group),
+            'toll_items': [
+                {
+                    'order_id': item.get('order_id'),
+                    'amount': item.get('amount'),
+                    'toll_plate': item.get('toll_plate', ''),
+                    'toll_when': item.get('toll_when', ''),
+                }
+                for item in group
+            ],
+            'replaced_order_ids': replaced_order_ids,
+            'replaced_output_files': replaced_output_files,
+            'page_count': 1,
+            'combined_type': 'toll_double',
+        })
+        logger.info(f"✅ 过路费双拼完成: plates={plate_text}, amount={amount:.2f}, out={output_filename}")
+    return combined
+
+
+def _select_primary_toll_pdfs(pdf_paths):
+    """同一票根包里通常一份 PDF 即可打印，优先文件名含发票的文件。"""
+    if len(pdf_paths) <= 1:
+        return list(pdf_paths)
+    named_invoices = [path for path in pdf_paths if '发票' in Path(path).name]
+    if named_invoices:
+        return named_invoices[:1]
+    return pdf_paths[:1]
+
+
 def _extract_train_amount_from_text(text):
     """从火车票文本中提取票面金额。"""
     if not text:
@@ -2030,13 +2321,16 @@ def process_pdf_files(extract_dir, zip_filename=None):
     file_paths = get_file_paths(extract_dir)
     grouped_files = group_files_by_type(file_paths)
 
-    # 先识别交通票据（火车票/机票），避免与网约车/酒店混淆
+    # 先识别交通票据（火车票/机票）和过路费，避免与网约车/酒店混淆
     transport_ticket_pdfs = []
+    toll_invoice_pdfs = []
     non_train_pdfs = []
     for pdf_path in grouped_files['pdf']:
-        pdf_type = identify_pdf_type(pdf_path)
+        pdf_type = identify_pdf_type(pdf_path, zip_filename=zip_filename)
         if pdf_type in ('train_ticket', 'flight_ticket'):
             transport_ticket_pdfs.append((pdf_path, pdf_type))
+        elif pdf_type == 'toll_invoice' or zip_type == 'toll':
+            toll_invoice_pdfs.append(pdf_path)
         else:
             non_train_pdfs.append(pdf_path)
 
@@ -2044,6 +2338,8 @@ def process_pdf_files(extract_dir, zip_filename=None):
         train_pdf_count = sum(1 for _, t in transport_ticket_pdfs if t == 'train_ticket')
         flight_pdf_count = sum(1 for _, t in transport_ticket_pdfs if t == 'flight_ticket')
         logger.info(f"🚆✈️ 识别到交通票据文件 {len(transport_ticket_pdfs)} 个(火车{train_pdf_count}, 机票{flight_pdf_count})")
+    if toll_invoice_pdfs:
+        logger.info(f"🛣️ 识别到过路费发票 {len(toll_invoice_pdfs)} 个")
     if non_train_pdfs:
         logger.info(f"🚗/🏨 非火车票 PDF 文件 {len(non_train_pdfs)} 个")
 
@@ -2053,8 +2349,11 @@ def process_pdf_files(extract_dir, zip_filename=None):
         'other': grouped_files['other'],
     }
 
+    # 票根过路费包只有发票/XML，不能走网约车配对，否则会被当成“文件组合不完整”丢掉。
+    if zip_type == 'toll' or (toll_invoice_pdfs and not non_train_pdfs):
+        orders, xml_missing_warnings = {}, []
     # 根据ZIP类型选择不同的处理策略
-    if zip_type == 'hotel':
+    elif zip_type == 'hotel':
         # 住宿记录：使用hash前缀关联文件
         orders, xml_missing_warnings = match_hotel_files_by_hash(non_train_grouped['pdf'], non_train_grouped['xml'], extract_dir)
     else:
@@ -2180,6 +2479,51 @@ def process_pdf_files(extract_dir, zip_filename=None):
                 
         except Exception as e:
             logger.error(f"处理订单 {order_id} 时出错: {str(e)}")
+
+    # 处理过路费发票：独立于网约车/酒店/交通票，按张渲染后计入总金额
+    toll_amount = 0.0
+    toll_order_count = 0
+    if toll_invoice_pdfs:
+        selected_toll_pdfs = _select_primary_toll_pdfs(toll_invoice_pdfs)
+        xml_path = grouped_files['xml'][0] if grouped_files.get('xml') else None
+        for toll_index, invoice_path in enumerate(selected_toll_pdfs, start=1):
+            amount = extract_toll_invoice_amount(invoice_path, zip_filename=zip_filename, xml_path=xml_path)
+            order_id = build_toll_order_id(invoice_path, zip_filename, amount)
+            output_filename = f"toll_{toll_index}_{uuid.uuid4().hex[:8]}.pdf"
+            output_path = Path(current_app.config['OUTPUT_FOLDER']) / output_filename
+            if not create_toll_invoice_pdf(invoice_path, output_path):
+                logger.error(f"❌ 过路费发票处理失败: {invoice_path}")
+                continue
+
+            page_count = 1
+            try:
+                page_count = max(1, len(PdfReader(str(output_path)).pages))
+            except Exception:
+                page_count = 1
+
+            meta = parse_toll_invoice_source(zip_filename) or parse_toll_invoice_source(Path(invoice_path).name) or {}
+            source_copy = Path(current_app.config['OUTPUT_FOLDER']) / f"toll_src_{uuid.uuid4().hex[:8]}.pdf"
+            shutil.copy2(invoice_path, source_copy)
+            results.append({
+                'order_id': order_id,
+                'amount': amount,
+                'output_file': output_filename,
+                'has_itinerary': False,
+                'has_invoice': True,
+                'has_hotel_bill': False,
+                'has_toll_invoice': True,
+                'source_invoice_path': str(source_copy),
+                'toll_plate': meta.get('plate', ''),
+                'toll_color': meta.get('color', ''),
+                'toll_when': meta.get('when', ''),
+                'toll_amount': amount,
+                'toll_invoice_count': 1,
+                'page_count': page_count,
+                'combined_type': 'toll_invoice',
+            })
+            toll_amount += amount
+            toll_order_count += 1
+            logger.info(f"✅ 过路费发票处理成功: order_id={order_id}, amount={amount:.2f}, out={output_filename}")
     
     # 处理交通票据（火车票/机票）：严格独立于网约车/酒店逻辑，底层复用同一套排版/拖拽/整合逻辑
     train_ticket_items = _collect_train_ticket_pages(transport_ticket_pdfs)
@@ -2294,7 +2638,8 @@ def process_pdf_files(extract_dir, zip_filename=None):
     logger.info(f"   🏨 酒店总金额: {hotel_amount:.2f}元 ({len([order_id for order_id in orders.keys() if order_id.startswith('hotel_')])}个订单)")
     logger.info(f"   🚆 火车票总金额: {train_amount:.2f}元 ({rail_ticket_count}张)")
     logger.info(f"   ✈️ 机票总金额: {flight_amount:.2f}元 ({flight_ticket_count}张)")
-    logger.info(f"   💰 总金额: {taxi_amount + hotel_amount + train_amount + flight_amount:.2f}元")
+    logger.info(f"   🛣️ 过路费总金额: {toll_amount:.2f}元 ({toll_order_count}张)")
+    logger.info(f"   💰 总金额: {taxi_amount + hotel_amount + train_amount + flight_amount + toll_amount:.2f}元")
     
     # 记录分类警告
     if taxi_warnings:
@@ -2313,12 +2658,14 @@ def process_pdf_files(extract_dir, zip_filename=None):
         'hotel_amount': hotel_amount,
         'train_amount': round(train_amount, 2),
         'flight_amount': flight_amount,
-        'total_amount': round(taxi_amount + hotel_amount + train_amount + flight_amount, 2),
+        'toll_amount': round(toll_amount, 2),
+        'total_amount': round(taxi_amount + hotel_amount + train_amount + flight_amount + toll_amount, 2),
         'taxi_orders': len([order_id for order_id in orders.keys() if not order_id.startswith('hotel_')]),
         'hotel_orders': len([order_id for order_id in orders.keys() if order_id.startswith('hotel_')]),
         'train_tickets': rail_ticket_count,
         'flight_tickets': flight_ticket_count,
         'train_groups': train_group_count,
+        'toll_orders': toll_order_count,
         'taxi_warnings': taxi_warnings,
         'hotel_warnings': hotel_warnings
     }
