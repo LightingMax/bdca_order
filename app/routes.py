@@ -11,6 +11,8 @@ from app.services.file_service import (
 )
 from app.services.pdf_service import (
     combine_toll_invoice_results,
+    looks_like_boarding_pass,
+    looks_like_flight_itinerary,
     looks_like_toll_invoice,
     parse_toll_invoice_source,
     process_pdf_files,
@@ -138,7 +140,11 @@ def _count_pdf_pages_in_directory(directory):
 def _looks_like_flight_upload(filename):
     """判断上传文件是否疑似机票，避免旧缓存把机票当普通发票复用。"""
     name = (filename or '').lower()
-    return any(keyword in name for keyword in ['机票', '航班', '飞机票', '航空', '飞猪', 'flight', 'air ticket'])
+    return (
+        looks_like_boarding_pass(name=filename)
+        or looks_like_flight_itinerary(name=filename)
+        or any(keyword in name for keyword in ['机票', '航班', '飞机票', '航空', '飞猪', 'flight', 'air ticket'])
+    )
 
 
 def _should_reprocess_upload(filename):
@@ -313,7 +319,7 @@ def _aggregate_result_amounts(results):
 
 
 def _aggregate_classification_info(file_results):
-    """汇总上传文件的分类统计；仅统计本次新处理文件，不含复用文件。"""
+    """汇总本次拖入文件的分类统计（含复用打印件的文件）。金额以订单去重后的结果为准。"""
     current_taxi_amount = 0.0
     current_hotel_amount = 0.0
     current_train_amount = 0.0
@@ -600,7 +606,11 @@ def upload_file():
         mac_address = get_user_mac()
         logger.info(f"用户MAC地址: {mac_address}")
         
-        # 保存用户数据（只记录新处理的订单，排除整合条目）
+        # 页面合计：这次拖进来的文件都要算上（含已打印过、复用输出 PDF 的），按订单去重。
+        upload_amount_stats = _aggregate_result_amounts(all_results)
+        total_amount = upload_amount_stats['total_amount']
+
+        # 战报只记真正新出现的订单，避免同一张票反复拖入把累计金额打翻倍
         if new_results:
             new_amount_stats = _aggregate_result_amounts(new_results)
             save_user_data(
@@ -614,6 +624,7 @@ def upload_file():
                 f"新增金额: {new_amount_stats['total_amount']:.2f}"
             )
         else:
+            new_amount_stats = _aggregate_result_amounts([])
             logger.info("没有新处理的订单，不更新用户统计数据")
         
         # 收集所有XML缺失警告
@@ -623,16 +634,20 @@ def upload_file():
             if 'xml_missing_warnings' in file_result:
                 all_xml_warnings.extend(file_result['xml_missing_warnings'])
         
-        # 计算本次上传新处理文件的分类统计（复用文件不参与金额累计）
-        all_classification_info = _aggregate_classification_info(processed_files)
-        
-        total_amount = all_classification_info['total_amount']
+        all_classification_info = _aggregate_classification_info(all_files)
+        all_classification_info.update({
+            'taxi_amount': upload_amount_stats['taxi_amount'],
+            'hotel_amount': upload_amount_stats['hotel_amount'],
+            'train_amount': upload_amount_stats['train_amount'],
+            'flight_amount': upload_amount_stats['flight_amount'],
+            'toll_amount': upload_amount_stats['toll_amount'],
+            'total_amount': total_amount,
+        })
         
         # 🎉 彩蛋：更新全局统计数据（仅统计本次新处理的结果，排除整合条目）
-        new_amount_stats = _aggregate_result_amounts(new_results)
         total_itineraries = new_amount_stats['order_count']
         stats_amount = new_amount_stats['total_amount']
-        total_pages = uploaded_pdf_page_total or total_itineraries
+        total_pages = uploaded_pdf_page_total if new_results else 0
         global_stats = save_global_stats(
             total_itineraries,
             stats_amount,
@@ -658,8 +673,8 @@ def upload_file():
             f"过路费金额 {all_classification_info.get('toll_amount', 0):.2f}元"
         )
         
-        # 计算本次新处理订单的金额（排除复用结果与整合条目）
-        current_session_stats = _aggregate_result_amounts(new_results)
+        # 本次拖入金额（含复用文件，按订单去重）；战报已在上面只计 new_results
+        current_session_stats = upload_amount_stats
         current_session_taxi_amount = current_session_stats['taxi_amount']
         current_session_hotel_amount = current_session_stats['hotel_amount']
         current_session_train_amount = current_session_stats['train_amount']
@@ -668,7 +683,8 @@ def upload_file():
         current_session_total = current_session_stats['total_amount']
         
         logger.info(
-            f"📊 本次处理金额计算: 新订单数={current_session_stats['order_count']}, "
+            f"📊 本次拖入金额计算: 订单数={current_session_stats['order_count']}"
+            f"（其中新订单 {new_amount_stats['order_count']}）, "
             f"网约车={current_session_taxi_amount:.2f}元, "
             f"酒店={current_session_hotel_amount:.2f}元, "
             f"火车={current_session_train_amount:.2f}元, "

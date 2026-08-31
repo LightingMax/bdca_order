@@ -2,9 +2,23 @@ import os
 import re
 import shutil
 import subprocess
+import threading
+import time
 import uuid
 from flask import current_app
 from app.config import Config
+
+# CUPS 的 lp 不能并发抢同一个队列：并发时会出现 returncode=1 +「成功」却未入队，
+# 或卡几十秒后报「没有那个文件或目录」。提交必须串行，失败则短暂重试。
+_LP_SUBMIT_LOCK = threading.Lock()
+_LP_MAX_ATTEMPTS = 3
+_LP_RETRY_DELAY_SEC = 0.8
+_LP_TIMEOUT_SEC = 30
+_LP_POST_SUBMIT_PAUSE_SEC = 0.25
+
+
+def _lp_retry_delay(attempt):
+    return _LP_RETRY_DELAY_SEC * attempt
 
 WORD_EXTENSIONS = {".doc", ".docx"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
@@ -135,7 +149,7 @@ def get_available_printers():
 
 
 def _lp_output_indicates_success(output):
-    """识别 lp 在不同语言环境下的成功输出，避免非零返回码误判。"""
+    """识别 lp 在不同语言环境下的成功输出。仅有「成功」二字且无任务号时不可信。"""
     normalized = (output or "").strip().lower()
     if not normalized:
         return False
@@ -143,9 +157,7 @@ def _lp_output_indicates_success(output):
     success_markers = [
         "request id is",
         "successful",
-        "success",
         "submitted",
-        "成功",
     ]
     failure_markers = [
         "not found",
@@ -158,11 +170,64 @@ def _lp_output_indicates_success(output):
         "错误",
         "找不到",
         "无法",
+        "没有那个文件或目录",
     ]
 
     return any(marker in normalized for marker in success_markers) and not any(
         marker in normalized for marker in failure_markers
     )
+
+
+def _lp_env():
+    """强制英文环境，便于解析 request id，避免中文「lp：成功」掩盖真实入队结果。"""
+    env = os.environ.copy()
+    env["LANG"] = "C"
+    env["LC_ALL"] = "C"
+    env["LC_MESSAGES"] = "C"
+    return env
+
+
+def _parse_lp_job_id(output):
+    text = output or ""
+    match = re.search(r"request id is\s+(\S+)", text, re.IGNORECASE)
+    if match:
+        return match.group(1).rstrip(")")
+    match = re.search(r"请求(?:\s*id)?\s*是\s+(\S+)", text, re.IGNORECASE)
+    if match:
+        return match.group(1).rstrip(")")
+    return ""
+
+
+def _lp_is_permanent_error(output):
+    text = (output or "").lower()
+    permanent = [
+        "unknown destination",
+        "unknown printer",
+        "invalid printer",
+        "printer does not exist",
+        "未知的目标",
+        "没有那个打印机",
+        "找不到打印机",
+        "permission denied",
+        "权限不够",
+        "拒绝",
+    ]
+    return any(marker in text for marker in permanent)
+
+
+def _lp_is_transient_error(output):
+    text = (output or "").lower()
+    transient = [
+        "没有那个文件或目录",
+        "no such file or directory",
+        "connection refused",
+        "unable to connect",
+        "server-error-service-unavailable",
+        "busy",
+        "temporarily",
+        "resource temporarily unavailable",
+    ]
+    return any(marker in text for marker in transient)
 
 
 def _convert_word_to_pdf(file_path):
@@ -333,7 +398,7 @@ def prepare_raw_pdf_for_a4_print(pdf_path, dpi=220, processing_log=None):
 
 
 def print_pdf(pdf_path, printer_name=None, copies=1, media_source=None, processing_log=None):
-    """通过 lp 命令提交 PDF 打印任务。"""
+    """通过 lp 命令提交 PDF 打印任务。同一时刻只允许一个 lp 提交，失败会自动重试。"""
     logger = current_app.logger
     logger.info(f"开始打印PDF文件: {pdf_path}")
 
@@ -366,72 +431,132 @@ def print_pdf(pdf_path, printer_name=None, copies=1, media_source=None, processi
             cmd.extend(["-o", f"media-source={tray}"])
         cmd.append(pdf_path)
 
-        logger.info(f"执行打印命令: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        stdout = (result.stdout or "").strip()
-        stderr = (result.stderr or "").strip()
-        combined_output = "\n".join(part for part in [stdout, stderr] if part).strip()
-        output_indicates_success = _lp_output_indicates_success(combined_output)
+        last_error = "未知错误"
+        last_returncode = None
+        last_job_id = ""
 
-        if result.returncode != 0 and not output_indicates_success:
-            err = combined_output or "未知错误"
-            logger.error(f"lp 提交失败: {err}")
-            _log_step(processing_log, f"打印机队列提交失败：{err}", "error")
-            return {
-                "success": False,
-                "message": f"lp 提交失败: {err}",
-                "queue_confirmed": False,
-                "returncode": result.returncode,
-            }
+        with _LP_SUBMIT_LOCK:
+            for attempt in range(1, _LP_MAX_ATTEMPTS + 1):
+                logger.info(f"执行打印命令: {' '.join(cmd)} (第 {attempt}/{_LP_MAX_ATTEMPTS} 次)")
+                try:
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=_LP_TIMEOUT_SEC,
+                        env=_lp_env(),
+                    )
+                except subprocess.TimeoutExpired:
+                    last_error = f"lp 提交超时（{_LP_TIMEOUT_SEC} 秒）"
+                    last_returncode = None
+                    logger.warning(f"{last_error}，文件: {pdf_path}")
+                    if attempt < _LP_MAX_ATTEMPTS:
+                        delay = _lp_retry_delay(attempt)
+                        _log_step(
+                            processing_log,
+                            f"第 {attempt} 次提交超时，{delay} 秒后重试",
+                            "warning",
+                        )
+                        time.sleep(delay)
+                        continue
+                    _log_step(processing_log, f"打印机队列提交失败：{last_error}", "error")
+                    return {
+                        "success": False,
+                        "message": f"lp 提交失败: {last_error}",
+                        "queue_confirmed": False,
+                    }
 
-        # 常见输出: request id is HP_M437_ULD-123 (1 file(s))
-        output = combined_output
-        job_id = ""
-        match = re.search(r"request id is\s+(\S+)", output, re.IGNORECASE)
-        if match:
-            job_id = match.group(1)
+                stdout = (result.stdout or "").strip()
+                stderr = (result.stderr or "").strip()
+                combined_output = "\n".join(part for part in [stdout, stderr] if part).strip()
+                job_id = _parse_lp_job_id(combined_output)
+                last_job_id = job_id
+                last_returncode = result.returncode
+                last_error = combined_output or "未知错误"
 
-        queue_confirmed = result.returncode == 0 or bool(job_id)
-        if result.returncode != 0:
-            err = combined_output or "未知错误"
-            logger.warning(
-                f"lp 返回码非0，任务可能未真正入队: returncode={result.returncode}, output={combined_output}"
-            )
-            _log_step(
-                processing_log,
-                f"打印机返回异常（returncode={result.returncode}），任务可能未入队：{err}。"
-                f"请检查 CUPS 服务（如 lpstat -r 是否连接正常）",
-                "error",
-            )
-            return {
-                "success": False,
-                "printer": printer_name,
-                "job_id": job_id,
-                "message": f"lp 返回异常（returncode={result.returncode}），打印机可能未收到任务：{err}",
-                "queue_confirmed": False,
-                "returncode": result.returncode,
-            }
+                if result.returncode == 0:
+                    time.sleep(_LP_POST_SUBMIT_PAUSE_SEC)
+                    logger.info(
+                        f"打印任务已提交，job_id={job_id or 'unknown'}, returncode={result.returncode}"
+                    )
+                    if job_id:
+                        _log_step(
+                            processing_log,
+                            f"任务已加入打印机队列（{job_id}）。若前面还有未完成任务，请稍候出纸",
+                            "success",
+                        )
+                    else:
+                        _log_step(
+                            processing_log,
+                            "任务已提交到打印机（未返回任务号，请稍后确认是否出纸）",
+                            "warning",
+                        )
+                    return {
+                        "success": True,
+                        "printer": printer_name,
+                        "job_id": job_id,
+                        "message": combined_output or "打印任务已提交",
+                        "queue_confirmed": True,
+                        "returncode": result.returncode,
+                    }
 
-        logger.info(f"打印任务已提交，job_id={job_id or 'unknown'}, returncode={result.returncode}")
-        if job_id:
-            _log_step(
-                processing_log,
-                f"任务已加入打印机队列（{job_id}）。若前面还有未完成任务，请稍候出纸",
-                "success",
-            )
-        else:
-            _log_step(
-                processing_log,
-                "任务已提交到打印机（未返回任务号，请稍后确认是否出纸）",
-                "warning",
-            )
+                if _lp_is_permanent_error(combined_output):
+                    logger.error(f"lp 提交失败（不可重试）: {last_error}")
+                    _log_step(processing_log, f"打印机队列提交失败：{last_error}", "error")
+                    return {
+                        "success": False,
+                        "printer": printer_name,
+                        "job_id": job_id,
+                        "message": f"lp 提交失败: {last_error}",
+                        "queue_confirmed": False,
+                        "returncode": result.returncode,
+                    }
+
+                can_retry = attempt < _LP_MAX_ATTEMPTS
+                reason = last_error
+                if can_retry:
+                    delay = _lp_retry_delay(attempt)
+                    logger.warning(
+                        f"lp 第 {attempt} 次未确认入队: returncode={result.returncode}, output={combined_output}"
+                    )
+                    _log_step(
+                        processing_log,
+                        f"第 {attempt} 次提交未确认入队（returncode={result.returncode}：{reason}），"
+                        f"{delay} 秒后重试",
+                        "warning",
+                    )
+                    time.sleep(delay)
+                    continue
+
+                logger.warning(
+                    f"lp 返回码非0，任务可能未真正入队: returncode={result.returncode}, output={combined_output}"
+                )
+                _log_step(
+                    processing_log,
+                    f"打印机返回异常（returncode={result.returncode}），任务可能未入队：{last_error}。"
+                    f"请检查 CUPS 服务（如 lpstat -r 是否连接正常）",
+                    "error",
+                )
+                return {
+                    "success": False,
+                    "printer": printer_name,
+                    "job_id": last_job_id,
+                    "message": (
+                        f"lp 返回异常（returncode={result.returncode}），"
+                        f"打印机可能未收到任务：{last_error}"
+                    ),
+                    "queue_confirmed": False,
+                    "returncode": result.returncode,
+                }
+
         return {
-            "success": True,
+            "success": False,
             "printer": printer_name,
-            "job_id": job_id,
-            "message": output or "打印任务已提交",
-            "queue_confirmed": queue_confirmed,
-            "returncode": result.returncode,
+            "job_id": last_job_id,
+            "message": f"lp 提交失败: {last_error}",
+            "queue_confirmed": False,
+            "returncode": last_returncode,
         }
     except Exception as e:
         logger.error(f"打印PDF出错: {str(e)}", exc_info=True)

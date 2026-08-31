@@ -28,6 +28,20 @@ TOLL_NEGATIVE_KEYWORDS = (
     '客运服务', '打车', '曹操出行', '约车',
     '火车票', '机票', '结账单', '住宿', '代订机票',
 )
+# 航旅纵横「个人登机凭证 / 电子登机凭证」按机票参与火车票双拼。
+BOARDING_PASS_KEYWORDS = (
+    '登机凭证', '电子登机凭证', '个人登机凭证', '航旅纵横', 'umetrip',
+)
+# 飞猪/航司「电子客票行程单」可替代发票，按机票打印，不能当成网约车行程单。
+FLIGHT_ITINERARY_STRONG_KEYWORDS = (
+    '航空运输电子客票行程单', '电子客票行程单', '机票款凭证', '飞猪', 'fliggy',
+)
+FLIGHT_ITINERARY_CONTEXT_KEYWORDS = (
+    '机票', '航班', '航空', '飞猪', 'fliggy', '电子客票', '机票款',
+)
+FLIGHT_ITINERARY_NEGATIVE_KEYWORDS = (
+    '高德', '滴滴', '打车', '网约车', '个行程', '客运服务', '曹操',
+)
 
 # ============================================================================
 # 以下函数已废弃，改用高德打车PDF解析器（parse_gaode_itinerary_enhanced）
@@ -323,6 +337,29 @@ def parse_toll_invoice_source(name):
     }
 
 
+def looks_like_boarding_pass(name='', text='', zip_filename=''):
+    """航旅纵横个人登机凭证：文件名或正文含登机凭证/航旅纵横即视为机票。"""
+    blob = ' '.join(part or '' for part in (name, text, zip_filename))
+    blob_lower = blob.lower()
+    return any(keyword in blob for keyword in BOARDING_PASS_KEYWORDS) or 'umetrip' in blob_lower
+
+
+def looks_like_flight_itinerary(name='', text='', zip_filename=''):
+    """
+    飞猪/航司电子客票行程单：可替代发票打印。
+    必须带航司/飞猪语境，避免把网约车「电子行程单」误判成机票。
+    """
+    blob = ' '.join(part or '' for part in (name, text, zip_filename))
+    blob_lower = blob.lower()
+    if any(keyword in blob for keyword in FLIGHT_ITINERARY_NEGATIVE_KEYWORDS):
+        return False
+    if any(keyword in blob for keyword in FLIGHT_ITINERARY_STRONG_KEYWORDS) or 'fliggy' in blob_lower:
+        return True
+    if '电子行程单' in blob or '客票行程单' in blob:
+        return any(keyword in blob for keyword in FLIGHT_ITINERARY_CONTEXT_KEYWORDS)
+    return False
+
+
 def looks_like_toll_invoice(name='', text='', zip_filename=''):
     """
     过路费发票判定：
@@ -385,6 +422,12 @@ def identify_pdf_type(pdf_path, zip_filename=None):
 
         # 通过文件名判断；过路费必须在通用“发票”之前，否则“通行费发票”会被吞掉。
         # 含“发票”的文件名必须先于“行程”，否则网约车“xx元-N个行程…电子发票”会被误判成行程单。
+        if looks_like_boarding_pass(name=original_filename, zip_filename=zip_filename or ''):
+            logger.info(f"通过文件名识别为登机凭证/机票: {pdf_path}")
+            return 'flight_ticket'
+        if looks_like_flight_itinerary(name=original_filename, zip_filename=zip_filename or ''):
+            logger.info(f"通过文件名识别为机票电子行程单: {pdf_path}")
+            return 'flight_ticket'
         if any(keyword in filename for keyword in flight_keywords):
             logger.info(f"通过文件名识别为机票: {pdf_path}")
             return 'flight_ticket'
@@ -405,9 +448,22 @@ def identify_pdf_type(pdf_path, zip_filename=None):
             if looks_like_toll_invoice(name=original_filename, text=page_text, zip_filename=zip_filename or ''):
                 logger.info(f"通过发票正文识别为过路费发票: {pdf_path}")
                 return 'toll_invoice'
+            if looks_like_flight_itinerary(name=original_filename, text=page_text, zip_filename=zip_filename or ''):
+                logger.info(f"通过发票正文识别为机票电子行程单: {pdf_path}")
+                return 'flight_ticket'
             logger.info(f"通过文件名识别为发票: {pdf_path}")
             return 'invoice'
         if '行程' in filename or 'itinerary' in filename or 'trip' in filename:
+            page_text = ''
+            try:
+                reader = PdfReader(pdf_path)
+                if reader.pages:
+                    page_text = reader.pages[0].extract_text() or ''
+            except Exception:
+                page_text = ''
+            if looks_like_flight_itinerary(name=original_filename, text=page_text, zip_filename=zip_filename or ''):
+                logger.info(f"通过行程单正文识别为机票电子行程单: {pdf_path}")
+                return 'flight_ticket'
             logger.info(f"通过文件名识别为行程单: {pdf_path}")
             return 'itinerary'
         if '结账单' in filename or '账单' in filename or 'bill' in filename:
@@ -422,6 +478,12 @@ def identify_pdf_type(pdf_path, zip_filename=None):
             text = page_text.lower()
             train_no_match = re.search(r'\b[gdcztk]\d{1,4}\b', text, flags=re.IGNORECASE)
             flight_no_match = re.search(r'\b[a-z]{2}\d{3,4}\b', text, flags=re.IGNORECASE)
+            if looks_like_boarding_pass(name=original_filename, text=page_text, zip_filename=zip_filename or ''):
+                logger.info(f"通过内容识别为登机凭证/机票: {pdf_path}")
+                return 'flight_ticket'
+            if looks_like_flight_itinerary(name=original_filename, text=page_text, zip_filename=zip_filename or ''):
+                logger.info(f"通过内容识别为机票电子行程单: {pdf_path}")
+                return 'flight_ticket'
             if any(keyword in text for keyword in flight_keywords) or flight_no_match:
                 logger.info(f"通过内容识别为机票: {pdf_path}")
                 return 'flight_ticket'
@@ -1085,6 +1147,8 @@ def identify_zip_type_from_filename(zip_filename):
 
     if parse_toll_invoice_source(zip_filename) or looks_like_toll_invoice(name=zip_filename):
         return 'toll'
+    if looks_like_boarding_pass(name=zip_filename) or looks_like_flight_itinerary(name=zip_filename):
+        return 'flight'
     
     filename_lower = zip_filename.lower()
     
@@ -2061,6 +2125,29 @@ def _extract_train_amount_from_text(text):
     return max(candidates) if candidates else 0.0
 
 
+def _normalize_spaced_decimals(text):
+    """飞猪行程单常把金额排成「790. 00」，先把小数点两边空格收掉。"""
+    return re.sub(r'(\d+)\s*[.．]\s*(\d{1,2})', r'\1.\2', text or '')
+
+
+def _extract_flight_amount_from_text(text):
+    """机票电子行程单金额：取 CNY 最大项（合计），避免票价/税费拆项。"""
+    if not text:
+        return 0.0
+    normalized = _normalize_spaced_decimals(text)
+    cny_values = []
+    for raw in re.findall(r"(?:CNY|RMB|¥|￥)\s*(\d+\.\d{2})", normalized, flags=re.IGNORECASE):
+        try:
+            value = float(raw)
+        except Exception:
+            continue
+        if 1 <= value <= 100000:
+            cny_values.append(value)
+    if cny_values:
+        return max(cny_values)
+    return _extract_train_amount_from_text(normalized)
+
+
 def _extract_train_meta_from_text(text, source_name):
     """提取火车票基础信息：车次、起终点（尽力而为）。"""
     if not text:
@@ -2105,16 +2192,27 @@ def _extract_flight_meta_from_text(text, source_name):
         return {"flight_no": "", "from_station": "", "to_station": "", "display_name": display_name}
 
     flight_no = ""
-    m_no = re.search(r"\b([A-Z]{2}\d{3,4})\b", text, flags=re.IGNORECASE)
+    m_no = re.search(r"航班号\s*([A-Z]{2}\s*\d{3,4})", text, flags=re.IGNORECASE)
+    if not m_no:
+        m_no = re.search(r"\b([A-Z]{2}\d{3,4})\b", text, flags=re.IGNORECASE)
     if m_no:
-        flight_no = m_no.group(1).upper()
+        flight_no = re.sub(r"\s+", "", m_no.group(1).upper())
 
     from_station = ""
     to_station = ""
-    route_match = re.search(r"([\u4e00-\u9fa5A-Za-z]{2,})\s*[-—→]\s*([\u4e00-\u9fa5A-Za-z]{2,})", text)
-    if route_match:
-        from_station = route_match.group(1).strip()
-        to_station = route_match.group(2).strip()
+    m_from = re.search(r"自[：:]\s*[A-Z]{3}\s*([\u4e00-\u9fa5]{2,})", text)
+    m_to = re.search(r"至[：:]\s*[A-Z]{3}\s*([\u4e00-\u9fa5]{2,})", text)
+    if m_from:
+        from_station = m_from.group(1).strip()
+    if m_to:
+        to_station = m_to.group(1).strip()
+    if not (from_station and to_station):
+        route_match = re.search(r"([\u4e00-\u9fa5A-Za-z]{2,})\s*[-—→]\s*([\u4e00-\u9fa5A-Za-z]{2,})", text)
+        if not route_match:
+            route_match = re.search(r"([\u4e00-\u9fa5A-Za-z]{2,})\s*[-—→]\s*([\u4e00-\u9fa5A-Za-z]{2,})", source_name or "")
+        if route_match:
+            from_station = from_station or route_match.group(1).strip()
+            to_station = to_station or route_match.group(2).strip()
 
     if flight_no:
         display_name = f"{display_name}-{flight_no}"
@@ -2129,7 +2227,7 @@ def _extract_flight_meta_from_text(text, source_name):
     }
 
 
-def _collect_train_ticket_pages(train_ticket_pdfs):
+def _collect_train_ticket_pages(train_ticket_pdfs, zip_filename=None):
     """
     收集火车票页面级数据（每页视作一张票），并提取每页金额。
     返回 list[dict(pdf_path, page_no, amount, source_name)]。
@@ -2149,44 +2247,50 @@ def _collect_train_ticket_pages(train_ticket_pdfs):
             pdf_path = ticket_pdf
             ticket_type = identify_pdf_type(pdf_path)
         is_flight = ticket_type == 'flight_ticket'
+
+        def _ticket_page(text, page_no):
+            amount = (
+                _extract_flight_amount_from_text(text)
+                if is_flight
+                else _extract_train_amount_from_text(text)
+            )
+            is_boarding = looks_like_boarding_pass(
+                name=Path(pdf_path).name,
+                text=text,
+                zip_filename=zip_filename or '',
+            )
+            meta = (
+                _extract_flight_meta_from_text(text, Path(pdf_path).name)
+                if is_flight
+                else _extract_train_meta_from_text(text, Path(pdf_path).name)
+            )
+            return {
+                "pdf_path": pdf_path,
+                "page_no": page_no,
+                "amount": amount,
+                "source_name": Path(pdf_path).name,
+                "ticket_type": "flight" if is_flight else "train",
+                "is_boarding_pass": bool(is_boarding),
+                "ticket_uid": uuid.uuid4().hex,
+                "train_no": meta.get("train_no", ""),
+                "flight_no": meta.get("flight_no", ""),
+                "from_station": meta["from_station"],
+                "to_station": meta["to_station"],
+                "display_name": meta["display_name"],
+            }
+
         try:
             if use_fitz:
                 doc = fitz.open(pdf_path)
                 for i in range(len(doc)):
                     text = doc.load_page(i).get_text() or ""
-                    amount = _extract_train_amount_from_text(text)
-                    meta = _extract_flight_meta_from_text(text, Path(pdf_path).name) if is_flight else _extract_train_meta_from_text(text, Path(pdf_path).name)
-                    pages.append({
-                        "pdf_path": pdf_path,
-                        "page_no": i + 1,
-                        "amount": amount,
-                        "source_name": Path(pdf_path).name,
-                        "ticket_type": "flight" if is_flight else "train",
-                        "train_no": meta.get("train_no", ""),
-                        "flight_no": meta.get("flight_no", ""),
-                        "from_station": meta["from_station"],
-                        "to_station": meta["to_station"],
-                        "display_name": meta["display_name"],
-                    })
+                    pages.append(_ticket_page(text, i + 1))
                 doc.close()
             else:
                 reader = PdfReader(pdf_path)
                 for i, page in enumerate(reader.pages):
                     text = page.extract_text() or ""
-                    amount = _extract_train_amount_from_text(text)
-                    meta = _extract_flight_meta_from_text(text, Path(pdf_path).name) if is_flight else _extract_train_meta_from_text(text, Path(pdf_path).name)
-                    pages.append({
-                        "pdf_path": pdf_path,
-                        "page_no": i + 1,
-                        "amount": amount,
-                        "source_name": Path(pdf_path).name,
-                        "ticket_type": "flight" if is_flight else "train",
-                        "train_no": meta.get("train_no", ""),
-                        "flight_no": meta.get("flight_no", ""),
-                        "from_station": meta["from_station"],
-                        "to_station": meta["to_station"],
-                        "display_name": meta["display_name"],
-                    })
+                    pages.append(_ticket_page(text, i + 1))
         except Exception as e:
             logger.warning(f"火车票页面解析失败: {pdf_path}, err={e}")
 
@@ -2526,7 +2630,7 @@ def process_pdf_files(extract_dir, zip_filename=None):
             logger.info(f"✅ 过路费发票处理成功: order_id={order_id}, amount={amount:.2f}, out={output_filename}")
     
     # 处理交通票据（火车票/机票）：严格独立于网约车/酒店逻辑，底层复用同一套排版/拖拽/整合逻辑
-    train_ticket_items = _collect_train_ticket_pages(transport_ticket_pdfs)
+    train_ticket_items = _collect_train_ticket_pages(transport_ticket_pdfs, zip_filename=zip_filename)
     train_ticket_count = len(train_ticket_items)
     flight_ticket_count = len([item for item in train_ticket_items if item.get("ticket_type") == "flight"])
     rail_ticket_count = train_ticket_count - flight_ticket_count
@@ -2548,6 +2652,7 @@ def process_pdf_files(extract_dir, zip_filename=None):
 
             group_size = len(ticket_group)
             group_amount = round(sum(item.get("amount", 0.0) for item in ticket_group), 2)
+            group_boarding_count = len([item for item in ticket_group if item.get("is_boarding_pass")])
             group_train_count = len([item for item in ticket_group if item.get("ticket_type") != "flight"])
             group_flight_count = len([item for item in ticket_group if item.get("ticket_type") == "flight"])
             group_train_amount = round(sum(float(item.get("amount", 0.0) or 0.0) for item in ticket_group if item.get("ticket_type") != "flight"), 2)
@@ -2592,6 +2697,7 @@ def process_pdf_files(extract_dir, zip_filename=None):
                 'has_hotel_bill': False,
                 'has_train_ticket': group_train_count > 0,
                 'has_flight_ticket': group_flight_count > 0,
+                'has_boarding_pass': group_boarding_count > 0,
                 'has_transport_ticket': True,
                 'train_ticket_count': group_size,
                 'rail_ticket_count': group_train_count,
@@ -2856,6 +2962,10 @@ def create_train_merged_entry(processed_files, merged_name_prefix="火车票整�
         火车票条目判重键（不要包含临时路径）。
         以票面语义信息为主，避免同一张票在不同上传会话被重复计入。
         """
+        uid = str(item.get('ticket_uid') or '').strip()
+        if uid:
+            return ("uid", uid)
+        pdf_path = str(item.get('pdf_path') or '').strip()
         source_name = str(item.get('source_name', '') or '').strip().lower()
         page_no = int(item.get('page_no', 1) or 1)
         ticket_type = str(item.get('ticket_type', 'train') or 'train').strip().lower()
@@ -2865,7 +2975,9 @@ def create_train_merged_entry(processed_files, merged_name_prefix="火车票整�
         to_station = str(item.get('to_station', '') or '').strip().lower()
         amount = f"{float(item.get('amount', 0) or 0):.2f}"
 
-        # 优先用来源名+页码，通常已足够稳定（你的样例就是订单号.pdf）
+        # 航旅纵横默认都叫「个人登机凭证.pdf」，必须带上真实路径才能两张都留下。
+        if pdf_path:
+            return ("path", ticket_type, pdf_path, page_no)
         if source_name:
             return ("src", ticket_type, source_name, page_no)
 
@@ -2975,6 +3087,7 @@ def create_train_merged_entry(processed_files, merged_name_prefix="火车票整�
         total_amount = round(sum(float(i.get('amount', 0) or 0) for i in merged_items), 2)
         rail_items = [i for i in merged_items if i.get("ticket_type") != "flight"]
         flight_items = [i for i in merged_items if i.get("ticket_type") == "flight"]
+        boarding_items = [i for i in merged_items if i.get("is_boarding_pass")]
         rail_amount = round(sum(float(i.get('amount', 0) or 0) for i in rail_items), 2)
         flight_amount = round(sum(float(i.get('amount', 0) or 0) for i in flight_items), 2)
         route_parts = []
@@ -3002,6 +3115,7 @@ def create_train_merged_entry(processed_files, merged_name_prefix="火车票整�
             'has_hotel_bill': False,
             'has_train_ticket': len(rail_items) > 0,
             'has_flight_ticket': len(flight_items) > 0,
+            'has_boarding_pass': len(boarding_items) > 0,
             'has_transport_ticket': True,
             'is_train_merged_entry': True,
             'train_ticket_count': len(merged_items),

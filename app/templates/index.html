@@ -1290,6 +1290,7 @@
             function buildOrderStatus(result) {
                 if (isTrainResult(result)) {
                     if (result.has_train_ticket && result.has_flight_ticket) return '<span class="text-success">✓ 火车票/机票</span>';
+                    if (result.has_boarding_pass && !result.has_train_ticket) return '<span class="text-success">✓ 登机凭证</span>';
                     if (result.has_flight_ticket) return '<span class="text-success">✓ 机票</span>';
                     return '<span class="text-success">✓ 火车票</span>';
                 }
@@ -1314,7 +1315,9 @@
                     const flightCount = result.flight_ticket_count || 0;
                     const countParts = [];
                     if (railCount > 0) countParts.push(`火车票: ${railCount} 张`);
-                    if (flightCount > 0) countParts.push(`机票: ${flightCount} 张`);
+                    if (flightCount > 0) {
+                        countParts.push(result.has_boarding_pass ? `登机凭证/机票: ${flightCount} 张` : `机票: ${flightCount} 张`);
+                    }
                     if (countParts.length === 0) countParts.push(`票据: ${ticketCount} 张`);
                     const routeText = (result.train_routes && result.train_routes.length > 0)
                         ? result.train_routes.join('；')
@@ -1701,8 +1704,8 @@
                 clearSmartPrintLog();
                 const previewEntries = [
                     { message: `准备打印 ${files.length} 个智能合成 PDF`, level: 'info' },
-                    { message: '将直接提交合成后的 PDF 到打印机队列（不经过原始打印转换）', level: 'info' },
-                    { message: '若 lpstat 连接异常，任务可能显示成功但实际未出纸', level: 'warning' },
+                    { message: '将按顺序逐个提交到打印机，避免并发抢队列漏打', level: 'info' },
+                    { message: '若某次提交失败会自动重试；若 lpstat 连接异常，仍请核对是否出纸', level: 'warning' },
                 ];
                 files.forEach((file, index) => {
                     const label = file.order_id || file.output_file || `文件${index + 1}`;
@@ -3085,13 +3088,7 @@
                     }
                     
                     if (response.reused_files > 0 && response.new_results_count >= 0) {
-                        summaryText += `<br><small>其中 ${response.reused_files} 个文件已上传过，重用了之前的处理结果</small>`;
-                        
-                        if (response.new_results_count > 0) {
-                            summaryText += `<br><small>本次新处理 <strong>${response.new_results_count}</strong> 个订单，这些订单已计入统计</small>`;
-                        } else {
-                            summaryText += `<br><small class="text-warning">所有订单均为重复上传，统计数据未增加</small>`;
-                        }
+                        summaryText += `<br><small>其中 ${response.reused_files} 个文件已上传过，已复用之前生成的打印文件，金额仍计入本次合计</small>`;
                     }
                     
                     summaryDiv.innerHTML = summaryText;
@@ -3457,72 +3454,59 @@
 
                         beginSmartPrintAll(printableSmartFiles);
 
-                        printableSmartFiles.forEach(function(file, fileIndex) {
-                            const fileNo = fileIndex + 1;
+                        (async function printSmartFilesSequentially() {
                             const total = printableSmartFiles.length;
-                            console.log('🔄 开始打印文件:', file.output_file);
-                            fetch(`/api/print/${file.output_file}`, {
-                                method: 'POST'
-                            })
-                            .then(response => response.json())
-                            .then(data => {
-                                printedCount++;
-                                console.log(`📄 文件 ${file.output_file} 打印结果:`, data);
-                                if (data.success) {
-                                    successCount++;
-                                } else {
-                                    failCount++;
-                                }
-
-                                const stillWaiting = printedCount < total;
-                                appendSmartPrintFileResult(file, data, fileNo, total, stillWaiting);
-                                
-                                if (printedCount === total) {
-                                    // 恢复按钮状态
-                                    printAllBtnEl.innerHTML = originalText;
-                                    printAllBtnEl.disabled = false;
-                                    
-                                    // 显示打印结果通知
-                                    let message = `智能打印完成: ${successCount}个成功`;
-                                    if (failCount > 0) {
-                                        message += `, ${failCount}个失败（请查看下方进度日志）`;
-                                        showNotification(message, 'warning');
-                                    } else if (successCount > 0) {
-                                        showNotification(message + '，请到打印机确认出纸', 'success');
+                            for (let fileIndex = 0; fileIndex < total; fileIndex++) {
+                                const file = printableSmartFiles[fileIndex];
+                                const fileNo = fileIndex + 1;
+                                console.log('🔄 开始打印文件:', file.output_file);
+                                try {
+                                    const response = await fetch(`/api/print/${file.output_file}`, {
+                                        method: 'POST'
+                                    });
+                                    const data = await response.json();
+                                    printedCount++;
+                                    console.log(`📄 文件 ${file.output_file} 打印结果:`, data);
+                                    if (data.success) {
+                                        successCount++;
                                     } else {
-                                        showNotification(message, 'error');
+                                        failCount++;
                                     }
-                                    console.log('✅ 所有文件打印完成');
+                                    appendSmartPrintFileResult(file, data, fileNo, total, fileNo < total);
+                                } catch (error) {
+                                    printedCount++;
+                                    failCount++;
+                                    console.error('❌ 打印文件出错:', file.output_file, error);
+                                    appendSmartPrintFileResult(
+                                        file,
+                                        {
+                                            success: false,
+                                            message: String(error),
+                                            processing_log: [
+                                                { message: `请求失败：${error}`, level: 'error' },
+                                            ],
+                                        },
+                                        fileNo,
+                                        total,
+                                        fileNo < total
+                                    );
                                 }
-                            })
-                            .catch(error => {
-                                printedCount++;
-                                failCount++;
-                                console.error('❌ 打印文件出错:', file.output_file, error);
-                                appendSmartPrintFileResult(
-                                    file,
-                                    {
-                                        success: false,
-                                        message: String(error),
-                                        processing_log: [
-                                            { message: `请求失败：${error}`, level: 'error' },
-                                        ],
-                                    },
-                                    fileNo,
-                                    total,
-                                    printedCount < total
-                                );
-                                
-                                if (printedCount === total) {
-                                    // 恢复按钮状态
-                                    printAllBtnEl.innerHTML = originalText;
-                                    printAllBtnEl.disabled = false;
-                                    
-                                    let message = `智能打印完成: ${successCount}个成功, ${failCount}个失败`;
-                                    showNotification(message, 'warning');
-                                }
-                            });
-                        });
+                            }
+
+                            printAllBtnEl.innerHTML = originalText;
+                            printAllBtnEl.disabled = false;
+
+                            let message = `智能打印完成: ${successCount}个成功`;
+                            if (failCount > 0) {
+                                message += `, ${failCount}个失败（请查看下方进度日志）`;
+                                showNotification(message, 'warning');
+                            } else if (successCount > 0) {
+                                showNotification(message + '，请到打印机确认出纸', 'success');
+                            } else {
+                                showNotification(message, 'error');
+                            }
+                            console.log('✅ 所有文件打印完成');
+                        })();
                     }
                 }
             });
