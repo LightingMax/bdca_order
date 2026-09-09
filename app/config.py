@@ -23,7 +23,7 @@ class Config:
     GLOBAL_STATS_FILE = os.environ.get('GLOBAL_STATS_FILE') or os.path.join(DATA_FOLDER, 'global_stats.json')
     
     # 允许上传的文件类型（智能处理）
-    ALLOWED_EXTENSIONS = {'zip', 'pdf'}
+    ALLOWED_EXTENSIONS = {'zip', 'pdf', 'ofd'}
     
     # 最大上传文件大小 (50MB)
     MAX_CONTENT_LENGTH = 50 * 1024 * 1024
@@ -38,6 +38,6 @@ class Config:
     
     # 通义千问API配置
     QWEN_API_BASE_URL = os.environ.get('QWEN_API_BASE_URL') or 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-    QWEN_API_KEY = os.environ.get('QWEN_API_KEY') or 'sk-4b678a7de6d34b878356518397592170'
+    QWEN_API_KEY = os.environ.get('QWEN_API_KEY') or ''
     QWEN_MODEL = os.environ.get('QWEN_MODEL') or 'qwen2.5-32b-instruct'
-    QWEN_API_TIMEOUT = int(os.environ.get('QWEN_API_TIMEOUT', 180)) 
+    QWEN_API_TIMEOUT = int(os.environ.get('QWEN_API_TIMEOUT', 180))

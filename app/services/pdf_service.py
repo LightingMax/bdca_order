@@ -1151,6 +1151,10 @@ def identify_zip_type_from_filename(zip_filename):
         return 'flight'
     
     filename_lower = zip_filename.lower()
+
+    # 当前 OFD 接入只接受航空运输电子客票 XBRL，因此可直接进入机票流程。
+    if filename_lower.endswith('.ofd'):
+        return 'flight'
     
     # 检查住宿相关关键词
     hotel_keywords = [
@@ -2227,13 +2231,14 @@ def _extract_flight_meta_from_text(text, source_name):
     }
 
 
-def _collect_train_ticket_pages(train_ticket_pdfs, zip_filename=None):
+def _collect_train_ticket_pages(train_ticket_pdfs, zip_filename=None, ticket_metadata_by_path=None):
     """
     收集火车票页面级数据（每页视作一张票），并提取每页金额。
     返回 list[dict(pdf_path, page_no, amount, source_name)]。
     """
     logger = current_app.logger
     pages = []
+    ticket_metadata_by_path = ticket_metadata_by_path or {}
     try:
         import fitz
         use_fitz = True
@@ -2247,9 +2252,15 @@ def _collect_train_ticket_pages(train_ticket_pdfs, zip_filename=None):
             pdf_path = ticket_pdf
             ticket_type = identify_pdf_type(pdf_path)
         is_flight = ticket_type == 'flight_ticket'
+        metadata = (
+            ticket_metadata_by_path.get(str(Path(pdf_path).resolve()))
+            or ticket_metadata_by_path.get(str(pdf_path))
+            or {}
+        )
 
         def _ticket_page(text, page_no):
-            amount = (
+            structured_amount = float(metadata.get("amount", 0.0) or 0.0)
+            amount = structured_amount or (
                 _extract_flight_amount_from_text(text)
                 if is_flight
                 else _extract_train_amount_from_text(text)
@@ -2264,11 +2275,17 @@ def _collect_train_ticket_pages(train_ticket_pdfs, zip_filename=None):
                 if is_flight
                 else _extract_train_meta_from_text(text, Path(pdf_path).name)
             )
+            for key in ("flight_no", "from_station", "to_station", "display_name"):
+                if metadata.get(key):
+                    meta[key] = metadata[key]
+            source_name = metadata.get("source_name") or Path(pdf_path).name
+            if metadata.get("route"):
+                meta["display_name"] = f'{Path(source_name).stem} ({metadata["route"]})'
             return {
                 "pdf_path": pdf_path,
                 "page_no": page_no,
                 "amount": amount,
-                "source_name": Path(pdf_path).name,
+                "source_name": source_name,
                 "ticket_type": "flight" if is_flight else "train",
                 "is_boarding_pass": bool(is_boarding),
                 "ticket_uid": uuid.uuid4().hex,
@@ -2277,6 +2294,11 @@ def _collect_train_ticket_pages(train_ticket_pdfs, zip_filename=None):
                 "from_station": meta["from_station"],
                 "to_station": meta["to_station"],
                 "display_name": meta["display_name"],
+                "invoice_number": metadata.get("invoice_number", ""),
+                "ticket_number": metadata.get("ticket_number", ""),
+                "travel_date": metadata.get("travel_date", ""),
+                "departure_time": metadata.get("departure_time", ""),
+                "source_format": metadata.get("source_format", "pdf"),
             }
 
         try:
@@ -2412,7 +2434,7 @@ def create_train_ticket_layout_pdf(train_ticket_items, output_path):
     return True
 
 
-def process_pdf_files(extract_dir, zip_filename=None):
+def process_pdf_files(extract_dir, zip_filename=None, transport_metadata_by_pdf=None):
     """处理解压后的PDF和XML文件"""
     logger = current_app.logger
     logger.info(f"开始处理解压后的文件: {extract_dir}")
@@ -2630,7 +2652,11 @@ def process_pdf_files(extract_dir, zip_filename=None):
             logger.info(f"✅ 过路费发票处理成功: order_id={order_id}, amount={amount:.2f}, out={output_filename}")
     
     # 处理交通票据（火车票/机票）：严格独立于网约车/酒店逻辑，底层复用同一套排版/拖拽/整合逻辑
-    train_ticket_items = _collect_train_ticket_pages(transport_ticket_pdfs, zip_filename=zip_filename)
+    train_ticket_items = _collect_train_ticket_pages(
+        transport_ticket_pdfs,
+        zip_filename=zip_filename,
+        ticket_metadata_by_path=transport_metadata_by_pdf,
+    )
     train_ticket_count = len(train_ticket_items)
     flight_ticket_count = len([item for item in train_ticket_items if item.get("ticket_type") == "flight"])
     rail_ticket_count = train_ticket_count - flight_ticket_count
@@ -2667,7 +2693,10 @@ def process_pdf_files(extract_dir, zip_filename=None):
             # 订单名优先使用 zip/pdf 名；单票可直接显示来源，分组显示组名
             if group_size == 1:
                 source = ticket_group[0]
-                order_id = Path(source.get("source_name", f"train_{group_index}")).stem
+                order_id = (
+                    source.get("invoice_number")
+                    or Path(source.get("source_name", f"train_{group_index}")).stem
+                )
             else:
                 order_id = f"train_group_{group_index}"
 
@@ -4198,4 +4227,4 @@ def generate_trip_records(processed_files):
         
     except Exception as e:
         logger.error(f"生成行程记录失败: {e}")
-        return f"生成行程记录时出错: {str(e)}" 
+        return f"生成行程记录时出错: {str(e)}"

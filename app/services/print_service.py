@@ -1,10 +1,12 @@
 import os
+import fcntl
 import re
 import shutil
 import subprocess
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from flask import current_app
 from app.config import Config
 
@@ -16,6 +18,39 @@ _LP_RETRY_DELAY_SEC = 0.8
 _LP_TIMEOUT_SEC = 30
 _LP_POST_SUBMIT_PAUSE_SEC = 0.25
 
+
+
+@contextmanager
+def _cross_process_print_lock():
+    """Serialize lp submissions across local debug and Docker production processes."""
+    data_folder = current_app.config.get("DATA_FOLDER") or Config.DATA_FOLDER
+    lock_path = os.environ.get("PRINT_LOCK_FILE") or os.path.join(data_folder, ".print-submit.lock")
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+
+    old_umask = os.umask(0)
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o666)
+    finally:
+        os.umask(old_umask)
+
+    lock_file = os.fdopen(fd, "a+")
+    timeout = float(os.environ.get("PRINT_LOCK_TIMEOUT", "120"))
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"等待共享打印锁超时（{timeout:g} 秒）")
+                time.sleep(0.1)
+        yield lock_path
+    finally:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        finally:
+            lock_file.close()
 
 def _lp_retry_delay(attempt):
     return _LP_RETRY_DELAY_SEC * attempt
@@ -424,10 +459,12 @@ def print_pdf(pdf_path, printer_name=None, copies=1, media_source=None, processi
         _log_step(processing_log, f"正在提交打印任务到打印机「{printer_name}」...")
 
         copies_value = str(max(1, int(copies)))
-        tray = (media_source or os.environ.get("DEFAULT_MEDIA_SOURCE") or "auto").strip()
+        tray = (media_source or os.environ.get("DEFAULT_MEDIA_SOURCE") or "").strip()
 
         cmd = ["lp", "-d", printer_name, "-n", copies_value]
-        if tray:
+        # "auto" means the printer/PPD default. Do not force a generic
+        # media-source value on legacy PPD queues that expose InputSlot instead.
+        if tray and tray.lower() not in {"auto", "automatic", "printer-default"}:
             cmd.extend(["-o", f"media-source={tray}"])
         cmd.append(pdf_path)
 
@@ -435,7 +472,7 @@ def print_pdf(pdf_path, printer_name=None, copies=1, media_source=None, processi
         last_returncode = None
         last_job_id = ""
 
-        with _LP_SUBMIT_LOCK:
+        with _LP_SUBMIT_LOCK, _cross_process_print_lock():
             for attempt in range(1, _LP_MAX_ATTEMPTS + 1):
                 logger.info(f"执行打印命令: {' '.join(cmd)} (第 {attempt}/{_LP_MAX_ATTEMPTS} 次)")
                 try:

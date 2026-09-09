@@ -250,6 +250,9 @@ def get_file_type(filename):
     # PDF文件
     elif ext == '.pdf':
         return 'pdf'
+    # OFD电子票据
+    elif ext == '.ofd':
+        return 'ofd'
     # 文档文件
     elif ext in ['.doc', '.docx', '.txt', '.rtf']:
         return 'document'
@@ -553,4 +556,4 @@ def update_file_print_status(file_hash, print_status, print_time=None):
         return True
     except Exception as e:
         logger.error(f"保存哈希记录文件出错: {str(e)}")
-        return False 
+        return False

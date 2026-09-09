@@ -11,9 +11,12 @@ import pdfplumber
 
 def call_qwen_api(table_data):
     """调用通义千问API规整表格数据"""
+    api_key = os.environ.get("QWEN_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("缺少 QWEN_API_KEY 环境变量")
     url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
     headers = {
-        "Authorization": "Bearer sk-4b678a7de6d34b878356518397592170",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
     

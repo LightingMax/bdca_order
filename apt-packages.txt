@@ -6,3 +6,4 @@ poppler-utils
 pdftk
 libreoffice-writer
 fonts-noto-cjk
+fonts-wqy-microhei

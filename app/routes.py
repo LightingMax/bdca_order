@@ -17,6 +17,7 @@ from app.services.pdf_service import (
     parse_toll_invoice_source,
     process_pdf_files,
 )
+from app.services.ofd_service import prepare_ofd_for_processing
 from app.services.print_service import (
     describe_raw_print_pipeline,
     print_pdf,
@@ -137,6 +138,28 @@ def _count_pdf_pages_in_directory(directory):
     return total_pages
 
 
+def _prepare_smart_upload(upload_path, stored_filename, original_filename, extract_dir):
+    """将智能上传文件准备成可供 PDF 处理链路读取的目录。"""
+    lower_name = (stored_filename or "").lower()
+    if lower_name.endswith('.zip'):
+        extract_zip(upload_path, extract_dir)
+        return {}
+    if lower_name.endswith('.pdf'):
+        import shutil
+
+        target = os.path.join(extract_dir, stored_filename)
+        shutil.copy2(upload_path, target)
+        return {}
+    if lower_name.endswith('.ofd'):
+        pdf_path, metadata = prepare_ofd_for_processing(
+            upload_path,
+            extract_dir,
+            original_filename=original_filename,
+        )
+        return {str(os.path.abspath(pdf_path)): metadata}
+    raise ValueError(f"不支持的文件类型: {stored_filename}")
+
+
 def _looks_like_flight_upload(filename):
     """判断上传文件是否疑似机票，避免旧缓存把机票当普通发票复用。"""
     name = (filename or '').lower()
@@ -154,7 +177,8 @@ def _should_reprocess_upload(filename):
     didi_keywords = ['滴滴', 'didi']
     qq_invoice_keywords = ['qq邮箱发票', 'qq_', '总金额']
     return (
-        _looks_like_flight_upload(filename)
+        name.endswith('.ofd')
+        or _looks_like_flight_upload(filename)
         or parse_toll_invoice_source(filename) is not None
         or looks_like_toll_invoice(name=filename)
         or any(keyword in name for keyword in hotel_keywords)
@@ -384,9 +408,9 @@ def statistics():
 
 @main_bp.route('/api/upload', methods=['POST'])
 def upload_file():
-    """处理ZIP文件上传（智能处理功能）"""
+    """处理 ZIP/PDF/OFD 文件上传（智能处理功能）。"""
     logger = current_app.logger
-    logger.info("收到ZIP文件上传请求（智能处理）")
+    logger.info("收到文件上传请求（智能处理）")
     
     # 检查是否有文件
     if 'files' not in request.files:
@@ -421,7 +445,7 @@ def upload_file():
     uploaded_pdf_page_total = 0
     
     try:
-        logger.info(f"开始处理 {len(files)} 个上传的ZIP文件")
+        logger.info(f"开始处理 {len(files)} 个上传文件")
         
         for file in files:
             # 检查文件类型
@@ -461,18 +485,20 @@ def upload_file():
                     
                     # 重新解压并分析文件
                     try:
-                        if filename.lower().endswith('.zip'):
-                            extract_zip(zip_path, file_extract_dir)
-                        elif filename.lower().endswith('.pdf'):
-                            import shutil
-                            shutil.copy2(zip_path, os.path.join(file_extract_dir, filename))
-                        else:
-                            logger.warning(f"不支持的文件类型，跳过重新分析: {filename}")
-                            raise ValueError(f"不支持的文件类型: {filename}")
+                        transport_metadata = _prepare_smart_upload(
+                            zip_path,
+                            filename,
+                            original_filename,
+                            file_extract_dir,
+                        )
                         
                         # 重新分析PDF文件，获取最新的XML缺失警告和分类统计（使用原始文件名）
                         original_filename = existing_file.get('original_filename', filename)
-                        _, current_xml_warnings, current_classification_info = process_pdf_files(file_extract_dir, original_filename)
+                        _, current_xml_warnings, current_classification_info = process_pdf_files(
+                            file_extract_dir,
+                            original_filename,
+                            transport_metadata_by_pdf=transport_metadata,
+                        )
                         
                         reused_files.append({
                             'filename': filename,
@@ -533,18 +559,19 @@ def upload_file():
             
             # 处理文件：ZIP 解压 / PDF 直存
             try:
-                if filename.lower().endswith('.zip'):
-                    extract_zip(zip_path, file_extract_dir)
-                elif filename.lower().endswith('.pdf'):
-                    # 兼容火车票“直接上传 PDF（非 zip）”
-                    import shutil
-                    shutil.copy2(zip_path, os.path.join(file_extract_dir, filename))
-                else:
-                    logger.warning(f"不支持的文件类型，跳过: {filename}")
-                    continue
+                transport_metadata = _prepare_smart_upload(
+                    zip_path,
+                    filename,
+                    original_filename,
+                    file_extract_dir,
+                )
                 
                 # 处理PDF文件（使用原始文件名进行类型识别）
-                results, xml_missing_warnings, classification_info = process_pdf_files(file_extract_dir, original_filename)
+                results, xml_missing_warnings, classification_info = process_pdf_files(
+                    file_extract_dir,
+                    original_filename,
+                    transport_metadata_by_pdf=transport_metadata,
+                )
                 file_pdf_page_count = _count_pdf_pages_in_directory(file_extract_dir)
                 uploaded_pdf_page_total += file_pdf_page_count
                 
@@ -1505,46 +1532,80 @@ def print_merged_collection():
         if not processed_files:
             return jsonify({'success': False, 'message': '没有可打印的文件'}), 400
 
-        selected_files = [f for f in processed_files if not f.get('is_train_merged_entry')]
+        selected_files = [
+            item for item in processed_files
+            if isinstance(item, dict) and item.get('output_file')
+        ]
+
+        def _is_transport_result(item):
+            combined_type = str(item.get('combined_type', ''))
+            return bool(
+                item.get('has_train_ticket')
+                or item.get('has_flight_ticket')
+                or item.get('has_transport_ticket')
+                or combined_type.startswith(('train_', 'flight_', 'ticket_'))
+            )
+
+        from app.services.pdf_service import create_train_merged_entry, create_download_collection
         if only_train:
             selected_files = [
-                f for f in selected_files
-                if (
-                    f.get('has_train_ticket')
-                    or f.get('has_flight_ticket')
-                    or f.get('has_transport_ticket')
-                    or str(f.get('combined_type', '')).startswith(('train_', 'flight_', 'ticket_'))
-                )
+                item for item in selected_files
+                if not item.get('is_train_merged_entry') and _is_transport_result(item)
             ]
             logger.info(f"整合打印(transport-only)筛选结果: {len(selected_files)}/{len(processed_files)}")
-
-        if not selected_files:
-            return jsonify({'success': False, 'message': '未找到可整合的火车票/机票文件'}), 400
-
-        # 优先复用“按火车票布局规则重排”的整合条目，确保跨ZIP不是简单拼接
-        from app.services.pdf_service import create_train_merged_entry, create_download_collection
-        train_merge = create_train_merged_entry(selected_files)
-        if train_merge.get('success'):
-            merged_path = train_merge.get('file_path')
-            merged_filename = train_merge.get('result', {}).get('output_file', '')
         else:
-            # 非火车场景回退到普通合集
+            transport_sources = [
+                item for item in selected_files
+                if not item.get('is_train_merged_entry') and _is_transport_result(item)
+            ]
+            transport_merged = [
+                item for item in selected_files if item.get('is_train_merged_entry')
+            ]
+            non_transport = [
+                item for item in selected_files
+                if not item.get('is_train_merged_entry') and not _is_transport_result(item)
+            ]
+
+            if len(transport_sources) > 1:
+                transport_merge_result = create_train_merged_entry(transport_sources)
+                if not transport_merge_result.get('success'):
+                    return jsonify({
+                        'success': False,
+                        'message': transport_merge_result.get('message', '交通票据整合失败')
+                    }), 500
+                selected_files = non_transport + [transport_merge_result.get('result', {})]
+                logger.info(
+                    f"整合打印已将 {len(transport_sources)} 个交通票据结果替换为 1 个整合条目"
+                )
+            elif transport_merged:
+                selected_files = non_transport + [transport_merged[-1]]
+                logger.info("整合打印使用现有交通票据整合条目，并排除单张交通票据")
+            else:
+                selected_files = non_transport + transport_sources
+
+        if not selected_files or any(not item.get('output_file') for item in selected_files):
+            return jsonify({'success': False, 'message': '没有包含可打印输出文件的条目'}), 400
+
+        if only_train:
+            merge_result = create_train_merged_entry(selected_files)
+            merged_path = merge_result.get('file_path')
+            merged_filename = merge_result.get('result', {}).get('output_file', '')
+        else:
             merge_result = create_download_collection(selected_files, collection_name)
-            if not merge_result.get('success'):
-                return jsonify({
-                    'success': False,
-                    'message': merge_result.get('message', '整合文件创建失败')
-                }), 500
-            merged_path = merge_result['file_path']
+            merged_path = merge_result.get('file_path')
             merged_filename = merge_result.get('filename', '')
 
-        if not merged_path:
+        if not merge_result.get('success') or not merged_path:
             return jsonify({
                 'success': False,
-                'message': train_merge.get('message', '整合文件创建失败')
+                'message': merge_result.get('message', '整合文件创建失败')
             }), 500
 
-        print_result = print_pdf(merged_path)
+        processing_log = [{
+            'message': f'已将 {len(selected_files)} 个文件合并为 1 个打印任务',
+            'level': 'info',
+        }]
+        print_result = print_pdf(merged_path, processing_log=processing_log)
         ok = bool(print_result.get('success'))
 
         logger.info(
@@ -1559,6 +1620,9 @@ def print_merged_collection():
             'merged_file': merged_filename,
             'file_count': len(selected_files),
             'train_only': only_train,
+            'queue_confirmed': print_result.get('queue_confirmed', ok),
+            'returncode': print_result.get('returncode'),
+            'processing_log': processing_log,
         }), (200 if ok else 500)
 
     except Exception as e:
@@ -1697,4 +1761,4 @@ def view_trips():
         
     except Exception as e:
         logger.error(f"生成行程记录时出错: {str(e)}", exc_info=True)
-        return jsonify({'success': False, 'message': f'生成行程记录时出错: {str(e)}'}), 500 
+        return jsonify({'success': False, 'message': f'生成行程记录时出错: {str(e)}'}), 500

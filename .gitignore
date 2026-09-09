@@ -120,6 +120,7 @@ app/static/output/*
 data/user_data.json
 data/file_hashes.json
 global_stats.json
+data/global_stats.json.*
 
 # =========================
 # Docker / 构建产物
@@ -143,3 +144,4 @@ driver/ULDLINUX_HewlettPackard_V1.00.39.15_00.23/
 *.p12
 .secrets
 secrets.json
+data/.print-submit.lock

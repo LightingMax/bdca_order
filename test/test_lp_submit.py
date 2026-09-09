@@ -50,10 +50,11 @@ class PrintPdfRetryTests(unittest.TestCase):
 
         self.tmp = tempfile.TemporaryDirectory()
         tmp_dir = Path(self.tmp.name)
+        self.tmp_dir = tmp_dir
         self.pdf_path = tmp_dir / "order_1_test.pdf"
         self.pdf_path.write_bytes(b"%PDF-1.4\n")
         self.app = create_app()
-        self.app.config.update(TESTING=True)
+        self.app.config.update(TESTING=True, DATA_FOLDER=str(tmp_dir / "data"))
         self.ctx = self.app.app_context()
         self.ctx.push()
 
@@ -61,8 +62,12 @@ class PrintPdfRetryTests(unittest.TestCase):
         self.ctx.pop()
         self.tmp.cleanup()
 
-    def _print(self):
-        return print_pdf(str(self.pdf_path), printer_name="HP_M437_ULD")
+    def _print(self, media_source=None):
+        return print_pdf(
+            str(self.pdf_path),
+            printer_name="HP_M437_ULD",
+            media_source=media_source,
+        )
 
     @patch("app.services.print_service.time.sleep")
     @patch("app.services.print_service.shutil.which", return_value="/usr/bin/lp")
@@ -110,6 +115,24 @@ class PrintPdfRetryTests(unittest.TestCase):
         result = self._print()
         self.assertTrue(result["success"])
         self.assertEqual(mock_run.call_count, 2)
+
+    @patch("app.services.print_service.time.sleep")
+    @patch("app.services.print_service.shutil.which", return_value="/usr/bin/lp")
+    @patch("app.services.print_service.subprocess.run")
+    def test_auto_uses_printer_default_without_media_source(self, mock_run, _which, mock_sleep):
+        mock_run.return_value = _completed(0, stdout="request id is HP_M437_ULD-1 (1 file(s))")
+        self._print(media_source="auto")
+        cmd = mock_run.call_args.args[0]
+        self.assertFalse(any(str(arg).startswith("media-source=") for arg in cmd))
+
+    @patch("app.services.print_service.time.sleep")
+    @patch("app.services.print_service.shutil.which", return_value="/usr/bin/lp")
+    @patch("app.services.print_service.subprocess.run")
+    def test_explicit_media_source_is_forwarded(self, mock_run, _which, mock_sleep):
+        mock_run.return_value = _completed(0, stdout="request id is HP_M437_ULD-1 (1 file(s))")
+        self._print(media_source="Upper")
+        cmd = mock_run.call_args.args[0]
+        self.assertIn("media-source=Upper", cmd)
 
     @patch("app.services.print_service.time.sleep")
     @patch("app.services.print_service.shutil.which", return_value="/usr/bin/lp")

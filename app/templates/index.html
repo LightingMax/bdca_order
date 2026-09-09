@@ -830,9 +830,9 @@
         <!-- 智能处理分区 -->
         <div id="smart-processing" class="function-content active">
             <div class="upload-area" id="uploadArea">
-                <h3>拖拽ZIP文件到此处或点击上传</h3>
-                <p class="text-muted">支持的文件格式: .zip / .pdf (可同时上传多个文件，火车票支持直接上传PDF)</p>
-                <input type="file" id="fileInput" accept=".zip,.pdf" multiple style="display: none;">
+                <h3>拖拽报销文件到此处或点击上传</h3>
+                <p class="text-muted">支持的文件格式: .zip / .pdf / .ofd（航空运输电子客票行程单支持直接上传OFD）</p>
+                <input type="file" id="fileInput" accept=".zip,.pdf,.ofd" multiple style="display: none;">
             </div>
             
             <div id="fileList" class="mb-3" style="display: none;">
@@ -1742,7 +1742,11 @@
                     });
                 }
                 appendSmartPrintLog(entries, {
-                    title: waiting ? `智能打印处理中（${index}/${total}）...` : `智能打印完成（${index}/${total}）`,
+                    title: waiting
+                        ? `智能打印处理中（${index}/${total}）...`
+                        : (data && data.success
+                            ? `智能打印完成（${index}/${total}）`
+                            : `智能打印失败（${index}/${total}）`),
                     waiting,
                     toast: true,
                     reset: false,
@@ -2599,17 +2603,17 @@
                 console.log('🔄 智能处理区域 - handleSmartFiles 被调用，文件数量:', files.length);
                 
                 if (files.length === 0) {
-                    alert('请选择至少一个文件（ZIP或PDF）');
+                    alert('请选择至少一个文件（ZIP、PDF或OFD）');
                     return;
                 }
                 
-                // 验证文件格式：支持 ZIP 和 PDF
+                // 验证文件格式：支持 ZIP、PDF 和 OFD
                 for (let i = 0; i < files.length; i++) {
                     const file = files[i];
                     console.log('📄 检查文件:', file.name, '类型:', file.type);
                     const lowerName = file.name.toLowerCase();
-                    if (!(lowerName.endsWith('.zip') || lowerName.endsWith('.pdf'))) {
-                        alert('仅支持上传 ZIP 或 PDF 文件');
+                    if (!(lowerName.endsWith('.zip') || lowerName.endsWith('.pdf') || lowerName.endsWith('.ofd'))) {
+                        alert('仅支持上传 ZIP、PDF 或 OFD 文件');
                         return;
                     }
                 }
@@ -3398,7 +3402,17 @@
                         return;
                     }
                     
-                    const trainFiles = processedFiles.filter(file => file.has_train_ticket === true && !file.is_train_merged_entry);
+                    const trainFiles = processedFiles.filter(file => {
+                        const combinedType = file.combined_type || '';
+                        return !file.is_train_merged_entry && (
+                            file.has_train_ticket === true
+                            || file.has_flight_ticket === true
+                            || file.has_transport_ticket === true
+                            || combinedType.startsWith('train_')
+                            || combinedType.startsWith('flight_')
+                            || combinedType.startsWith('ticket_')
+                        );
+                    });
                     const trainTicketCount = trainFiles.reduce((sum, file) => {
                         const itemCount = Array.isArray(file.train_ticket_items) && file.train_ticket_items.length > 0
                             ? file.train_ticket_items.length
@@ -3454,58 +3468,61 @@
 
                         beginSmartPrintAll(printableSmartFiles);
 
-                        (async function printSmartFilesSequentially() {
+                        (async function printSmartFilesAsOneJob() {
                             const total = printableSmartFiles.length;
-                            for (let fileIndex = 0; fileIndex < total; fileIndex++) {
-                                const file = printableSmartFiles[fileIndex];
-                                const fileNo = fileIndex + 1;
-                                console.log('🔄 开始打印文件:', file.output_file);
-                                try {
-                                    const response = await fetch(`/api/print/${file.output_file}`, {
-                                        method: 'POST'
-                                    });
-                                    const data = await response.json();
-                                    printedCount++;
-                                    console.log(`📄 文件 ${file.output_file} 打印结果:`, data);
-                                    if (data.success) {
-                                        successCount++;
-                                    } else {
-                                        failCount++;
-                                    }
-                                    appendSmartPrintFileResult(file, data, fileNo, total, fileNo < total);
-                                } catch (error) {
-                                    printedCount++;
-                                    failCount++;
-                                    console.error('❌ 打印文件出错:', file.output_file, error);
-                                    appendSmartPrintFileResult(
-                                        file,
-                                        {
-                                            success: false,
-                                            message: String(error),
-                                            processing_log: [
-                                                { message: `请求失败：${error}`, level: 'error' },
-                                            ],
-                                        },
-                                        fileNo,
-                                        total,
-                                        fileNo < total
-                                    );
+                            try {
+                                const response = await fetch('/api/print-merged', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        processed_files: printableSmartFiles,
+                                        collection_name: '智能打印合集'
+                                    })
+                                });
+                                const data = await response.json();
+                                printedCount = total;
+                                if (data.success) {
+                                    successCount = total;
+                                } else {
+                                    failCount = total;
                                 }
-                            }
+                                appendSmartPrintFileResult(
+                                    {
+                                        output_file: data.merged_file || '智能打印合集.pdf',
+                                        order_id: `合并打印 ${total} 个文件`
+                                    },
+                                    data,
+                                    1,
+                                    1,
+                                    false
+                                );
 
-                            printAllBtnEl.innerHTML = originalText;
-                            printAllBtnEl.disabled = false;
-
-                            let message = `智能打印完成: ${successCount}个成功`;
-                            if (failCount > 0) {
-                                message += `, ${failCount}个失败（请查看下方进度日志）`;
-                                showNotification(message, 'warning');
-                            } else if (successCount > 0) {
-                                showNotification(message + '，请到打印机确认出纸', 'success');
-                            } else {
-                                showNotification(message, 'error');
+                                if (data.success) {
+                                    showNotification(`已将 ${total} 个文件合并为 1 个打印任务，请到打印机确认出纸`, 'success');
+                                } else {
+                                    showNotification(`批量打印失败：${data.message || '未知错误'}`, 'warning');
+                                }
+                            } catch (error) {
+                                printedCount = total;
+                                failCount = total;
+                                appendSmartPrintFileResult(
+                                    { output_file: '智能打印合集.pdf', order_id: `合并打印 ${total} 个文件` },
+                                    {
+                                        success: false,
+                                        message: String(error),
+                                        processing_log: [
+                                            { message: `批量打印请求失败：${error}`, level: 'error' },
+                                        ],
+                                    },
+                                    1,
+                                    1,
+                                    false
+                                );
+                                showNotification(`批量打印请求失败：${error}`, 'error');
+                            } finally {
+                                printAllBtnEl.innerHTML = originalText;
+                                printAllBtnEl.disabled = false;
                             }
-                            console.log('✅ 所有文件打印完成');
                         })();
                     }
                 }
